@@ -1,0 +1,21 @@
+<ion-header>
+    <ion-toolbar color="dark">
+        <ion-buttons slot="start">
+            <ion-button (click)="close()">
+                <ion-icon name="close"></ion-icon>
+            </ion-button>
+        </ion-buttons>
+        <ion-title>View Image</ion-title>
+        <ion-buttons slot="end">
+            <ion-button (click)="saveImage()">
+                <ion-icon name="download"></ion-icon>
+            </ion-button>
+        </ion-buttons>
+    </ion-toolbar>
+</ion-header>
+
+<ion-content color="black" class="ion-text-center">
+    <div class="img-container">
+        <img [src]="imageUrl" style="max-width: 100%; max-height: 100vh; object-fit: contain;" />
+    </div>
+</ion-content>

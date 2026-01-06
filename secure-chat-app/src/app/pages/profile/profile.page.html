@@ -1,0 +1,32 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-title>Your Profile</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="saveProfile()">Save & Continue</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding">
+  <div class="ion-text-center">
+    <ion-avatar style="margin: auto; width: 100px; height: 100px; background: #eee;">
+      <img [src]="profile.photo_url || 'https://gravatar.com/avatar?d=mp'" />
+    </ion-avatar>
+    <ion-button fill="clear" size="small" (click)="changePhoto()">Change Photo</ion-button>
+  </div>
+
+  <ion-list>
+    <ion-item>
+      <ion-label position="stacked">First Name</ion-label>
+      <ion-input [(ngModel)]="profile.first_name"></ion-input>
+    </ion-item>
+    <ion-item>
+      <ion-label position="stacked">Last Name</ion-label>
+      <ion-input [(ngModel)]="profile.last_name"></ion-input>
+    </ion-item>
+    <ion-item>
+      <ion-label position="stacked">Short Note</ion-label>
+      <ion-textarea [(ngModel)]="profile.short_note" rows="3"></ion-textarea>
+    </ion-item>
+  </ion-list>
+</ion-content>

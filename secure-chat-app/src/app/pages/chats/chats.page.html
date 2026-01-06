@@ -1,0 +1,35 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-title>Chats</ion-title>
+    <ion-buttons slot="end">
+      <ion-button routerLink="/tabs/contacts">
+        <ion-icon name="create-outline"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content>
+  <ion-list>
+    <ion-item *ngFor="let chat of chats" button [routerLink]="['/chat-detail', chat.id]">
+      <ion-avatar slot="start">
+        <img [src]="chat.avatar || 'assets/placeholder_user.png'" />
+      </ion-avatar>
+      <ion-label>
+        <h2>{{ chat.name }}</h2>
+        <p [style.font-weight]="getUnreadCount(chat) > 0 ? 'bold' : 'normal'"
+          [style.color]="getUnreadCount(chat) > 0 ? 'black' : 'gray'">
+          {{ chat.lastMessage || 'Start conversation' }}
+        </p>
+      </ion-label>
+      <ion-note slot="end" class="ion-text-end">
+        <div style="font-size: 0.8em; margin-bottom: 5px;">{{ chat.lastTimestamp | date:'shortTime' }}</div>
+        <ion-badge color="primary" *ngIf="getUnreadCount(chat) > 0">{{ getUnreadCount(chat) }}</ion-badge>
+      </ion-note>
+    </ion-item>
+  </ion-list>
+
+  <div *ngIf="chats.length === 0" class="ion-text-center ion-padding">
+    <p>No chats yet. Start one from Contacts!</p>
+  </div>
+</ion-content>

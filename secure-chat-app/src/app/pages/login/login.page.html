@@ -1,0 +1,30 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-title>Secure Chat Login</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding">
+
+  <div *ngIf="!otpSent">
+    <ion-item>
+      <ion-label position="floating">Phone Number</ion-label>
+      <ion-input type="tel" [(ngModel)]="phoneNumber" placeholder="+1234567890"></ion-input>
+    </ion-item>
+    <ion-button expand="block" (click)="sendOtp()" [disabled]="!phoneNumber">
+      Send OTP
+    </ion-button>
+  </div>
+
+  <div *ngIf="otpSent">
+    <ion-item>
+      <ion-label position="floating">Enter OTP</ion-label>
+      <ion-input type="text" [(ngModel)]="otp" placeholder="123456"></ion-input>
+    </ion-item>
+    <p class="ion-text-center">Mock OTP: 123456</p>
+    <ion-button expand="block" (click)="verifyOtp()" [disabled]="!otp">
+      Verify & Login
+    </ion-button>
+  </div>
+
+</ion-content>

@@ -1,0 +1,71 @@
+<ion-header>
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <!-- Force back to Chats list -->
+      <ion-button (click)="goBack()">
+        <ion-icon name="arrow-back"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+    <ion-title>Chat</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content>
+  <ion-list lines="none">
+    <ion-item *ngFor="let msg of messages">
+      <div [class]="isMyMsg(msg) ? 'msg-me' : 'msg-them'">
+        <ng-container *ngIf="isImage(msg.text); else textMsg">
+          <img [src]="getImgUrl(msg.text)" style="max-width: 200px; border-radius: 8px;" />
+        </ng-container>
+        <ng-template #textMsg>
+          <p>{{ msg.text }}</p>
+        </ng-template>
+        <span class="timestamp">{{ msg.timestamp | date:'shortTime' }}</span>
+      </div>
+    </ion-item>
+  </ion-list>
+</ion-content>
+
+<ion-footer>
+  <ion-toolbar>
+    <ion-item lines="none">
+      <input type="file" #fileInput style="display: none" (change)="uploadImage($event)" accept="image/*">
+      <ion-button slot="start" fill="clear" (click)="fileInput.click()">
+        <ion-icon name="attach"></ion-icon>
+      </ion-button>
+
+      <ion-input placeholder="Type a message..." [(ngModel)]="newMessage"></ion-input>
+      <ion-button slot="end" fill="clear" (click)="sendMessage()">
+        <ion-icon name="send"></ion-icon>
+      </ion-button>
+    </ion-item>
+  </ion-toolbar>
+</ion-footer>
+
+<style>
+  .msg-me {
+    margin-left: auto;
+    background: #dcf8c6;
+    padding: 10px;
+    border-radius: 10px;
+    max-width: 80%;
+    margin-bottom: 5px;
+  }
+
+  .msg-them {
+    margin-right: auto;
+    background: #fff;
+    padding: 10px;
+    border-radius: 10px;
+    max-width: 80%;
+    margin-bottom: 5px;
+    border: 1px solid #ddd;
+  }
+
+  .timestamp {
+    font-size: 0.7em;
+    color: #888;
+    display: block;
+    text-align: right;
+  }
+</style>
