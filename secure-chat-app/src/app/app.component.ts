@@ -3,6 +3,8 @@ import { CallService } from './services/call.service';
 import { ModalController } from '@ionic/angular';
 import { CallModalPage } from './pages/call-modal/call-modal.page';
 import { PushService } from './services/push.service';
+import { PresenceService } from './services/presence.service';
+import { App } from '@capacitor/app';
 
 @Component({
   selector: 'app-root',
@@ -14,12 +16,20 @@ export class AppComponent implements OnInit {
   constructor(
     private callService: CallService,
     private modalCtrl: ModalController,
-    private pushService: PushService
+    private pushService: PushService,
+    private presence: PresenceService
   ) { }
 
-  ngOnInit() {
+  async ngOnInit() {
     this.pushService.initPush();
     this.callService.init();
+
+    // Presence Logic
+    this.presence.setPresence('online');
+
+    App.addListener('appStateChange', ({ isActive }) => {
+      this.presence.setPresence(isActive ? 'online' : 'offline');
+    });
 
     // Global Call Listener
     this.callService.callStatus.subscribe(async (status) => {

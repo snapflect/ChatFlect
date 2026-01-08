@@ -1,33 +1,58 @@
 import { Injectable } from '@angular/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
+import { LoggingService } from './logging.service';
 
 @Injectable({
   providedIn: 'root'
 })
 export class RecordingService {
 
-  constructor() { }
+  constructor(private logger: LoggingService) { }
 
   async canRecord() {
-    return VoiceRecorder.canDeviceVoiceRecord();
+    try {
+      return await VoiceRecorder.canDeviceVoiceRecord();
+    } catch (e) {
+      this.logger.error("Check Record Support Failed", e);
+      return { value: false };
+    }
   }
 
   async hasPermission() {
-    const status = await VoiceRecorder.hasAudioRecordingPermission();
-    return status.value;
+    try {
+      const status = await VoiceRecorder.hasAudioRecordingPermission();
+      return status.value;
+    } catch (e) {
+      this.logger.error("Check Record Permission Failed", e);
+      return false;
+    }
   }
 
   async requestPermission() {
-    const status = await VoiceRecorder.requestAudioRecordingPermission();
-    return status.value;
+    try {
+      const status = await VoiceRecorder.requestAudioRecordingPermission();
+      return status.value;
+    } catch (e) {
+      this.logger.error("Request Record Permission Failed", e);
+      return false;
+    }
   }
 
   async startRecording() {
-    return VoiceRecorder.startRecording();
+    try {
+      return await VoiceRecorder.startRecording();
+    } catch (e) {
+      this.logger.error("Start Recording Failed", e);
+      throw e;
+    }
   }
 
   async stopRecording() {
-    // Returns { value: { recordDataBase64: string, msDuration: number, mimeType: string } }
-    return VoiceRecorder.stopRecording();
+    try {
+      return await VoiceRecorder.stopRecording();
+    } catch (e) {
+      this.logger.error("Stop Recording Failed", e);
+      throw e;
+    }
   }
 }

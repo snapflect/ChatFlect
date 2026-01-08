@@ -35,16 +35,23 @@ export class ContactsPage implements OnInit {
   }
 
   async loadContacts() {
-    // For now, load "My Contacts" from backend or just local device contacts?
-    // Since we don't have a "My Friends" backend API yet for phase 1 (just relying on phone matches),
-    // let's just show an empty state or try to sync device contacts if we had the plugin setup fully.
-    // For MVP/Test, we'll just have the "Add Contact" button.
-    // But to satisfy the compiler:
-    this.logger.log("Contacts loaded");
-    // Optionally fetch from local storage or cached list
+    this.logger.log("Loading contacts...");
+
+    // 1. Load Cached
     const cached = localStorage.getItem('contacts_cache');
     if (cached) {
       this.contacts = JSON.parse(cached);
+    }
+
+    // 2. Sync Native in Background
+    try {
+      const fresh = await this.contactsService.getContacts(); // Triggers plugin
+      if (fresh && fresh.length > 0) {
+        this.contacts = fresh;
+        localStorage.setItem('contacts_cache', JSON.stringify(fresh));
+      }
+    } catch (e) {
+      this.logger.error("Sync failed", e);
     }
   }
 
