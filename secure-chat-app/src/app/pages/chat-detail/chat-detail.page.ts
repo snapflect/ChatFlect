@@ -25,6 +25,7 @@ export class ChatDetailPage implements OnInit {
 
   chatId: string | null = null;
   messages: any[] = [];
+  filteredMessages: any[] = [];
   newMessage = '';
   currentUserId: any;
   replyingTo: any = null;
@@ -65,8 +66,10 @@ export class ChatDetailPage implements OnInit {
       this.chatService.getChatDetails(this.chatId).subscribe((chat: any) => {
         if (chat) {
           this.isGroup = chat.isGroup;
+          this.isGroup = chat.isGroup;
           this.chatName = chat.isGroup ? chat.groupName : 'User';
           this.participants = chat.participants || [];
+          this.currentTimer = chat.autoDeleteTimer || 0;
 
           // 1. Presence (1:1 Only)
           if (!this.isGroup && this.participants.length === 2) {
@@ -98,7 +101,8 @@ export class ChatDetailPage implements OnInit {
       // ... (Existing Message Logic) ...
       this.chatService.getMessages(this.chatId).subscribe(msgs => {
         this.messages = msgs;
-        this.scrollToBottom();
+        this.filterMessages(); // Update view
+        if (!this.isSearchActive) this.scrollToBottom(); // Only scroll if not searching history
 
         this.messages.forEach(async msg => {
           // ... (Decryption Logic Same as before)
@@ -210,6 +214,18 @@ export class ChatDetailPage implements OnInit {
 
   async sendMessage() {
     if (!this.newMessage.trim() || !this.chatId) return;
+
+    // Check if blocked by me
+    if (!this.isGroup) {
+      const otherId = this.participants.find(p => String(p) !== String(this.currentUserId));
+      if (otherId) {
+        const isBlocked = await this.auth.isUserBlocked(otherId);
+        if (isBlocked) {
+          this.showToast("Unblock this contact to send messages.");
+          return;
+        }
+      }
+    }
 
     // Send with Reply Context
     await this.chatService.sendMessage(
@@ -691,6 +707,37 @@ export class ChatDetailPage implements OnInit {
       this.nav.navigateForward(['/group-info', { id: this.chatId }]);
     }
   }
+
+  // --- Search Logic ---
+  isSearchActive = false;
+  searchTerm = '';
+  // filteredMessages initialized at top
+
+  toggleSearch() {
+    this.isSearchActive = !this.isSearchActive;
+    if (!this.isSearchActive) {
+      this.searchTerm = '';
+      this.filterMessages();
+    }
+  }
+
+  onSearch(event: any) {
+    this.searchTerm = event.target.value;
+    this.filterMessages();
+  }
+
+  filterMessages() {
+    if (!this.searchTerm || this.searchTerm.trim() === '') {
+      this.filteredMessages = [...this.messages];
+    } else {
+      this.filteredMessages = this.messages.filter(msg => {
+        if (this.getMsgType(msg.text) === 'text') {
+          return msg.text.toLowerCase().includes(this.searchTerm.toLowerCase());
+        }
+        return false; // Skip media for text search
+      });
+    }
+  }
   goBack() {
     this.nav.back();
   }
@@ -699,8 +746,101 @@ export class ChatDetailPage implements OnInit {
     if (this.isGroup) {
       this.openGroupInfo();
     } else {
-      // P2P Info? For now, maybe just toast or nothing
-      // this.nav.navigateForward(['/contact-info', { id: ... }]);
+      this.presentChatOptions();
     }
+  }
+
+  // --- Disappearing Messages ---
+  currentTimer = 0; // ms
+
+  async promptDisappearingMessages() {
+    const alert = await this.alertCtrl.create({
+      header: 'Disappearing Messages',
+      inputs: [
+        { type: 'radio', label: 'Off', value: 0, checked: this.currentTimer === 0 },
+        { type: 'radio', label: '24 Hours', value: 24 * 3600 * 1000, checked: this.currentTimer === 24 * 3600 * 1000 },
+        { type: 'radio', label: '7 Days', value: 7 * 24 * 3600 * 1000, checked: this.currentTimer === 7 * 24 * 3600 * 1000 },
+        { type: 'radio', label: '90 Days', value: 90 * 24 * 3600 * 1000, checked: this.currentTimer === 90 * 24 * 3600 * 1000 }
+      ],
+      buttons: [
+        { text: 'Cancel', role: 'cancel' },
+        {
+          text: 'Set',
+          handler: (val) => {
+            if (this.chatId) this.chatService.setChatTimer(this.chatId, val);
+            this.showToast(val === 0 ? "Timer Off" : "Timer Set");
+          }
+        }
+      ]
+    });
+    await alert.present();
+  }
+
+  async presentChatOptions() {
+    const otherId = this.participants.find(p => String(p) !== String(this.currentUserId));
+    if (!otherId) return;
+
+    const isBlocked = await this.auth.isUserBlocked(otherId);
+
+    const actionSheet = await this.actionSheetCtrl.create({
+      header: this.chatName,
+      buttons: [
+        {
+          text: `Disappearing Messages (${this.getTimerLabel()})`,
+          icon: 'timer',
+          handler: () => this.promptDisappearingMessages()
+        },
+        {
+          text: isBlocked ? 'Unblock User' : 'Block User',
+          role: isBlocked ? undefined : 'destructive',
+          icon: isBlocked ? 'shield-checkmark' : 'ban',
+          handler: () => this.toggleBlock(otherId, isBlocked)
+        },
+        {
+          text: 'Cancel',
+          role: 'cancel',
+          icon: 'close'
+        }
+      ]
+    });
+    await actionSheet.present();
+  }
+
+  getTimerLabel() {
+    if (this.currentTimer === 0) return 'Off';
+    if (this.currentTimer === 24 * 3600 * 1000) return '24h';
+    if (this.currentTimer === 7 * 24 * 3600 * 1000) return '7d';
+    if (this.currentTimer === 90 * 24 * 3600 * 1000) return '90d';
+    return 'Custom';
+  }
+
+  async toggleBlock(targetId: string, currentStatus: boolean) {
+    // ... (same as before)
+    if (currentStatus) {
+      await this.auth.unblockUser(targetId);
+      this.showToast("User Unblocked");
+    } else {
+      const alert = await this.alertCtrl.create({
+        header: 'Block User?',
+        message: 'Blocked users cannot call you or send you messages.',
+        buttons: [
+          { text: 'Cancel', role: 'cancel' },
+          {
+            text: 'Block',
+            handler: async () => {
+              await this.auth.blockUser(targetId);
+              this.showToast("User Blocked");
+              this.nav.back();
+            }
+          }
+        ]
+      });
+      await alert.present();
+    }
+  }
+
+  async showToast(msg: string) {
+    const t = await this.toastCtrl.create({ message: msg, duration: 2000 });
+    t.present();
   }
 }

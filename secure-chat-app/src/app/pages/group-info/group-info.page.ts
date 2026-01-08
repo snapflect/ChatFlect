@@ -43,6 +43,31 @@ export class GroupInfoPage implements OnInit {
     // 3. Check my role
     const me = this.members.find(m => m.user_id === this.myId);
     this.iAmAdmin = (me && me.role === 'admin');
+
+    // 4. If Admin, get Invite Code
+    if (this.iAmAdmin) {
+      try {
+        const res: any = await this.api.post('groups.php', {
+          action: 'get_invite_code',
+          group_id: this.groupId
+        }).toPromise();
+        if (res && res.invite_code) {
+          this.inviteCode = res.invite_code;
+        }
+      } catch (e) {
+        console.error("Failed to load invite code", e);
+      }
+    }
+  }
+
+  inviteCode: string | null = null;
+
+  async copyInviteLink() {
+    if (!this.inviteCode) return;
+    const link = `https://snapflect.com/chat/join/${this.inviteCode}`;
+    await navigator.clipboard.writeText(link);
+    const t = await this.toast.create({ message: 'Link copied!', duration: 2000 });
+    t.present();
   }
 
   async onMemberClick(member: any) {

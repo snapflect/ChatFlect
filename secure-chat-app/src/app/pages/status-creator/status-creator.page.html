@@ -1,0 +1,76 @@
+<ion-header>
+  <ion-toolbar color="primary">
+    <ion-buttons slot="start">
+      <ion-back-button defaultHref="/status"></ion-back-button>
+    </ion-buttons>
+    <ion-title>New Status</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="postStatus()" [disabled]="!textContent && !selectedFile">
+        Post
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [style.--background]="backgroundColor">
+
+  <!-- Type Selection -->
+  <div class="type-selector">
+    <ion-segment [(ngModel)]="type" (ionChange)="onTypeChange()">
+      <ion-segment-button value="text">
+        <ion-label>Text</ion-label>
+      </ion-segment-button>
+      <ion-segment-button value="image">
+        <ion-label>Image</ion-label>
+      </ion-segment-button>
+    </ion-segment>
+  </div>
+
+  <!-- TEXT MODE -->
+  <div *ngIf="type === 'text'" class="text-container" [style.background-color]="backgroundColor">
+    <textarea [(ngModel)]="textContent" placeholder="Type a status..." [style.font-family]="selectedFont"
+      maxlength="300">
+    </textarea>
+
+    <div class="controls">
+      <!-- Color Picker -->
+      <div class="color-picker">
+        <div *ngFor="let color of colors" class="color-dot" [style.background-color]="color"
+          (click)="backgroundColor = color">
+        </div>
+      </div>
+
+      <!-- Font Picker (Simple toggle) -->
+      <ion-button fill="clear" (click)="toggleFont()">
+        <ion-icon name="text-outline"></ion-icon> Font
+      </ion-button>
+    </div>
+  </div>
+
+  <!-- IMAGE MODE -->
+  <div *ngIf="type === 'image'" class="image-container">
+    <div class="upload-box" (click)="fileInput.click()" *ngIf="!previewUrl">
+      <ion-icon name="image-outline"></ion-icon>
+      <p>Tap to select image</p>
+    </div>
+
+    <img *ngIf="previewUrl" [src]="previewUrl" class="preview-img" />
+
+    <ion-input [(ngModel)]="caption" placeholder="Add a caption..." class="caption-input" *ngIf="previewUrl">
+    </ion-input>
+
+    <input #fileInput type="file" (change)="onFileSelected($event)" hidden accept="image/*" />
+  </div>
+
+  <!-- PRIVACY SETTING -->
+  <ion-list class="privacy-list">
+    <ion-item>
+      <ion-label>Privacy</ion-label>
+      <ion-select [(ngModel)]="privacy">
+        <ion-select-option value="everyone">Public</ion-select-option>
+        <ion-select-option value="contacts">My Contacts</ion-select-option>
+      </ion-select>
+    </ion-item>
+  </ion-list>
+
+</ion-content>

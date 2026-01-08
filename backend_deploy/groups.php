@@ -50,6 +50,61 @@ if (isset($data['action']) && $data['action'] === 'update_group') {
         echo json_encode(["error" => $conn->error]);
     }
     exit;
+    exit;
+}
+
+if (isset($data['action']) && $data['action'] === 'update_settings') {
+    $groupId = $conn->real_escape_string($data['group_id']);
+    $settings = $conn->real_escape_string(json_encode($data['settings'])); // e.g. {"only_admins_send": true}
+
+    $sql = "UPDATE groups SET settings='$settings' WHERE id='$groupId'";
+    if ($conn->query($sql)) {
+        echo json_encode(["status" => "success"]);
+    } else {
+        echo json_encode(["error" => $conn->error]);
+    }
+    exit;
+}
+
+if (isset($data['action']) && $data['action'] === 'get_invite_code') {
+    $groupId = $conn->real_escape_string($data['group_id']);
+
+    // Check if code exists
+    $res = $conn->query("SELECT invite_code FROM groups WHERE id='$groupId'");
+    $row = $res->fetch_assoc();
+
+    if ($row && $row['invite_code']) {
+        echo json_encode(["status" => "success", "invite_code" => $row['invite_code']]);
+    } else {
+        // Generate new
+        $code = substr(md5(uniqid()), 0, 8);
+        $conn->query("UPDATE groups SET invite_code='$code' WHERE id='$groupId'");
+        echo json_encode(["status" => "success", "invite_code" => $code]);
+    }
+    exit;
+}
+
+if (isset($data['action']) && $data['action'] === 'join_via_code') {
+    $code = $conn->real_escape_string($data['invite_code']);
+    $userId = $conn->real_escape_string($data['user_id']);
+
+    // Find Group
+    $res = $conn->query("SELECT id FROM groups WHERE invite_code='$code'");
+    $row = $res->fetch_assoc();
+
+    if ($row) {
+        $groupId = $row['id'];
+        // Add Member (Ignore if already exists via IGNORE)
+        $sql = "INSERT IGNORE INTO group_members (group_id, user_id, role) VALUES ('$groupId', '$userId', 'member')";
+        if ($conn->query($sql)) {
+            echo json_encode(["status" => "success", "group_id" => $groupId]);
+        } else {
+            echo json_encode(["error" => $conn->error]);
+        }
+    } else {
+        echo json_encode(["error" => "Invalid Quote"]);
+    }
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['group_id'])) {

@@ -5,6 +5,8 @@ import { CryptoService } from './crypto.service';
 import { PushService } from './push.service';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { LoggingService } from './logging.service';
+import { AngularFirestore } from '@angular/fire/compat/firestore';
+import { take } from 'rxjs/operators';
 
 @Injectable({
     providedIn: 'root'
@@ -13,21 +15,35 @@ export class AuthService {
     private userIdSource = new BehaviorSubject<string | null>(null);
     currentUserId = this.userIdSource.asObservable();
 
+    // Blocked Users Stream
+    private blockedUsersSubject = new BehaviorSubject<string[]>([]);
+    blockedUsers$ = this.blockedUsersSubject.asObservable();
+
     constructor(
         private api: ApiService,
         private crypto: CryptoService,
         private pushService: PushService,
-        private logger: LoggingService
+        private logger: LoggingService,
+        private afs: AngularFirestore
     ) {
         const savedId = localStorage.getItem('user_id');
         if (savedId) {
             this.userIdSource.next(savedId);
+            this.initBlockedListener(savedId);
         }
+    }
+
+    private initBlockedListener(userId: string) {
+        this.afs.collection(`users/${userId}/blocked`).snapshotChanges().subscribe(snaps => {
+            const blocked = snaps.map(s => s.payload.doc.id);
+            this.blockedUsersSubject.next(blocked);
+        });
     }
 
     setSession(userId: string) {
         localStorage.setItem('user_id', userId);
         this.userIdSource.next(userId);
+        this.initBlockedListener(userId);
 
         // Save FCM Token now that we are logged in
         PushNotifications.checkPermissions().then(async (res) => {
@@ -98,5 +114,45 @@ export class AuthService {
 
     async getProfile(userId: string) {
         return this.api.get(`profile.php?user_id=${userId}`).toPromise();
+    }
+
+    // Blocking Features
+    async blockUser(targetId: string) {
+        const myId = this.userIdSource.value;
+        if (!myId) return;
+
+        await this.afs.collection(`users/${myId}/blocked`).doc(targetId).set({
+            blocked_at: new Date().toISOString()
+        });
+    }
+
+    async unblockUser(targetId: string) {
+        const myId = this.userIdSource.value;
+        if (!myId) return;
+
+        await this.afs.collection(`users/${myId}/blocked`).doc(targetId).delete();
+    }
+
+    async isUserBlocked(targetId: string): Promise<boolean> {
+        const myId = this.userIdSource.value;
+        if (!myId) return false;
+
+        const doc = await this.afs.collection(`users/${myId}/blocked`).doc(targetId).get().toPromise();
+        return doc ? doc.exists : false;
+    }
+
+    async deleteAccount() {
+        const myId = localStorage.getItem('user_id');
+        if (!myId) return;
+
+        // 1. Delete from MySQL
+        await this.api.post('delete_account.php', { user_id: myId }).toPromise();
+
+        // 2. Delete Firestore (User Doc)
+        // using AngularFirestore
+        await this.afs.collection('users').doc(myId).delete();
+
+        // 3. Clear Local Storage
+        this.logout();
     }
 }

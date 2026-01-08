@@ -7,6 +7,7 @@ import { CryptoService } from './crypto.service';
 import { ApiService } from './api.service';
 import { ToastController } from '@ionic/angular';
 import { LoggingService } from './logging.service';
+import { AuthService } from './auth.service';
 
 @Injectable({
     providedIn: 'root'
@@ -19,7 +20,8 @@ export class ChatService {
         private crypto: CryptoService,
         private api: ApiService,
         private toast: ToastController,
-        private logger: LoggingService
+        private logger: LoggingService,
+        private auth: AuthService
     ) {
         const app = initializeApp(environment.firebase);
         this.db = getFirestore(app);
@@ -30,64 +32,94 @@ export class ChatService {
         const messagesRef = collection(this.db, 'chats', chatId, 'messages');
         const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
-        onSnapshot(q, async (snapshot) => {
-            const messages = [];
-            const privateKeyStr = localStorage.getItem('private_key');
-            const myId = String(localStorage.getItem('user_id')).trim();
+        const combined$ = new Observable<any[]>(observer => {
+            // Subscribe to both Messages and Blocked lists
+            const unsubMsg = onSnapshot(q, (snapshot) => {
+                const blocked = this.auth.getBlockedListSnapshot(); // Helper or subscribe? 
+                // Better: rely on current value if behavior subject
+                // Wait, I can't easily sync snapshot and observable here without RxJS combineLatest.
+                // Simplified: Re-emit whenever messages change, filtering against *current* blocked list.
 
-            for (const d of snapshot.docs) {
-                const data = d.data();
-
-                // 1. Filter "Delete for Me"
-                if (data['deletedFor'] && data['deletedFor'].includes(myId)) {
-                    continue; // Skip this message entirely
-                }
-
-                let decrypted = "Wait...";
-
-                if (data['isDeleted']) {
-                    decrypted = "🚫 This message was deleted";
-                } else if (privateKeyStr) {
-                    const senderId = String(data['senderId']).trim();
-                    const isMe = senderId === myId;
-
-                    // Support both 1v1 (string) and Group (JSON Map)
-                    let cipherText = '';
-                    if (isMe) {
-                        cipherText = data['content_self'] || (typeof data['content'] === 'string' ? data['content'] : data['content'][myId]);
-                    } else {
-                        if (typeof data['content'] === 'string') {
-                            cipherText = data['content']; // Old 1v1
-                        } else if (data['content'] && data['content'][myId]) {
-                            cipherText = data['content'][myId]; // Group Map
-                        }
-                    }
-
-                    if (cipherText) {
-                        try {
-                            const plain = await this.crypto.decryptMessage(cipherText, privateKeyStr);
-                            if (!plain.includes("[Decryption Error]") && plain !== '') {
-                                decrypted = plain;
-                                try {
-                                    const metadata = JSON.parse(decrypted);
-                                    if (metadata && metadata.type === 'image') decrypted = metadata;
-                                } catch (e) { }
-                            } else {
-                                decrypted = "🔒 Decryption Failed";
-                            }
-                        } catch (e) {
-                            decrypted = "🔒 Error";
-                        }
-                    } else {
-                        decrypted = "🔒 Encrypted (Not for you)";
-                    }
-                }
-                messages.push({ id: d.id, ...data, text: decrypted });
-            }
-            this.messagesSubject.next(messages);
+                // We need to subscribe to blockedUsers inside here OR use combineLatest outside.
+                // Let's use combineLatest pattern in getMessages return or simpler:
+                // Just peek current blocked value if possible, or simple subscription
+            });
         });
 
-        return this.messagesSubject.asObservable();
+        // Revised approach:
+        return new Observable(observer => {
+            let messages: any[] = [];
+            let blocked: string[] = [];
+
+            const update = () => {
+                const filtered = messages.filter(m => !blocked.includes(m.senderId));
+                observer.next(filtered);
+            };
+
+            const unsubAuth = this.auth.blockedUsers$.subscribe(b => {
+                blocked = b;
+                update();
+            });
+
+            const unsubMsg = onSnapshot(q, async (snapshot) => {
+                const msgsRaw = [];
+                const privateKeyStr = localStorage.getItem('private_key');
+                const myId = String(localStorage.getItem('user_id')).trim();
+
+                for (const d of snapshot.docs) {
+                    const data = d.data();
+                    if (data['deletedFor'] && data['deletedFor'].includes(myId)) continue;
+
+                    // Expiration Check
+                    if (data['expiresAt'] && Date.now() > data['expiresAt']) {
+                        continue; // Hidden (Distributed GC: Sender could delete here, but hiding is enough for MVP)
+                    }
+
+                    // Decrypt Logic (Inline for scope access) - Reusing existing logic
+                    let decrypted = "Wait...";
+                    if (data['isDeleted']) {
+                        decrypted = "🚫 This message was deleted";
+                    } else if (privateKeyStr) {
+                        // ... (Exact same decryption logic as before) ...
+                        const senderId = String(data['senderId']).trim();
+                        const isMe = senderId === myId;
+                        let cipherText = '';
+                        if (isMe) {
+                            cipherText = data['content_self'] || (typeof data['content'] === 'string' ? data['content'] : data['content'][myId]);
+                        } else {
+                            if (typeof data['content'] === 'string') {
+                                cipherText = data['content'];
+                            } else if (data['content'] && data['content'][myId]) {
+                                cipherText = data['content'][myId];
+                            }
+                        }
+
+                        if (cipherText) {
+                            try {
+                                const plain = await this.crypto.decryptMessage(cipherText, privateKeyStr);
+                                if (!plain.includes("[Decryption Error]") && plain !== '') {
+                                    decrypted = plain;
+                                    try {
+                                        const metadata = JSON.parse(decrypted);
+                                        if (metadata && metadata.type === 'image') decrypted = metadata;
+                                    } catch (e) { }
+                                } else {
+                                    decrypted = "🔒 Decryption Failed";
+                                }
+                            } catch (e) { decrypted = "🔒 Error"; }
+                        } else { decrypted = "🔒 Encrypted (Not for you)"; }
+                    }
+                    msgsRaw.push({ id: d.id, ...data, text: decrypted });
+                }
+                messages = msgsRaw;
+                update();
+            });
+
+            return () => {
+                unsubAuth.unsubscribe();
+                unsubMsg();
+            };
+        });
     }
 
     getChatDetails(chatId: string) {
@@ -164,10 +196,12 @@ export class ChatService {
             }
 
             // Payload
+            const ttl = await this.getChatTTL(chatId);
             const payload: any = {
                 senderId,
                 timestamp: Date.now(),
-                content_self: encryptedSelf
+                content_self: encryptedSelf,
+                expiresAt: ttl > 0 ? Date.now() + ttl : null
             };
 
             // Add Reply Data (Keep Unencrypted for easy UI render, or encrypt if high security needed. 
@@ -206,9 +240,25 @@ export class ChatService {
             await updateDoc(doc(this.db, 'chats', chatId), updatePayload);
             this.sendPushNotification(chatId, senderId, "🔒 Encrypted Message");
 
+            await updateDoc(doc(this.db, 'chats', chatId), updatePayload);
+            this.sendPushNotification(chatId, senderId, "🔒 Encrypted Message");
+
         } catch (e) {
             this.logger.error("Send Error", e);
         }
+    }
+
+    // Update Auto-Delete Timer (0 = Off, otherwise ms)
+    async setChatTimer(chatId: string, durationMs: number) {
+        await updateDoc(doc(this.db, 'chats', chatId), {
+            autoDeleteTimer: durationMs
+        });
+    }
+
+    // Helper: Check for expiration during send
+    private async getChatTTL(chatId: string): Promise<number> {
+        const d = await getDoc(doc(this.db, 'chats', chatId));
+        return d.exists() ? (d.data()['autoDeleteTimer'] || 0) : 0;
     }
 
     async sendImageMessage(chatId: string, imageBlob: Blob, senderId: string, caption: string = '') {

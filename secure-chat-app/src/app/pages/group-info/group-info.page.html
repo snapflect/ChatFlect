@@ -38,6 +38,17 @@
   </ion-list>
 
   <div class="ion-padding">
+    <ion-card *ngIf="inviteCode" class="invite-card" (click)="copyInviteLink()">
+      <ion-item lines="none" class="bg-transparent">
+        <ion-icon name="link-outline" slot="start"></ion-icon>
+        <ion-label>
+          <h3>Invite via Link</h3>
+          <p>snapflect.com/.../{{inviteCode}}</p>
+        </ion-label>
+        <ion-note slot="end">COPY</ion-note>
+      </ion-item>
+    </ion-card>
+
     <ion-button expand="block" color="danger" (click)="leaveGroup()" class="action-btn">
       <ion-icon name="log-out-outline" slot="start"></ion-icon>
       Exit Group
@@ -48,6 +59,11 @@
       Add Member
     </ion-button>
 
+    <!-- Placeholder for Settings -->
+    <ion-button *ngIf="iAmAdmin" expand="block" color="medium" class="action-btn" disabled>
+      <ion-icon name="settings-outline" slot="start"></ion-icon>
+      Group Settings (Coming Soon)
+    </ion-button>
   </div>
 </ion-content>
 

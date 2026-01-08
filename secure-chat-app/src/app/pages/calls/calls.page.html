@@ -1,13 +1,29 @@
 <ion-header [translucent]="true">
   <ion-toolbar>
-    <ion-title>calls</ion-title>
+    <ion-title class="gradient-text">Calls</ion-title>
   </ion-toolbar>
 </ion-header>
 
 <ion-content [fullscreen]="true">
-  <ion-header collapse="condense">
-    <ion-toolbar>
-      <ion-title size="large">calls</ion-title>
-    </ion-toolbar>
-  </ion-header>
+  <ion-list lines="none" class="bg-transparent ion-padding-top">
+    <ion-item *ngFor="let call of calls" class="call-item glass-item">
+      <div slot="start" class="call-icon-wrapper">
+        <ion-icon [name]="getCallIcon(call)" class="main-icon"></ion-icon>
+      </div>
+
+      <ion-label>
+        <h2>{{ call.caller_id === myId ? 'Outgoing' : 'Incoming' }}</h2>
+        <div class="call-details">
+          <ion-icon [name]="getCallStatusIcon(call)" [color]="getColor(call)"></ion-icon>
+          <p>{{ call.created_at | date:'short' }}</p>
+        </div>
+      </ion-label>
+
+      <ion-icon name="information-circle-outline" slot="end" color="primary"></ion-icon>
+    </ion-item>
+
+    <div *ngIf="calls.length === 0" class="empty-state">
+      <p>No recent calls</p>
+    </div>
+  </ion-list>
 </ion-content>

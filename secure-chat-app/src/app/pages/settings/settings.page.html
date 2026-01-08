@@ -66,14 +66,22 @@
       <ion-label>Notifications</ion-label>
     </ion-item>
 
-    <ion-item button class="glass-item">
-      <ion-icon name="help-circle-outline" slot="start" class="gradient-icon"></ion-icon>
-      <ion-label>Help</ion-label>
+    <ion-icon name="help-circle-outline" slot="start" class="gradient-icon"></ion-icon>
+    <ion-label>Help</ion-label>
     </ion-item>
 
-    <ion-item button (click)="logout()" lines="none" class="glass-item logout-item">
-      <ion-icon name="log-out-outline" slot="start" color="danger"></ion-icon>
-      <ion-label color="danger">Logout</ion-label>
+    <ion-item button routerLink="/backup" class="glass-item">
+      <ion-icon name="shield-checkmark-outline" slot="start" class="gradient-icon"></ion-icon>
+      <ion-label>Backup & Security</ion-label>
+    </ion-item>
+
+    <ion-icon name="log-out-outline" slot="start" color="danger"></ion-icon>
+    <ion-label color="danger">Logout</ion-label>
+    </ion-item>
+
+    <ion-item button (click)="deleteAccount()" lines="none" class="glass-item delete-item">
+      <ion-icon name="trash-outline" slot="start" color="danger"></ion-icon>
+      <ion-label color="danger">Delete Account</ion-label>
     </ion-item>
 
   </ion-list>

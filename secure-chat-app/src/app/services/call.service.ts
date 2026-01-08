@@ -296,4 +296,11 @@ export class CallService {
         this.currentCallId = null;
         this.activeCallDocRef = null;
     }
+    getCallHistory(): any {
+        const myId = localStorage.getItem('user_id');
+        return this.api.post('calls.php', {
+            action: 'history',
+            user_id: myId
+        });
+    }
 }

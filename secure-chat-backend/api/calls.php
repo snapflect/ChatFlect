@@ -12,6 +12,16 @@ if (isset($data['action'])) {
         $conn->query($sql);
     } elseif ($data['action'] === 'end' && isset($data['call_id'])) {
         // ... (Optional update logic)
+    } elseif ($data['action'] === 'history') {
+        $userId = $conn->real_escape_string($data['user_id']);
+        $sql = "SELECT * FROM calls WHERE caller_id = '$userId' OR receiver_id = '$userId' ORDER BY created_at DESC LIMIT 50";
+        $result = $conn->query($sql);
+
+        $calls = [];
+        while ($row = $result->fetch_assoc()) {
+            $calls[] = $row;
+        }
+        echo json_encode($calls);
     }
 }
 ?>

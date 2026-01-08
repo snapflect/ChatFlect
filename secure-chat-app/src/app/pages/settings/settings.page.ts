@@ -1,5 +1,5 @@
 import { Component, OnInit } from '@angular/core';
-import { NavController } from '@ionic/angular';
+import { NavController, AlertController } from '@ionic/angular';
 import { AuthService } from 'src/app/services/auth.service';
 import { ApiService } from 'src/app/services/api.service';
 import { LoggingService } from 'src/app/services/logging.service';
@@ -23,7 +23,8 @@ export class SettingsPage implements OnInit {
     private auth: AuthService,
     private nav: NavController,
     private api: ApiService,
-    private logger: LoggingService
+    private logger: LoggingService,
+    private alertCtrl: AlertController
   ) { }
 
   ngOnInit() {
@@ -100,6 +101,25 @@ export class SettingsPage implements OnInit {
 
   openPrivacy() {
     // Navigate to privacy settings
+  }
+
+  async deleteAccount() {
+    const alert = await this.alertCtrl.create({
+      header: 'Delete Account?',
+      message: 'This action cannot be undone. All your data will be permanently deleted.',
+      buttons: [
+        { text: 'Cancel', role: 'cancel' },
+        {
+          text: 'Delete',
+          role: 'destructive',
+          handler: async () => {
+            await this.auth.deleteAccount();
+            this.nav.navigateRoot('/login');
+          }
+        }
+      ]
+    });
+    await alert.present();
   }
 
   logout() {

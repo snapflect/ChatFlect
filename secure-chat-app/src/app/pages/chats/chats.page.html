@@ -10,12 +10,15 @@
       </ion-button>
     </ion-buttons>
   </ion-toolbar>
+  <ion-toolbar>
+    <ion-searchbar (ionInput)="filterChats($event)" placeholder="Search chats" class="custom-searchbar"></ion-searchbar>
+  </ion-toolbar>
 </ion-header>
 
 <ion-content [fullscreen]="true">
   <div class="ion-padding-top">
     <ion-list lines="none" class="bg-transparent">
-      <ion-item *ngFor="let chat of chats" button [routerLink]="['/chat-detail', chat.id]" class="chat-item">
+      <ion-item *ngFor="let chat of filteredChats" button [routerLink]="['/chat-detail', chat.id]" class="chat-item">
         <ion-avatar slot="start" class="chat-avatar">
           <img [src]="chat.avatar || 'assets/placeholder_user.png'" />
           <!-- Online indicator placeholder -->

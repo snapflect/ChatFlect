@@ -37,8 +37,11 @@ CREATE TABLE `groups` (
   `id` varchar(100) NOT NULL,
   `name` varchar(255) NOT NULL,
   `created_by` varchar(255) NOT NULL,
+  `settings` text DEFAULT NULL COMMENT 'JSON: only_admins_send, etc',
+  `invite_code` varchar(20) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `invite_code` (`invite_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
@@ -84,9 +87,13 @@ CREATE TABLE `calls` (
 CREATE TABLE `status_updates` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` varchar(255) NOT NULL,
-  `media_url` varchar(500) NOT NULL,
-  `type` enum('image','video') DEFAULT 'image',
+  `media_url` varchar(500) DEFAULT NULL,
+  `type` enum('image','video','text') DEFAULT 'image',
   `caption` text DEFAULT NULL,
+  `text_content` text DEFAULT NULL,
+  `background_color` varchar(20) DEFAULT '#000000',
+  `font` varchar(50) DEFAULT 'sans-serif',
+  `privacy` enum('everyone','contacts','whitelist','blacklist') DEFAULT 'everyone',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   INDEX `idx_user_time` (`user_id`, `created_at`)

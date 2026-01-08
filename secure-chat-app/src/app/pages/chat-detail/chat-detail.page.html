@@ -26,24 +26,100 @@
       </div>
     </ion-title>
     <ion-buttons slot="end">
-      <ion-button (click)="makeCall('video')">
-        <ion-icon name="videocam" slot="icon-only" color="secondary"></ion-icon>
-      </ion-button>
-      <ion-button (click)="makeCall('audio')">
-        <ion-icon name="call" slot="icon-only" color="secondary"></ion-icon>
+      <ion-button (click)="toggleSearch()">
+        <ion-icon name="search"></ion-icon>
       </ion-button>
       <ion-button (click)="openChatInfo()">
         <ion-icon name="ellipsis-vertical"></ion-icon>
       </ion-button>
     </ion-buttons>
-    <!-- Possible avatar or name here in future -->
+  </ion-toolbar>
+  <ion-toolbar *ngIf="isSearchActive">
+    <ion-searchbar (ionInput)="onSearch($event)" placeholder="Search in chat..." showCancelButton="always"
+      (ionCancel)="toggleSearch()"></ion-searchbar>
   </ion-toolbar>
 </ion-header>
 
 <ion-content [fullscreen]="true" class="chat-content">
   <!-- (Existing List) -->
   <ion-list lines="none" class="bg-transparent ion-padding-top">
-    <!-- ... -->
+    <div *ngFor="let msg of filteredMessages" class="message-wrapper">
+
+      <!-- Date Divider (Optional, skip for now or logic needed) -->
+
+      <div [class.msg-me]="isMyMsg(msg)" [class.msg-them]="!isMyMsg(msg)" class="message-bubble glass-card"
+        (press)="presentActionSheet(msg)">
+
+        <!-- Sender Name (Group) -->
+        <p *ngIf="isGroup && !isMyMsg(msg)" class="sender-name">{{ msg.senderName || 'User' }}</p>
+
+        <!-- Reply Context -->
+        <div *ngIf="msg.replyTo" class="reply-context">
+          <div class="reply-bar"></div>
+          <p class="reply-text">{{ msg.replyTo.text?.type ? 'Media' : (msg.replyTo.text | slice:0:30) }}...</p>
+        </div>
+
+        <!-- Forwarded Label -->
+        <p *ngIf="msg.forwarded" class="forwarded-label"><ion-icon name="arrow-redo"></ion-icon> Forwarded</p>
+
+        <!-- Image -->
+        <div *ngIf="isImage(msg.text)" class="media-container">
+          <img [src]="getImgUrl(msg.text)" (click)="openImage(getImgUrl(msg.text))" />
+          <p *ngIf="msg.text.caption" class="caption">{{ msg.text.caption }}</p>
+        </div>
+
+        <!-- Audio -->
+        <div *ngIf="getMsgType(msg.text) === 'audio'" class="audio-player">
+          <ion-button fill="clear" (click)="toggleAudio(msg)">
+            <ion-icon [name]="msg.isPlaying ? 'pause' : 'play'"></ion-icon>
+          </ion-button>
+          <div class="audio-track">
+            <div class="progress-bar" [style.width.%]="msg.isPlaying ? 50 : 0"></div>
+          </div>
+          <span class="audio-duration">{{ msg.text.duration || '0:00' }}s</span>
+        </div>
+
+        <!-- Document -->
+        <div *ngIf="getMsgType(msg.text) === 'document'" class="doc-attachment" (click)="openDocument(msg.text)">
+          <ion-icon name="document-text" size="large"></ion-icon>
+          <span>{{ msg.text.name || 'Document' }}</span>
+        </div>
+
+        <!-- Location -->
+        <div *ngIf="getMsgType(msg.text) === 'location'" class="location-bubble"
+          (click)="openLocation(msg.text.lat, msg.text.lng)">
+          <ion-icon name="location" color="danger"></ion-icon>
+          <span>Shared Location</span>
+        </div>
+
+        <!-- Text -->
+        <p *ngIf="getMsgType(msg.text) === 'text'" class="msg-text">
+          {{ msg.text }}
+          <!-- Link Preview -->
+        <div *ngIf="msg.linkMeta" class="link-preview" (click)="openLink(msg.linkMeta.url)">
+          <img *ngIf="msg.linkMeta.image" [src]="msg.linkMeta.image" />
+          <div class="link-info">
+            <b>{{ msg.linkMeta.domain }}</b>
+            <p>{{ msg.linkMeta.title }}</p>
+          </div>
+        </div>
+        </p>
+
+        <!-- Footer: Time + Read Status + Reactions -->
+        <div class="msg-footer">
+          <span class="timestamp">{{ msg.timestamp?.seconds * 1000 | date:'shortTime' }}</span>
+          <ion-icon *ngIf="isMyMsg(msg)" [name]="msg.read ? 'checkmark-done-outline' : 'checkmark-outline'"
+            [color]="msg.read ? 'primary' : 'medium'"></ion-icon>
+
+          <!-- Reactions Display -->
+          <div *ngIf="getReactionCount(msg) > 0" class="reactions-display">
+            <span *ngFor="let r of getTopReactions(msg)">{{ r }}</span>
+            <span *ngIf="getReactionCount(msg) > 1" class="reaction-count">{{ getReactionCount(msg) }}</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
   </ion-list>
 </ion-content>
 

@@ -1,15 +1,7 @@
 <ion-header class="ion-no-border">
   <ion-toolbar>
     <ion-title class="gradient-text">Status</ion-title>
-    <ion-buttons slot="end">
-      <ion-button class="relative-btn">
-        <ion-icon name="camera-outline"></ion-icon>
-        <input type="file" (change)="uploadStatus($event)" class="header-input" />
-      </ion-button>
-      <ion-button>
-        <ion-icon name="create-outline"></ion-icon>
-      </ion-button>
-    </ion-buttons>
+    <!-- Removed header inputs to use FABs -->
   </ion-toolbar>
 </ion-header>
 
@@ -63,6 +55,23 @@
       </ion-label>
     </ion-item>
   </ion-list>
+  </ion-list>
+
+  <!-- FABs for WhatsApp-like UI -->
+  <ion-fab vertical="bottom" horizontal="end" slot="fixed" class="fab-padding">
+
+    <!-- Text Status (Pencil) -->
+    <ion-fab-button color="light" size="small" routerLink="/status-creator" class="mini-fab">
+      <ion-icon name="pencil"></ion-icon>
+    </ion-fab-button>
+
+    <!-- Camera Status -->
+    <ion-fab-button color="secondary">
+      <ion-icon name="camera"></ion-icon>
+      <!-- Overlay Input -->
+      <input type="file" (change)="uploadStatus($event)" class="fab-input" accept="image/*,video/*" />
+    </ion-fab-button>
+  </ion-fab>
 </ion-content>
 
 <style>
@@ -111,11 +120,21 @@
     margin-right: 10px;
   }
 
-  .relative-btn {
-    position: relative;
+  .fab-padding {
+    margin-bottom: 20px;
+    margin-right: 15px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    /* Spacing between pencil and camera */
   }
 
-  .header-input {
+  .mini-fab {
+    margin-bottom: 10px;
+  }
+
+  .fab-input {
     position: absolute;
     top: 0;
     left: 0;

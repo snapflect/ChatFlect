@@ -1,0 +1,38 @@
+<ion-header class="ion-no-border">
+    <ion-toolbar>
+        <ion-buttons slot="start">
+            <ion-back-button defaultHref="/tabs/settings" color="medium"></ion-back-button>
+        </ion-buttons>
+        <ion-title class="gradient-text">Backup & Security</ion-title>
+    </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true" class="ion-padding">
+
+    <div class="glass-card ion-padding text-center">
+        <ion-icon name="shield-checkmark-outline"
+            style="font-size: 64px; color: var(--ion-color-secondary);"></ion-icon>
+        <h2>Secure Backup</h2>
+        <p class="text-medium">
+            Your messages are end-to-end encrypted.
+            To access them on another device, you must export your **Private Key**.
+        </p>
+    </div>
+
+    <div class="ion-padding-top">
+        <ion-button expand="block" class="vibrant-btn" (click)="createBackup()">
+            <ion-icon name="download-outline" slot="start"></ion-icon>
+            Export Backup (Keys)
+        </ion-button>
+        <p class="note text-center">Saves a .json file. Keep it safe!</p>
+    </div>
+
+    <div class="ion-padding-top">
+        <ion-button expand="block" color="medium" (click)="restoreBackup()">
+            <ion-icon name="cloud-upload-outline" slot="start"></ion-icon>
+            Restore Backup
+        </ion-button>
+        <p class="note text-center">Restores Keys from a .json file.</p>
+    </div>
+
+</ion-content>

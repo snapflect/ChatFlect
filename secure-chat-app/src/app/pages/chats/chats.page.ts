@@ -46,8 +46,28 @@ export class ChatsPage implements OnInit {
           }
         }
         // Filter out empty chats (no lastMessage or very old timestamp default)
+        // Filter out empty chats (no lastMessage or very old timestamp default)
         this.chats = this.chats.filter(c => c.lastMessage && c.lastMessage.trim() !== '');
+        this.filteredChats = [...this.chats];
       });
+    });
+  }
+
+  filteredChats: any[] = [];
+  searchTerm: string = '';
+
+  filterChats(event: any) {
+    const term = event.target.value;
+    this.searchTerm = term;
+    if (!term || term.trim() === '') {
+      this.filteredChats = [...this.chats];
+      return;
+    }
+
+    this.filteredChats = this.chats.filter(c => {
+      return c.name.toLowerCase().includes(term.toLowerCase());
+      // Optional: Search last message?
+      // || c.lastMessage.toLowerCase().includes(term.toLowerCase())
     });
   }
 

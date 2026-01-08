@@ -5,6 +5,8 @@ import { CallModalPage } from './pages/call-modal/call-modal.page';
 import { PushService } from './services/push.service';
 import { PresenceService } from './services/presence.service';
 import { App } from '@capacitor/app';
+import { NativeBiometric } from 'capacitor-native-biometric';
+import { AlertController } from '@ionic/angular';
 
 @Component({
   selector: 'app-root',
@@ -17,7 +19,8 @@ export class AppComponent implements OnInit {
     private callService: CallService,
     private modalCtrl: ModalController,
     private pushService: PushService,
-    private presence: PresenceService
+    private presence: PresenceService,
+    private alertCtrl: AlertController
   ) { }
 
   async ngOnInit() {
@@ -27,8 +30,15 @@ export class AppComponent implements OnInit {
     // Presence Logic
     this.presence.setPresence('online');
 
-    App.addListener('appStateChange', ({ isActive }) => {
+    App.addListener('appStateChange', async ({ isActive }) => {
       this.presence.setPresence(isActive ? 'online' : 'offline');
+
+      if (isActive) {
+        const enabled = localStorage.getItem('biometric_enabled') === 'true';
+        if (enabled) {
+          await this.performBiometricCheck();
+        }
+      }
     });
 
     // Global Call Listener
@@ -76,5 +86,39 @@ export class AppComponent implements OnInit {
         await modal.present();
       }
     });
+  }
+
+  async performBiometricCheck() {
+    try {
+      const result = await NativeBiometric.isAvailable();
+      if (result.isAvailable) {
+        await NativeBiometric.verifyIdentity({
+          reason: "Unlock Secure Chat",
+          title: "Security Lock",
+          subtitle: "Authentication Required",
+          description: "Please verify your identity"
+        });
+        // Success
+      }
+    } catch (e) {
+      // Failed or Cancelled - Force Retry or Exit
+      const alert = await this.alertCtrl.create({
+        header: 'Locked',
+        message: 'Authentication required to access chats.',
+        backdropDismiss: false,
+        buttons: [
+          {
+            text: 'Unlock',
+            handler: () => this.performBiometricCheck()
+          },
+          {
+            text: 'Exit',
+            role: 'cancel',
+            handler: () => App.exitApp()
+          }
+        ]
+      });
+      await alert.present();
+    }
   }
 }
