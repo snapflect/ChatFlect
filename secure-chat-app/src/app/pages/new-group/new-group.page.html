@@ -1,0 +1,35 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-back-button defaultHref="/tabs/chats"></ion-back-button>
+    </ion-buttons>
+    <ion-title>New Group</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="createGroup()" [disabled]="!groupName || selectedContacts.length === 0">
+        Create
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding">
+  <ion-item class="glass-input">
+    <ion-label position="stacked">Group Name</ion-label>
+    <ion-input [(ngModel)]="groupName" placeholder="e.g. Project Team"></ion-input>
+  </ion-item>
+
+  <h3 class="ion-margin-top gradient-text">Add Participants</h3>
+
+  <ion-list class="bg-transparent">
+    <ion-item *ngFor="let c of contacts" lines="none" class="contact-item">
+      <ion-avatar slot="start">
+        <img [src]="c.photo_url || 'https://gravatar.com/avatar?d=mp'" />
+      </ion-avatar>
+      <ion-label>
+        <h2>{{ c.first_name }} {{ c.last_name }}</h2>
+        <p>{{ c.phone_number }}</p>
+      </ion-label>
+      <ion-checkbox slot="end" (ionChange)="toggleSelection(c.user_id)"></ion-checkbox>
+    </ion-item>
+  </ion-list>
+</ion-content>

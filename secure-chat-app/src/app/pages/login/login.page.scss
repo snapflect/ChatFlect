@@ -1,0 +1,44 @@
+ion-content.login-content {
+    --background: url('https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=2070&auto=format&fit=crop') no-repeat center center / cover;
+}
+
+.login-container {
+    display: flex;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(5px);
+    /* Gentle blur on the bg image */
+}
+
+.login-card {
+    width: 90%;
+    max-width: 400px;
+    padding: 40px 20px;
+}
+
+.title-large {
+    font-size: 2.5rem;
+    margin-bottom: 5px;
+}
+
+.subtitle {
+    color: var(--ion-color-step-600);
+    font-size: 1rem;
+    margin-bottom: 30px;
+    letter-spacing: 1px;
+}
+
+.input-group {
+    margin-top: 20px;
+}
+
+.hint-text {
+    color: var(--ion-color-tertiary);
+    font-size: 0.9em;
+    margin: 10px 0 20px;
+}
+
+ion-icon {
+    margin-right: 10px;
+}

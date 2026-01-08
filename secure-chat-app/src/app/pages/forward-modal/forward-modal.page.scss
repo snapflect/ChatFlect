@@ -1,0 +1,13 @@
+.bg-transparent {
+    background: transparent !important;
+}
+
+.contact-item {
+    --background: transparent;
+    --border-color: rgba(255, 255, 255, 0.1);
+    margin-bottom: 5px;
+}
+
+ion-avatar {
+    border: 2px solid var(--ion-color-secondary);
+}

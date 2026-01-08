@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { ApiService } from './api.service';
 import { Capacitor } from '@capacitor/core';
 import { Contacts } from '@capacitor-community/contacts';
+import { LoggingService } from './logging.service';
 
 @Injectable({
     providedIn: 'root'
@@ -9,7 +10,7 @@ import { Contacts } from '@capacitor-community/contacts';
 export class ContactsService {
     localContacts: any[] = [];
 
-    constructor(private api: ApiService) { }
+    constructor(private api: ApiService, private logger: LoggingService) { }
 
     async getContacts() {
         if (!Capacitor.isNativePlatform()) {
@@ -50,18 +51,22 @@ export class ContactsService {
             // Deduplicate
             const uniquePhones = [...new Set(phoneNumbers)];
 
-            // Send to API to find registered matches
-            const res: any = await this.api.post('contacts.php', { phone_numbers: uniquePhones }).toPromise();
-            this.localContacts = res || [];
-            return res;
+            // Send to API
+            return this.syncPhone(uniquePhones);
 
         } catch (e) {
-            console.error("Contact Sync Error", e);
+            this.logger.error("Contact Sync Error", e);
             // FALLBACK: Return Demo Contacts on Error/Permission Denial
             return [
-                { id: 999, first_name: 'Demo', last_name: 'Bot', phone_number: '111111', photo_url: '' },
-                { id: 888, first_name: 'Test', last_name: 'User', phone_number: '222222', photo_url: '' }
+                { user_id: '999', first_name: 'Demo', last_name: 'Bot', phone_number: '111111', photo_url: '' },
+                { user_id: '888', first_name: 'Test', last_name: 'User', phone_number: '222222', photo_url: '' }
             ];
         }
+    }
+
+    async syncPhone(phones: string[]) {
+        const res: any = await this.api.post('contacts.php', { phone_numbers: phones }).toPromise();
+        this.localContacts = res || [];
+        return res;
     }
 }

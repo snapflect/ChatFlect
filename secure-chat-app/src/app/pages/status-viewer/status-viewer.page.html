@@ -1,0 +1,107 @@
+<ion-content color="black" [fullscreen]="true">
+  <!-- Progress Bars -->
+  <div class="progress-container">
+    <div *ngFor="let s of userStatuses; let i = index" class="progress-bar-bg">
+      <div class="progress-bar-fill"
+        [style.width.%]="i < currentIndex ? 100 : (i === currentIndex ? progress * 100 : 0)">
+      </div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <div class="header-overlay">
+    <ion-back-button (click)="close()" icon="arrow-back"></ion-back-button>
+    <!-- Todo: Add Avatar/Name of current status user -->
+  </div>
+
+  <!-- Image Container -->
+  <div class="media-container" (touchstart)="pause()" (touchend)="resume()" (mousedown)="pause()" (mouseup)="resume()">
+
+    <img [src]="userStatuses[currentIndex]?.content_url" class="status-img" />
+
+    <div class="caption" *ngIf="userStatuses[currentIndex]?.caption">
+      {{ userStatuses[currentIndex]?.caption }}
+    </div>
+
+    <!-- Tap Zones -->
+    <div class="tap-zone left" (click)="prev()"></div>
+    <div class="tap-zone right" (click)="next()"></div>
+  </div>
+</ion-content>
+
+<style>
+  .progress-container {
+    position: absolute;
+    top: 10px;
+    left: 5px;
+    right: 5px;
+    display: flex;
+    gap: 5px;
+    z-index: 20;
+  }
+
+  .progress-bar-bg {
+    flex: 1;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: white;
+  }
+
+  .header-overlay {
+    position: absolute;
+    top: 20px;
+    left: 0;
+    z-index: 20;
+    color: white;
+    padding: 10px;
+  }
+
+  .media-container {
+    height: 100%;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: black;
+  }
+
+  .status-img {
+    max-width: 100%;
+    max-height: 100%;
+  }
+
+  .caption {
+    position: absolute;
+    bottom: 50px;
+    width: 100%;
+    text-align: center;
+    color: white;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    z-index: 10;
+  }
+
+  .tap-zone {
+    position: absolute;
+    top: 50px;
+    /* Below progress */
+    bottom: 0;
+    width: 50%;
+    z-index: 15;
+  }
+
+  .tap-zone.left {
+    left: 0;
+  }
+
+  .tap-zone.right {
+    right: 0;
+  }
+</style>

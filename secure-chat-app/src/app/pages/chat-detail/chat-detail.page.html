@@ -1,44 +1,165 @@
-<ion-header>
+<ion-header class="ion-no-border">
   <ion-toolbar>
     <ion-buttons slot="start">
-      <!-- Force back to Chats list -->
-      <ion-button (click)="goBack()">
-        <ion-icon name="arrow-back"></ion-icon>
+      <ion-button (click)="goBack()" color="medium">
+        <ion-icon name="arrow-back" style="font-size: 24px;"></ion-icon>
       </ion-button>
     </ion-buttons>
-    <ion-title>Chat</ion-title>
+    <ion-title class="gradient-text" (click)="openGroupInfo()">
+      {{ chatName }} <ion-icon *ngIf="isGroup" name="information-circle-outline"
+        style="font-size: 0.8em; margin-left: 5px;"></ion-icon>
+    </ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="makeCall('video')">
+        <ion-icon name="videocam" slot="icon-only" color="secondary"></ion-icon>
+      </ion-button>
+      <ion-button (click)="makeCall('audio')">
+        <ion-icon name="call" slot="icon-only" color="secondary"></ion-icon>
+      </ion-button>
+      <ion-button (click)="openChatInfo()">
+        <ion-icon name="ellipsis-vertical"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+    <!-- Possible avatar or name here in future -->
   </ion-toolbar>
 </ion-header>
 
-<ion-content>
-  <ion-list lines="none">
-    <ion-item *ngFor="let msg of messages">
-      <div [class]="isMyMsg(msg) ? 'msg-me' : 'msg-them'">
-        <ng-container *ngIf="isImage(msg.text); else textMsg">
-          <img [src]="getImgUrl(msg.text)" style="max-width: 200px; border-radius: 8px;" />
+<ion-content [fullscreen]="true" class="chat-content">
+  <ion-list lines="none" class="bg-transparent ion-padding-top">
+    <ion-item *ngFor="let msg of messages" class="msg-item">
+      <!-- Message Bubble -->
+      <div [class]="isMyMsg(msg) ? 'msg-me glass-bubble' : 'msg-them glass-bubble-them'"
+        (press)="presentActionSheet(msg)">
+
+        <!-- Reply Context -->
+        <div *ngIf="msg.replyTo" class="reply-context">
+          <div class="reply-bar"></div>
+          <p class="reply-text">{{ msg.replyTo.text | slice:0:30 }}...</p>
+        </div>
+
+        <!-- Content Type Switch -->
+        <ng-container [ngSwitch]="getMsgType(msg.text)">
+          <!-- Image -->
+          <div *ngSwitchCase="'image'">
+            <img [src]="getImgUrl(msg.text)" class="msg-image" (click)="openImage(getImgUrl(msg.text))" />
+            <p *ngIf="msg.text.caption" class="msg-caption">{{ msg.text.caption }}</p>
+          </div>
+
+          <!-- Audio -->
+          <div *ngSwitchCase="'audio'" class="audio-player">
+            <ion-icon [name]="msg.isPlaying ? 'pause-circle' : 'play-circle'" class="play-icon"
+              (click)="toggleAudio(msg)"></ion-icon>
+            <div class="audio-info">
+              <span>Voice Note</span>
+              <span class="audio-dur">{{ msg.text.d * 1000 | date:'mm:ss' }}</span>
+            </div>
+            <!-- TODO: Implement actual playback logic connecting to _blobUrl -->
+          </div>
+
+          <!-- Document -->
+          <div *ngSwitchCase="'document'" class="doc-bubble" (click)="openDocument(msg.text)">
+            <div class="doc-icon">
+              <ion-icon name="document-text" size="large"></ion-icon>
+            </div>
+            <div class="doc-info">
+              <p class="doc-name">{{ msg.text.name }}</p>
+              <p class="doc-size">{{ (msg.text.size / 1024) | number:'1.0-1' }} KB</p>
+            </div>
+          </div>
+
+          <!-- Location -->
+          <div *ngSwitchCase="'location'" class="loc-bubble" (click)="openLocation(msg.text.lat, msg.text.lng)">
+            <img src="assets/map_placeholder.png"
+              onerror="this.src='https://maps.googleapis.com/maps/api/staticmap?center=0,0&zoom=1&size=400x200&mrk=0,0'"
+              class="loc-img" style="display:none;" />
+            <!-- Simple reliable UI without API Key -->
+            <div class="loc-content">
+              <ion-icon name="location" color="danger" size="large"></ion-icon>
+              <div class="loc-text">
+                <p class="loc-title">Current Location</p>
+                <p class="loc-coords">{{ msg.text.lat | number:'1.4-4' }}, {{ msg.text.lng | number:'1.4-4' }}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Text -->
+          <div *ngSwitchDefault>
+            <p class="msg-text" [innerHTML]="msg.text | formatText"></p>
+            <!-- Link Preview (Placeholder) -->
+            <div *ngIf="msg.linkMeta" class="link-preview" (click)="openLink(msg.linkMeta.url)">
+              <img *ngIf="msg.linkMeta.image" [src]="msg.linkMeta.image" />
+              <div class="link-info">
+                <p class="link-title">{{ msg.linkMeta.title }}</p>
+                <p class="link-domain">{{ msg.linkMeta.domain }}</p>
+              </div>
+            </div>
+          </div>
         </ng-container>
-        <ng-template #textMsg>
-          <p>{{ msg.text }}</p>
-        </ng-template>
-        <span class="timestamp">{{ msg.timestamp | date:'shortTime' }}</span>
+
+        <span class="timestamp">
+          {{ msg.timestamp | date:'shortTime' }}
+          <ion-icon *ngIf="isMyMsg(msg)" [name]="msg.read ? 'checkmark-done' : 'checkmark'"
+            [color]="msg.read ? 'success' : 'medium'"></ion-icon>
+        </span>
+
+        <!-- Reactions Badge -->
+        <div class="reaction-badge" *ngIf="getReactionCount(msg) > 0" (click)="presentReactionPicker(msg)">
+          <span *ngFor="let r of getTopReactions(msg)">{{ r }}</span>
+          <span *ngIf="getReactionCount(msg) > 3" class="reaction-count">+{{ getReactionCount(msg) - 3 }}</span>
+        </div>
+
       </div>
     </ion-item>
   </ion-list>
 </ion-content>
 
-<ion-footer>
-  <ion-toolbar>
-    <ion-item lines="none">
-      <input type="file" #fileInput style="display: none" (change)="uploadImage($event)" accept="image/*">
-      <ion-button slot="start" fill="clear" (click)="fileInput.click()">
-        <ion-icon name="attach"></ion-icon>
+<ion-footer class="ion-no-border">
+  <!-- Reply Preview -->
+  <div *ngIf="replyingTo" class="reply-preview glass-card">
+    <div class="reply-bar"></div>
+    <p>Replying to: {{ replyingTo.text | slice:0:30 }}...</p>
+    <ion-icon name="close" (click)="replyingTo = null"></ion-icon>
+  </div>
+
+  <ion-toolbar class="input-toolbar">
+    <div class="input-container glass-card" *ngIf="!isRecording; else recordingUI">
+      <ion-button fill="clear" (click)="presentAttachmentMenu()" class="icon-btn">
+        <ion-icon name="add" slot="icon-only"></ion-icon>
       </ion-button>
 
-      <ion-input placeholder="Type a message..." [(ngModel)]="newMessage"></ion-input>
-      <ion-button slot="end" fill="clear" (click)="sendMessage()">
-        <ion-icon name="send"></ion-icon>
+      <ion-input placeholder="Type a secure message..." [(ngModel)]="newMessage" class="msg-input"></ion-input>
+
+      <div *ngIf="!newMessage.trim()">
+        <ion-button fill="clear" class="icon-btn">
+          <ion-icon name="camera-outline" slot="icon-only"></ion-icon>
+        </ion-button>
+        <ion-button fill="clear" (click)="recordAudio()" class="icon-btn">
+          <ion-icon name="mic-outline" slot="icon-only"></ion-icon>
+        </ion-button>
+      </div>
+
+      <ion-button *ngIf="newMessage.trim()" fill="clear" (click)="sendMessage()" class="send-btn">
+        <ion-icon name="send" slot="icon-only"></ion-icon>
       </ion-button>
-    </ion-item>
+    </div>
+
+    <!-- Recording UI -->
+    <ng-template #recordingUI>
+      <div class="input-container glass-card recording-active">
+        <ion-button fill="clear" color="danger" (click)="stopRecording(false)">
+          <ion-icon name="trash" slot="icon-only"></ion-icon>
+        </ion-button>
+
+        <div class="record-timer">
+          <div class="rec-dot"></div>
+          <span>{{ recordDuration * 1000 | date:'mm:ss' }}</span>
+        </div>
+
+        <ion-button fill="clear" color="primary" (click)="stopRecording(true)">
+          <ion-icon name="send" slot="icon-only"></ion-icon>
+        </ion-button>
+      </div>
+    </ng-template>
   </ion-toolbar>
 </ion-footer>
 

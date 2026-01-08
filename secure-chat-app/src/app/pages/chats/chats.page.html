@@ -1,35 +1,48 @@
-<ion-header>
+<ion-header class="ion-no-border">
   <ion-toolbar>
-    <ion-title>Chats</ion-title>
+    <ion-title class="gradient-text">Chats</ion-title>
     <ion-buttons slot="end">
-      <ion-button routerLink="/tabs/contacts">
-        <ion-icon name="create-outline"></ion-icon>
+      <ion-button [routerLink]="['/new-group']">
+        <ion-icon name="people-circle-outline" slot="icon-only"></ion-icon>
+      </ion-button>
+      <ion-button routerLink="/tabs/contacts" class="vibrant-icon-btn">
+        <ion-icon name="add-circle" color="secondary" style="font-size: 28px;"></ion-icon>
       </ion-button>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
-<ion-content>
-  <ion-list>
-    <ion-item *ngFor="let chat of chats" button [routerLink]="['/chat-detail', chat.id]">
-      <ion-avatar slot="start">
-        <img [src]="chat.avatar || 'assets/placeholder_user.png'" />
-      </ion-avatar>
-      <ion-label>
-        <h2>{{ chat.name }}</h2>
-        <p [style.font-weight]="getUnreadCount(chat) > 0 ? 'bold' : 'normal'"
-          [style.color]="getUnreadCount(chat) > 0 ? 'black' : 'gray'">
-          {{ chat.lastMessage || 'Start conversation' }}
-        </p>
-      </ion-label>
-      <ion-note slot="end" class="ion-text-end">
-        <div style="font-size: 0.8em; margin-bottom: 5px;">{{ chat.lastTimestamp | date:'shortTime' }}</div>
-        <ion-badge color="primary" *ngIf="getUnreadCount(chat) > 0">{{ getUnreadCount(chat) }}</ion-badge>
-      </ion-note>
-    </ion-item>
-  </ion-list>
+<ion-content [fullscreen]="true">
+  <div class="ion-padding-top">
+    <ion-list lines="none" class="bg-transparent">
+      <ion-item *ngFor="let chat of chats" button [routerLink]="['/chat-detail', chat.id]" class="chat-item">
+        <ion-avatar slot="start" class="chat-avatar">
+          <img [src]="chat.avatar || 'assets/placeholder_user.png'" />
+          <!-- Online indicator placeholder -->
+          <div class="online-indicator"></div>
+        </ion-avatar>
 
-  <div *ngIf="chats.length === 0" class="ion-text-center ion-padding">
-    <p>No chats yet. Start one from Contacts!</p>
+        <ion-label>
+          <div class="chat-header">
+            <h2 class="chat-name">{{ chat.name }}</h2>
+            <span class="chat-time">{{ chat.lastTimestamp | date:'shortTime' }}</span>
+          </div>
+
+          <div class="chat-footer">
+            <p [class.unread-msg]="getUnreadCount(chat) > 0" class="chat-preview">
+              {{ chat.lastMessage || 'Start conversation' }}
+            </p>
+            <ion-badge color="secondary" *ngIf="getUnreadCount(chat) > 0" class="unread-badge">{{ getUnreadCount(chat)
+              }}</ion-badge>
+          </div>
+        </ion-label>
+      </ion-item>
+    </ion-list>
+
+    <div *ngIf="chats.length === 0" class="empty-state">
+      <ion-icon name="chatbubbles-outline" class="empty-icon"></ion-icon>
+      <p>No chats yet. <br> Start a vivid conversation!</p>
+      <ion-button routerLink="/tabs/contacts" class="vibrant-btn small-btn">Find Contacts</ion-button>
+    </div>
   </div>
 </ion-content>

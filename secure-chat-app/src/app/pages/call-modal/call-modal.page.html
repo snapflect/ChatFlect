@@ -1,0 +1,61 @@
+<ion-content class="call-bg">
+    <div class="call-container" [class.video-call]="isVideo">
+
+        <!-- Video UI -->
+        <div class="video-container" *ngIf="isVideo">
+            <video id="remoteVideo" autoplay playsinline class="remote-video"></video>
+            <video id="localVideo" autoplay playsinline muted class="local-video"></video>
+        </div>
+
+        <!-- Audio UI (Avatar) - Hide if Video connected -->
+        <div class="call-header ion-text-center" *ngIf="!isVideo || status !== 'connected'">
+            <ion-avatar class="large-avatar">
+                <img src="assets/avatar-placeholder.png" />
+            </ion-avatar>
+            <h2>{{ callerName }}</h2>
+            <p class="status-text animate-pulse">
+                {{ status === 'incoming' ? 'Incoming ' + (callType === 'video' ? 'Video ' : '') + 'Call...' : (status
+                === 'calling' ? 'Calling...' : 'Connected') }}
+            </p>
+        </div>
+
+        <!-- Hidden Audio Element for WebRTC (Audio Only fallback or mixed) -->
+        <audio id="remoteAudio" autoplay playsinline [muted]="isVideo"></audio>
+        <!-- Note: If Video, the Audio track usually comes with the Video stream, so we use the video element for audio too? 
+             Actually, distinct elements are safer for hybrid. 
+             If isVideo, muting this audio tag and letting remoteVideo play audio is standard. -->
+
+        <!-- Actions -->
+        <div class="actions-footer">
+
+            <!-- Answer -->
+            <ion-fab-button color="success" *ngIf="status === 'incoming'" (click)="answer()" class="action-btn">
+                <ion-icon name="call"></ion-icon>
+            </ion-fab-button>
+
+            <!-- End -->
+            <ion-fab-button color="danger" (click)="hangup()" class="action-btn">
+                <ion-icon name="call" class="rotate-down"></ion-icon>
+            </ion-fab-button>
+
+            <!-- Mute Toggle -->
+            <ion-fab-button color="light" *ngIf="status === 'connected'" (click)="toggleMute()"
+                class="action-btn small-btn">
+                <ion-icon [name]="isMuted ? 'mic-off' : 'mic'"></ion-icon>
+            </ion-fab-button>
+
+            <!-- Video Toggle -->
+            <ion-fab-button color="light" *ngIf="status === 'connected' && isVideo" (click)="toggleVideo()"
+                class="action-btn small-btn">
+                <ion-icon [name]="isVideoEnabled ? 'videocam' : 'videocam-off'"></ion-icon>
+            </ion-fab-button>
+
+            <!-- Flip Camera -->
+            <ion-fab-button color="light" *ngIf="status === 'connected' && isVideo" (click)="flipCamera()"
+                class="action-btn small-btn">
+                <ion-icon name="camera-reverse"></ion-icon>
+            </ion-fab-button>
+
+        </div>
+    </div>
+</ion-content>

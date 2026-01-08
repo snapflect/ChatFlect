@@ -1,0 +1,137 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-back-button defaultHref="/tabs/chats"></ion-back-button>
+    </ion-buttons>
+    <ion-title class="gradient-text">Settings</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding">
+  <!-- Profile Header -->
+  <!-- Profile Header -->
+  <div class="profile-section ion-text-center ion-margin-bottom">
+    <input type="file" id="avatarInput" (change)="onFileSelected($event)" hidden accept="image/*" />
+
+    <div class="avatar-wrapper" (click)="triggerFile()">
+      <ion-avatar class="big-avatar">
+        <img [src]="user.photo_url || 'assets/avatar-placeholder.png'" />
+      </ion-avatar>
+      <div class="edit-badge">
+        <ion-icon name="camera" color="light"></ion-icon>
+      </div>
+      <div *ngIf="isLoading" class="loading-overlay">
+        <ion-spinner></ion-spinner>
+      </div>
+    </div>
+
+    <h2 class="username">{{ user.first_name }} {{ user.last_name }}</h2>
+    <p class="phone">{{ user.phone }}</p>
+  </div>
+
+  <div class="edit-form ion-margin-bottom">
+    <ion-item class="glass-item">
+      <ion-label position="stacked" color="medium">First Name</ion-label>
+      <ion-input [(ngModel)]="user.first_name"></ion-input>
+    </ion-item>
+    <ion-item class="glass-item">
+      <ion-label position="stacked" color="medium">Last Name</ion-label>
+      <ion-input [(ngModel)]="user.last_name"></ion-input>
+    </ion-item>
+    <ion-item class="glass-item">
+      <ion-label position="stacked" color="medium">About</ion-label>
+      <ion-textarea [(ngModel)]="user.short_note" rows="2"></ion-textarea>
+    </ion-item>
+
+    <ion-button expand="block" shape="round" class="gradient-btn" (click)="saveProfile()">
+      Save Changes
+    </ion-button>
+  </div>
+
+  <!-- Settings List -->
+  <ion-list class="bg-transparent">
+
+    <ion-item button (click)="openPrivacy()" class="glass-item">
+      <ion-icon name="lock-closed-outline" slot="start" class="gradient-icon"></ion-icon>
+      <ion-label>Privacy</ion-label>
+    </ion-item>
+
+    <ion-item button (click)="openChats()" class="glass-item">
+      <ion-icon name="chatbubbles-outline" slot="start" class="gradient-icon"></ion-icon>
+      <ion-label>Chats</ion-label>
+    </ion-item>
+
+    <ion-item button (click)="openNotifications()" class="glass-item">
+      <ion-icon name="notifications-outline" slot="start" class="gradient-icon"></ion-icon>
+      <ion-label>Notifications</ion-label>
+    </ion-item>
+
+    <ion-item button class="glass-item">
+      <ion-icon name="help-circle-outline" slot="start" class="gradient-icon"></ion-icon>
+      <ion-label>Help</ion-label>
+    </ion-item>
+
+    <ion-item button (click)="logout()" lines="none" class="glass-item logout-item">
+      <ion-icon name="log-out-outline" slot="start" color="danger"></ion-icon>
+      <ion-label color="danger">Logout</ion-label>
+    </ion-item>
+
+  </ion-list>
+</ion-content>
+
+<style>
+  .glass-item {
+    --background: rgba(255, 255, 255, 0.05);
+    /* Very subtle */
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+
+  .logout-item {
+    margin-top: 20px;
+  }
+
+  .gradient-icon {
+    color: var(--ion-color-secondary);
+  }
+
+  .avatar-wrapper {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    margin: 0 auto;
+  }
+
+  .big-avatar {
+    width: 100px;
+    height: 100px;
+    border: 3px solid var(--ion-color-secondary);
+  }
+
+  .edit-badge {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    background: var(--ion-color-primary);
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #000;
+  }
+
+  .loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+</style>

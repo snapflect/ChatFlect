@@ -1,32 +1,47 @@
-<ion-header>
+<ion-header class="ion-no-border">
   <ion-toolbar>
-    <ion-title>Your Profile</ion-title>
+    <ion-title class="gradient-text">Your Profile</ion-title>
     <ion-buttons slot="end">
-      <ion-button (click)="saveProfile()">Save & Continue</ion-button>
+      <ion-button (click)="saveProfile()" class="vibrant-icon-btn">
+        <ion-icon name="checkmark-done-circle" color="secondary" style="font-size: 28px;"></ion-icon>
+      </ion-button>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
-<ion-content class="ion-padding">
-  <div class="ion-text-center">
-    <ion-avatar style="margin: auto; width: 100px; height: 100px; background: #eee;">
-      <img [src]="profile.photo_url || 'https://gravatar.com/avatar?d=mp'" />
-    </ion-avatar>
-    <ion-button fill="clear" size="small" (click)="changePhoto()">Change Photo</ion-button>
+<ion-content [fullscreen]="true">
+  <div class="profile-header ion-text-center">
+    <div class="avatar-container">
+      <ion-avatar class="profile-avatar">
+        <img [src]="profile.photo_url || 'https://gravatar.com/avatar?d=mp'" />
+      </ion-avatar>
+      <ion-button fill="clear" class="change-photo-btn" (click)="changePhoto()">
+        <ion-icon name="camera" slot="icon-only"></ion-icon>
+      </ion-button>
+    </div>
   </div>
 
-  <ion-list>
-    <ion-item>
-      <ion-label position="stacked">First Name</ion-label>
-      <ion-input [(ngModel)]="profile.first_name"></ion-input>
-    </ion-item>
-    <ion-item>
-      <ion-label position="stacked">Last Name</ion-label>
-      <ion-input [(ngModel)]="profile.last_name"></ion-input>
-    </ion-item>
-    <ion-item>
-      <ion-label position="stacked">Short Note</ion-label>
-      <ion-textarea [(ngModel)]="profile.short_note" rows="3"></ion-textarea>
-    </ion-item>
-  </ion-list>
+  <div class="ion-padding">
+    <div class="glass-card ion-padding">
+      <ion-item lines="none" class="custom-input">
+        <ion-label position="stacked" color="secondary">First Name</ion-label>
+        <ion-input [(ngModel)]="profile.first_name" placeholder="John"></ion-input>
+      </ion-item>
+
+      <ion-item lines="none" class="custom-input">
+        <ion-label position="stacked" color="secondary">Last Name</ion-label>
+        <ion-input [(ngModel)]="profile.last_name" placeholder="Doe"></ion-input>
+      </ion-item>
+
+      <ion-item lines="none" class="custom-input">
+        <ion-label position="stacked" color="secondary">Short Note</ion-label>
+        <ion-textarea [(ngModel)]="profile.short_note" rows="3"
+          placeholder="Hey there! I am using Secure Chat."></ion-textarea>
+      </ion-item>
+
+      <ion-button expand="block" shape="round" class="vibrant-btn ion-margin-top" (click)="saveProfile()">
+        Save Profile
+      </ion-button>
+    </div>
+  </div>
 </ion-content>

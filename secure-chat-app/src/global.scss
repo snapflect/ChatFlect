@@ -35,3 +35,86 @@
 /* @import "@ionic/angular/css/palettes/dark.always.css"; */
 /* @import "@ionic/angular/css/palettes/dark.class.css"; */
 @import "@ionic/angular/css/palettes/dark.system.css";
+
+/* -------------------------------------------------------------------------- */
+/*                           CUSTOM VIBRANT DESIGN                            */
+/* -------------------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+    --ion-font-family: 'Inter', sans-serif;
+}
+
+body {
+    font-family: 'Inter', sans-serif !important;
+}
+
+/* Glassmorphism Card Utility */
+.glass-card {
+    background: rgba(36, 38, 41, 0.7);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+    border-radius: 16px;
+}
+
+/* Gradient Text */
+.gradient-text {
+    background: linear-gradient(135deg, var(--ion-color-secondary), var(--ion-color-primary));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
+}
+
+/* Vibrant Button */
+.vibrant-btn {
+    --background: linear-gradient(135deg, var(--ion-color-primary), #6243b8);
+    --box-shadow: 0 4px 15px rgba(127, 90, 240, 0.4);
+    --border-radius: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: none;
+    --padding-top: 15px;
+    --padding-bottom: 15px;
+}
+
+/* Input Styles */
+ion-item.custom-input {
+    --background: rgba(255, 255, 255, 0.05);
+    --border-radius: 12px;
+    --padding-start: 15px;
+    margin-bottom: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+ion-item.custom-input:focus-within {
+    border-color: var(--ion-color-primary);
+    box-shadow: 0 0 0 1px var(--ion-color-primary);
+    transition: all 0.3s ease;
+}
+
+/* Toolbar Overrides */
+ion-toolbar {
+    --background: transparent;
+    --border-color: transparent;
+}
+
+ion-header {
+    box-shadow: none;
+    /* Add subtle blur for sticky headers if needed, generally handled by page content */
+}
+
+ion-title {
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    font-size: 1.2rem;
+}
+
+/* List Item Overrides */
+ion-item {
+    --background: transparent;
+    --color: var(--ion-text-color);
+}

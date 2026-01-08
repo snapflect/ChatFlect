@@ -1,6 +1,7 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { ModalController, ToastController } from '@ionic/angular';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { LoggingService } from 'src/app/services/logging.service';
 
 @Component({
     selector: 'app-image-modal',
@@ -13,7 +14,8 @@ export class ImageModalPage implements OnInit {
 
     constructor(
         private modalController: ModalController,
-        private toastController: ToastController
+        private toastController: ToastController,
+        private logger: LoggingService
     ) { }
 
     ngOnInit() { }
@@ -47,7 +49,7 @@ export class ImageModalPage implements OnInit {
             toast.present();
 
         } catch (e) {
-            console.error('Save failed', e);
+            this.logger.error('Save failed', e);
             const toast = await this.toastController.create({
                 message: 'Failed to save image.',
                 duration: 2000,

@@ -1,11 +1,12 @@
 import { Injectable } from '@angular/core';
+import { LoggingService } from './logging.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class CryptoService {
 
-    constructor() { }
+    constructor(private logger: LoggingService) { }
 
     // --- Utils ---
     private ab2str(buf: ArrayBuffer): string {
@@ -143,7 +144,7 @@ export class CryptoService {
 
             return JSON.stringify(packageObj);
         } catch (e) {
-            console.error("Encryption Failed", e);
+            this.logger.error("Encryption Failed", e);
             return "";
         }
     }
@@ -188,10 +189,11 @@ export class CryptoService {
             return new TextDecoder().decode(decrypted);
 
         } catch (e) {
-            console.error("Decryption Failed", e);
+            this.logger.error("Decryption Failed", e);
             return "[Decryption Error]";
         }
     }
+
     // --- File Encryption (Blob) --- //
 
     async encryptBlob(blob: Blob): Promise<{ encryptedBlob: Blob, key: CryptoKey, iv: Uint8Array }> {

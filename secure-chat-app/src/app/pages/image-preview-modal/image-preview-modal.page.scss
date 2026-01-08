@@ -1,0 +1,44 @@
+.preview-content {
+    --background: #000;
+}
+
+.image-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.image-container img {
+    max-width: 100%;
+    max-height: 80vh;
+    object-fit: contain;
+}
+
+.close-btn {
+    --background: rgba(0, 0, 0, 0.4);
+    --border-radius: 50%;
+    height: 40px;
+    width: 40px;
+    margin-left: 10px;
+    margin-top: 10px;
+}
+
+.caption-toolbar {
+    --background: rgba(0, 0, 0, 0.8);
+    padding: 10px;
+}
+
+.input-container {
+    display: flex;
+    align-items: center;
+    padding: 5px 15px;
+    border-radius: 24px !important;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.caption-input {
+    --color: white;
+    --placeholder-color: #aaa;
+}

@@ -1,13 +1,14 @@
 import { Injectable } from '@angular/core';
 import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
+import { LoggingService } from './logging.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class ProfileService {
 
-    constructor(private api: ApiService, private auth: AuthService) { }
+    constructor(private api: ApiService, private auth: AuthService, private logger: LoggingService) { }
 
     async getProfile() {
         const userId = this.auth.currentUserId; // Need to access value or pass it
@@ -40,11 +41,16 @@ export class ProfileService {
         // Wait, ApiService checks environment.apiUrl.
         // Let's just use fetch for the upload to handle the multipart correctly without risk of interceptors messing it up
 
-        const response = await fetch('https://chat.snapflect.com/api/upload.php', {
-            method: 'POST',
-            body: formData
-        });
-        const json = await response.json();
-        return json.url; // Returns "uploads/xxxx.jpg"
+        try {
+            const response = await fetch('https://chat.snapflect.com/api/upload.php', {
+                method: 'POST',
+                body: formData
+            });
+            const json = await response.json();
+            return json.url; // Returns "uploads/xxxx.jpg"
+        } catch (e) {
+            this.logger.error("Upload Service Error", e);
+            throw e;
+        }
     }
 }

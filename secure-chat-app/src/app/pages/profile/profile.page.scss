@@ -1,0 +1,48 @@
+ion-content {
+    --background: var(--ion-background-color);
+}
+
+.profile-header {
+    padding: 40px 0 20px;
+}
+
+.avatar-container {
+    position: relative;
+    display: inline-block;
+}
+
+.profile-avatar {
+    width: 120px;
+    height: 120px;
+    border: 4px solid var(--ion-color-primary);
+    box-shadow: 0 0 20px rgba(127, 90, 240, 0.4);
+}
+
+.change-photo-btn {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    --background: var(--ion-color-secondary);
+    --background-activated: var(--ion-color-secondary-shade);
+    --color: white;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    margin: 0;
+    padding: 0;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    --padding-start: 0;
+    --padding-end: 0;
+}
+
+.glass-card {
+    border-radius: 20px;
+}
+
+ion-label {
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+/* Override input background for this specific card look if needed, 
+   but reusing global .custom-input is good for consistency. */

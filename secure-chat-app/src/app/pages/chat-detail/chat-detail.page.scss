@@ -1,0 +1,199 @@
+ion-content.chat-content {
+    --background: var(--ion-background-color);
+}
+
+.bg-transparent {
+    background: transparent !important;
+}
+
+.msg-item {
+    --background: transparent;
+    --padding-start: 10px;
+    --padding-end: 10px;
+    margin-bottom: 5px;
+    --min-height: auto;
+}
+
+.glass-bubble {
+    margin-left: auto;
+    background: linear-gradient(135deg, var(--ion-color-primary), #6243b8);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 18px 18px 0 18px;
+    max-width: 80%;
+    box-shadow: 0 4px 15px rgba(127, 90, 240, 0.3);
+    position: relative;
+}
+
+.glass-bubble-them {
+    margin-right: auto;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 18px 18px 18px 0;
+    max-width: 80%;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.msg-text {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    /* Preserve line breaks */
+}
+
+/* Link Preview */
+.link-preview {
+    margin-top: 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+}
+
+.link-preview img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+    /* Favicon usually small */
+    padding: 5px;
+    background: white;
+    /* Ensure favicon visible */
+}
+
+.link-info {
+    padding: 8px;
+    overflow: hidden;
+}
+
+.link-title {
+    font-size: 0.8rem;
+    font-weight: bold;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0;
+    color: inherit;
+}
+
+.link-domain {
+    font-size: 0.7rem;
+    opacity: 0.7;
+    margin: 0;
+}
+
+.chat-link {
+    color: #4facfe;
+    text-decoration: underline;
+}
+
+.msg-image {
+    max-width: 100%;
+    border-radius: 12px;
+    margin-bottom: 2px;
+}
+
+.msg-caption {
+    font-size: 0.9rem;
+    margin: 4px 0 0 0;
+    opacity: 0.9;
+}
+
+.timestamp {
+    font-size: 0.7em;
+    color: #e0e0e0;
+    display: block;
+    text-align: right;
+    margin-top: 4px;
+    opacity: 0.8;
+}
+
+/* Reply Styles */
+.reply-context {
+    background: rgba(0, 0, 0, 0.1);
+    border-left: 4px solid var(--ion-color-tertiary);
+    padding: 5px 8px;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    font-size: 0.85em;
+    opacity: 0.9;
+}
+
+.reply-preview {
+    background: rgba(40, 44, 52, 0.95);
+    border-left: 4px solid var(--ion-color-secondary);
+    padding: 10px;
+    margin: 10px;
+    border-radius: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: white;
+    font-size: 0.9rem;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* Footer & Input */
+ion-footer {
+    background: var(--ion-background-color);
+}
+
+.input-toolbar {
+    padding: 10px;
+    --background: transparent;
+}
+
+.input-container {
+    display: flex;
+    align-items: center;
+    padding: 5px 10px;
+    border-radius: 24px !important;
+    background: rgba(36, 38, 41, 0.9);
+    /* Slightly more opaque for input */
+}
+
+.icon-btn {
+    --color: var(--ion-color-medium);
+    margin: 0;
+}
+
+.msg-input {
+    --padding-start: 10px;
+    /* --placeholder-color: var(--ion-color-medium); */
+    font-size: 1rem;
+}
+
+.send-btn {
+    --color: var(--ion-color-secondary);
+    font-weight: bold;
+}
+
+/* Reaction Badge */
+.reaction-badge {
+    position: absolute;
+    bottom: -10px;
+    right: 10px;
+    background: #444;
+    border: 2px solid #1a1b1e;
+    border-radius: 12px;
+    padding: 2px 6px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 0.8rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    z-index: 10;
+    cursor: pointer;
+}
+
+.reaction-count {
+    font-size: 0.7em;
+    color: #ccc;
+    margin-left: 2px;
+}

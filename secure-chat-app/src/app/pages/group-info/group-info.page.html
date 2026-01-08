@@ -1,0 +1,97 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-back-button defaultHref="/tabs/chats"></ion-back-button>
+    </ion-buttons>
+    <ion-title class="gradient-text">Group Info</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <!-- Group Header -->
+  <div class="group-header">
+    <ion-avatar class="group-avatar-large">
+      <img [src]="group.icon_url || 'assets/group-placeholder.png'" />
+    </ion-avatar>
+    <h1 class="gradient-text">{{ group.name }}</h1>
+    <p class="member-count">Group · {{ members.length }} participants</p>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Member List -->
+  <ion-list class="bg-transparent">
+    <ion-list-header>
+      <ion-label>Participants</ion-label>
+    </ion-list-header>
+
+    <ion-item *ngFor="let m of members" (click)="onMemberClick(m)" lines="none" class="glass-item">
+      <ion-avatar slot="start">
+        <img [src]="m.photo_url || 'assets/avatar-placeholder.png'" />
+      </ion-avatar>
+      <ion-label>
+        <h2>{{ m.user_id === myId ? 'You' : m.first_name + ' ' + m.last_name }}</h2>
+        <p>{{ m.phone_number }}</p>
+      </ion-label>
+      <ion-badge slot="end" *ngIf="m.role === 'admin'" color="success" class="admin-badge">Group Admin</ion-badge>
+    </ion-item>
+  </ion-list>
+
+  <div class="ion-padding">
+    <ion-button expand="block" color="danger" (click)="leaveGroup()" class="action-btn">
+      <ion-icon name="log-out-outline" slot="start"></ion-icon>
+      Exit Group
+    </ion-button>
+
+    <ion-button *ngIf="iAmAdmin" expand="block" color="secondary" (click)="addMember()" class="action-btn">
+      <ion-icon name="person-add-outline" slot="start"></ion-icon>
+      Add Member
+    </ion-button>
+
+  </div>
+</ion-content>
+
+<style>
+  .group-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+  }
+
+  .group-avatar-large {
+    width: 100px;
+    height: 100px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  }
+
+  .member-count {
+    color: #888;
+    margin-top: 5px;
+  }
+
+  .glass-item {
+    --background: rgba(255, 255, 255, 0.05);
+    /* Subtle glass */
+    margin-bottom: 2px;
+  }
+
+  .admin-badge {
+    font-size: 0.7em;
+    padding: 4px 8px;
+    border-radius: 4px;
+    opacity: 0.8;
+  }
+
+  .divider {
+    height: 8px;
+    background: #121212;
+    /* Darker separator */
+  }
+
+  .action-btn {
+    --border-radius: 12px;
+    margin-top: 20px;
+  }
+</style>

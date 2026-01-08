@@ -4,6 +4,9 @@ import { Router } from '@angular/router';
 import { ToastController } from '@ionic/angular';
 
 import { ChatService } from 'src/app/services/chat.service';
+import { Share } from '@capacitor/share';
+import { AlertController } from '@ionic/angular';
+import { LoggingService } from 'src/app/services/logging.service';
 
 @Component({
   selector: 'app-contacts',
@@ -11,6 +14,10 @@ import { ChatService } from 'src/app/services/chat.service';
   styleUrls: ['./contacts.page.scss'],
   standalone: false
 })
+
+
+// ...
+
 export class ContactsPage implements OnInit {
   contacts: any[] = [];
 
@@ -18,7 +25,9 @@ export class ContactsPage implements OnInit {
     private contactsService: ContactsService,
     private chatService: ChatService,
     private router: Router,
-    private toast: ToastController
+    private toast: ToastController,
+    private alertCtrl: AlertController,
+    private logger: LoggingService
   ) { }
 
   ngOnInit() {
@@ -26,15 +35,76 @@ export class ContactsPage implements OnInit {
   }
 
   async loadContacts() {
+    // For now, load "My Contacts" from backend or just local device contacts?
+    // Since we don't have a "My Friends" backend API yet for phase 1 (just relying on phone matches),
+    // let's just show an empty state or try to sync device contacts if we had the plugin setup fully.
+    // For MVP/Test, we'll just have the "Add Contact" button.
+    // But to satisfy the compiler:
+    this.logger.log("Contacts loaded");
+    // Optionally fetch from local storage or cached list
+    const cached = localStorage.getItem('contacts_cache');
+    if (cached) {
+      this.contacts = JSON.parse(cached);
+    }
+  }
+
+  async addContact() {
+    // "New Contact" -> For this MVP, we'll offer to "Message a Number" directly
+    // since writing to Native Contacts is permission-heavy and complex across Android versions.
+    const alert = await this.alertCtrl.create({
+      header: 'New Chat',
+      message: 'Enter phone number (with country code):',
+      inputs: [
+        { name: 'phone', type: 'tel', placeholder: '+1234567890' }
+      ],
+      buttons: [
+        { text: 'Cancel', role: 'cancel' },
+        {
+          text: 'Message',
+          handler: async (data) => {
+            if (data.phone) {
+              // Find user by phone via API? 
+              // Or just try to start chat if they exist.
+              // We need 'user_id' to start a chat.
+              // Let's call API to look them up.
+              await this.findAndChat(data.phone);
+            }
+          }
+        }
+      ]
+    });
+    await alert.present();
+  }
+
+  async findAndChat(phone: string) {
+    // We can use contacts.php to look up ONE number? 
+    // contacts.php takes an array. 
     try {
-      const res: any = await this.contactsService.getContacts();
-      if (Array.isArray(res)) {
-        const myId = localStorage.getItem('user_id');
-        // Filter out my own user_id
-        this.contacts = res.filter((c: any) => String(c.user_id) !== String(myId));
+      const res: any = await this.contactsService.syncPhone([phone]);
+      if (res && res.length > 0) {
+        // Found!
+        this.startChat(res[0]);
+      } else {
+        const t = await this.toast.create({ message: 'User not found on this app.', duration: 2000 });
+        t.present();
+        // Ask to invite?
+        // this.inviteFriend();
       }
     } catch (e) {
-      console.error(e);
+      this.logger.error("Error finding contact", e);
+    }
+  }
+
+  async inviteFriend() {
+    try {
+      await Share.share({
+        title: 'Join me on SecureChat!',
+        text: 'Let\'s chat securely! Download the app: ',
+        url: 'https://snapflect.com/chat-app-download', // Placeholder
+        dialogTitle: 'Invite Friends'
+      });
+    } catch (e) {
+      this.logger.error("Share failed", e);
     }
   }
 
@@ -46,7 +116,7 @@ export class ContactsPage implements OnInit {
       const chatId = await this.chatService.getOrCreateChat(targetId);
       this.router.navigate(['/chat-detail', chatId]);
     } catch (e: any) {
-      console.error("Chat Init Error", e);
+      this.logger.error("Chat Init Error", e);
       const t = await this.toast.create({ message: 'Chat Error: ' + e.message, duration: 2000 });
       t.present();
     }

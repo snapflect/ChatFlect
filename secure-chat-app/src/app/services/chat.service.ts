@@ -1,11 +1,12 @@
 import { Injectable } from '@angular/core';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion } from 'firebase/firestore';
 import { environment } from 'src/environments/environment';
 import { Observable, BehaviorSubject } from 'rxjs';
 import { CryptoService } from './crypto.service';
 import { ApiService } from './api.service';
 import { ToastController } from '@ionic/angular';
+import { LoggingService } from './logging.service';
 
 @Injectable({
     providedIn: 'root'
@@ -17,7 +18,8 @@ export class ChatService {
     constructor(
         private crypto: CryptoService,
         private api: ApiService,
-        private toast: ToastController
+        private toast: ToastController,
+        private logger: LoggingService
     ) {
         const app = initializeApp(environment.firebase);
         this.db = getFirestore(app);
@@ -30,26 +32,42 @@ export class ChatService {
 
         onSnapshot(q, async (snapshot) => {
             const messages = [];
-            const privateKeyStr = localStorage.getItem('private_key'); // My Private Key
+            const privateKeyStr = localStorage.getItem('private_key');
+            const myId = String(localStorage.getItem('user_id')).trim();
 
             for (const d of snapshot.docs) {
                 const data = d.data();
+
+                // 1. Filter "Delete for Me"
+                if (data['deletedFor'] && data['deletedFor'].includes(myId)) {
+                    continue; // Skip this message entirely
+                }
+
                 let decrypted = "Wait...";
 
-                if (privateKeyStr) {
-                    // Check if I am the sender
-                    const myId = String(localStorage.getItem('user_id')).trim();
+                if (data['isDeleted']) {
+                    decrypted = "🚫 This message was deleted";
+                } else if (privateKeyStr) {
                     const senderId = String(data['senderId']).trim();
                     const isMe = senderId === myId;
 
-                    const cipherText = isMe ? (data['content_self'] || data['content']) : data['content'];
+                    // Support both 1v1 (string) and Group (JSON Map)
+                    let cipherText = '';
+                    if (isMe) {
+                        cipherText = data['content_self'] || (typeof data['content'] === 'string' ? data['content'] : data['content'][myId]);
+                    } else {
+                        if (typeof data['content'] === 'string') {
+                            cipherText = data['content']; // Old 1v1
+                        } else if (data['content'] && data['content'][myId]) {
+                            cipherText = data['content'][myId]; // Group Map
+                        }
+                    }
 
                     if (cipherText) {
                         try {
                             const plain = await this.crypto.decryptMessage(cipherText, privateKeyStr);
-                            if (!plain.includes("[Decryption Error]")) {
+                            if (!plain.includes("[Decryption Error]") && plain !== '') {
                                 decrypted = plain;
-                                // Check Metadata
                                 try {
                                     const metadata = JSON.parse(decrypted);
                                     if (metadata && metadata.type === 'image') decrypted = metadata;
@@ -61,17 +79,9 @@ export class ChatService {
                             decrypted = "🔒 Error";
                         }
                     } else {
-                        decrypted = "🔒 Encrypted";
+                        decrypted = "🔒 Encrypted (Not for you)";
                     }
                 }
-
-                // Handle "My" messages (already decrypted or raw) 
-                // Note: Sender usually stores local copy. Here we re-decrypt our own msg which works if we encrypt session key for ourselves too?
-                // Wait, current design only encrypts session key for Recipient.
-                // So Sender CANNOT decrypt their own sent messages if they reload!
-                // Fix for Phase 2: Encrypt session key for Sender too.
-                // For now, let's ignore that and focus on Receiver.
-
                 messages.push({ id: d.id, ...data, text: decrypted });
             }
             this.messagesSubject.next(messages);
@@ -80,124 +90,310 @@ export class ChatService {
         return this.messagesSubject.asObservable();
     }
 
-    // Send a message (Encrypted)
-    async sendMessage(chatId: string, plainText: string, senderId: string) {
-        try {
-            // 1. Get Chat Metadata to find Recipient
-            // Assuming chat doc has 'participants' array [id1, id2]
-            // In real app optimize this (cache, or pass recipient ID)
-            const chatDoc = await getDoc(doc(this.db, 'chats', chatId));
-            if (!chatDoc.exists()) return;
-
-            const participants = chatDoc.data()['participants'] || [];
-            const recipientId = participants.find((p: any) => p != senderId); // Simple 1v1 logic
-
-            if (!recipientId) return;
-
-            // 2. Get Recipient Public Key from API
-            console.log(`Getting key for recipient: ${recipientId}`);
-            const res: any = await this.api.get(`keys.php?user_id=${recipientId}`).toPromise();
-            if (!res || !res.public_key) {
-                console.error("Recipient Key not found for ID:", recipientId);
-                const t = await this.toast.create({
-                    message: 'Security Error: Recipient Public Key not found. Cannot send encrypted message.',
-                    duration: 3000,
-                    color: 'danger'
-                });
-                t.present();
-                return;
-            }
-            const recipientPubKeyStr = res.public_key;
-            console.log("Recipient Key Found. Encrypting...");
-
-            // 3. Encrypt for Recipient
-            const encryptedContent = await this.crypto.encryptMessage(plainText, recipientPubKeyStr);
-            console.log("Encrypted for recipient");
-
-            // 4. Encrypt for Self (so we can read our own history)
-            const myPubKey = localStorage.getItem('public_key');
-            let encryptedContentSelf = '';
-            if (myPubKey) {
-                encryptedContentSelf = await this.crypto.encryptMessage(plainText, myPubKey);
-            }
-
-            // 5. Send
-            const messagesRef = collection(this.db, 'chats', chatId, 'messages');
-            await addDoc(messagesRef, {
-                senderId,
-                content: encryptedContent,
-                content_self: encryptedContentSelf,
-                timestamp: Date.now()
+    getChatDetails(chatId: string) {
+        return new Observable(observer => {
+            onSnapshot(doc(this.db, 'chats', chatId), (doc) => {
+                observer.next(doc.exists() ? { id: doc.id, ...doc.data() } : null);
             });
+        });
+    }
 
-            // 6. Update Parent Chat Doc (Last Msg, Timestamp, Unread)
-            const chatRef = doc(this.db, 'chats', chatId);
-            await updateDoc(chatRef, {
-                lastMessage: 'Encrypted Message', // Placeholder for now
-                lastTimestamp: Date.now(),
-                [`unread_${recipientId}`]: increment(1)
+    // Create Group (MySQL + Firestore)
+    async createGroup(name: string, userIds: string[]) {
+        const myId = String(localStorage.getItem('user_id'));
+        // 1. Create in MySQL (Master)
+        const res: any = await this.api.post('groups.php', {
+            action: 'create',
+            name: name,
+            created_by: myId,
+            members: userIds
+        }).toPromise();
+
+        if (res && res.status === 'success') {
+            const groupId = res.group_id;
+
+            // 2. Create in Firestore
+            const chatRef = doc(this.db, 'chats', groupId);
+            await setDoc(chatRef, {
+                participants: [...userIds, myId], // Ensure all members + creator
+                isGroup: true,
+                groupName: name,
+                groupOwner: myId,
+                createdAt: Date.now(),
+                lastMessage: 'Group Created',
+                lastTimestamp: Date.now()
             });
-
-            console.log("Message sent to Firestore!");
-        } catch (e) {
-            console.error("Send Error", e);
+            return groupId;
+        } else {
+            throw new Error(res.error || 'Failed to create group');
         }
     }
 
-    async sendImageMessage(chatId: string, imageBlob: Blob, senderId: string) {
+    async sendMessage(chatId: string, plainText: string, senderId: string, replyTo: any = null) {
         try {
-            // 1. Encrypt Image Blob
-            const { encryptedBlob, key, iv } = await this.crypto.encryptBlob(imageBlob);
-
-            // 2. Upload Encrypted Blob
-            const formData = new FormData();
-            formData.append('file', encryptedBlob, 'secure_img.bin');
-
-            const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
-            if (!uploadRes || !uploadRes.url) {
-                console.error("Upload failed");
-                return;
-            }
-
-            // 3. Get Recipient Key
             const chatDoc = await getDoc(doc(this.db, 'chats', chatId));
             if (!chatDoc.exists()) return;
-            const participants = chatDoc.data()['participants'] || [];
-            const recipientId = participants.find((p: any) => p != senderId);
 
-            if (!recipientId) return;
+            const chatData = chatDoc.data();
+            const participants = chatData['participants'] || [];
+            const isGroup = !!chatData['isGroup'];
+            const contentMap: any = {};
 
-            const res: any = await this.api.get(`keys.php?user_id=${recipientId}`).toPromise();
-            if (!res || !res.public_key) return;
-
-            const recipientPubKey = await this.crypto.importKey(res.public_key, 'public');
-            const encryptedKey = await this.crypto.encryptSessionKey(key, recipientPubKey);
-
-            // Encrypt Session Key for Self too
-            const myPubKeyStr = localStorage.getItem('public_key');
-            let encryptedKeySelf = '';
-            if (myPubKeyStr) {
-                const myPubKey = await this.crypto.importKey(myPubKeyStr, 'public');
-                encryptedKeySelf = await this.crypto.encryptSessionKey(key, myPubKey);
+            // My Key
+            const myPubKey = localStorage.getItem('public_key');
+            let encryptedSelf = '';
+            if (myPubKey) {
+                encryptedSelf = await this.crypto.encryptMessage(plainText, myPubKey);
+                contentMap[senderId] = encryptedSelf;
             }
-            if (!encryptedKeySelf) console.warn("WARNING: encryptedKeySelf is EMPTY! Sender will not be able to view image.");
 
+            // Recipients
+            for (const p of participants) {
+                const pid = String(p).trim();
+                if (pid === String(senderId).trim()) continue;
 
-            // 4. Construct Metadata
-            const metadata = JSON.stringify({
-                type: 'image',
-                url: uploadRes.url,
-                k: encryptedKey,
-                ks: encryptedKeySelf, // k_self abbreviated
-                i: this.crypto.arrayBufferToBase64(iv.buffer as any)
+                try {
+                    const res: any = await this.api.get(`keys.php?user_id=${pid}`).toPromise();
+                    if (res && res.public_key) {
+                        const cypher = await this.crypto.encryptMessage(plainText, res.public_key);
+                        contentMap[pid] = cypher;
+                    }
+                } catch (e) {
+                    this.logger.error(`Failed to fetch key for ${pid}`, e);
+                }
+            }
+
+            // Payload
+            const payload: any = {
+                senderId,
+                timestamp: Date.now(),
+                content_self: encryptedSelf
+            };
+
+            // Add Reply Data (Keep Unencrypted for easy UI render, or encrypt if high security needed. 
+            // For MVP, we store a snippet unencrypted for context, or rely on client to fetch original msg by ID)
+            // Let's store snippet for performance.
+            if (replyTo) {
+                payload['replyTo'] = {
+                    id: replyTo.id,
+                    // text: replyTo.text, // REMOVED DUPLICATE
+                    senderId: replyTo.senderId,
+                    text: typeof replyTo.text === 'string' ? replyTo.text.substring(0, 50) : '[Media]'
+                };
+            }
+
+            if (isGroup) {
+                payload['content'] = contentMap;
+            } else {
+                const other = Object.keys(contentMap).find(k => k !== senderId);
+                payload['content'] = (other && contentMap[other]) ? contentMap[other] : contentMap;
+            }
+
+            await addDoc(collection(this.db, 'chats', chatId, 'messages'), payload);
+
+            // Update Parent
+            const updatePayload: any = {
+                lastMessage: isGroup ? `${plainText.substring(0, 20)}...` : 'Encrypted Message',
+                lastTimestamp: Date.now()
+            };
+
+            participants.forEach((p: any) => {
+                if (String(p) !== String(senderId)) {
+                    updatePayload[`unread_${p}`] = increment(1);
+                }
             });
 
-            // 5. Send as Standard Message (Encrypted Layer 2)
-            await this.sendMessage(chatId, metadata, senderId);
+            await updateDoc(doc(this.db, 'chats', chatId), updatePayload);
+            this.sendPushNotification(chatId, senderId, "🔒 Encrypted Message");
 
         } catch (e) {
-            console.error("Image Send Error", e);
+            this.logger.error("Send Error", e);
         }
+    }
+
+    async sendImageMessage(chatId: string, imageBlob: Blob, senderId: string, caption: string = '') {
+        try {
+            // 1. Upload Encryption (AES)
+            const { encryptedBlob: blobEnc, key: aesKey, iv } = await this.crypto.encryptBlob(imageBlob);
+            const aesKeyRaw = await window.crypto.subtle.exportKey("raw", aesKey);
+
+            // Upload Encrypted Blob
+            const formData = new FormData();
+            formData.append('file', blobEnc, 'secure_img.bin');
+
+            const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
+            if (!uploadRes || !uploadRes.url) throw new Error("Upload Failed");
+
+            // 2. Prepare Metadata
+            const metadata = {
+                type: 'image',
+                url: uploadRes.url,
+                i: this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer),
+                caption: caption
+            };
+
+            await this.handleMediaFanout(chatId, senderId, metadata, aesKeyRaw, '📷 Photo');
+
+        } catch (e) {
+            this.logger.error("Image Send Failed", e);
+        }
+    }
+
+    async sendAudioMessage(chatId: string, audioBlob: Blob, senderId: string, duration: number) {
+        try {
+            const { encryptedBlob: blobEnc, key: aesKey, iv } = await this.crypto.encryptBlob(audioBlob);
+            const aesKeyRaw = await window.crypto.subtle.exportKey("raw", aesKey);
+
+            const formData = new FormData();
+            formData.append('file', blobEnc, 'voice.bin');
+
+            const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
+            if (!uploadRes || !uploadRes.url) throw new Error("Audio Upload Failed");
+
+            const metadata = {
+                type: 'audio',
+                url: uploadRes.url,
+                i: this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer),
+                d: duration
+            };
+
+            await this.handleMediaFanout(chatId, senderId, metadata, aesKeyRaw, '🎤 Voice Note');
+
+        } catch (e) {
+            this.logger.error("Audio Send Failed", e);
+        }
+    }
+
+    async sendDocumentMessage(chatId: string, file: File, senderId: string) {
+        try {
+            const { encryptedBlob: blobEnc, key: aesKey, iv } = await this.crypto.encryptBlob(file);
+            const aesKeyRaw = await window.crypto.subtle.exportKey("raw", aesKey);
+
+            const formData = new FormData();
+            formData.append('file', blobEnc, 'doc.bin');
+
+            const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
+            if (!uploadRes || !uploadRes.url) throw new Error("Doc Upload Failed");
+
+            const metadata = {
+                type: 'document',
+                url: uploadRes.url,
+                i: this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer),
+                name: file.name,
+                size: file.size,
+                mime: file.type
+            };
+
+            await this.handleMediaFanout(chatId, senderId, metadata, aesKeyRaw, '📄 Document');
+
+        } catch (e) {
+            this.logger.error("Doc Send Failed", e);
+        }
+    }
+
+    async sendLocationMessage(chatId: string, lat: number, lng: number, senderId: string) {
+        try {
+            const dummyKey = await this.crypto.generateSessionKey();
+            const dummyKeyRaw = await window.crypto.subtle.exportKey("raw", dummyKey);
+
+            const metadata = {
+                type: 'location',
+                lat: lat,
+                lng: lng
+            };
+
+            await this.handleMediaFanout(chatId, senderId, metadata, dummyKeyRaw, '📍 Location');
+
+        } catch (e) {
+            this.logger.error("Location Send Failed", e);
+        }
+    }
+
+    // Trigger Push Notification
+    private async sendPushNotification(chatId: string, senderId: string, messageText: string, excludeSender: boolean = true) {
+        // 1. Get Participants
+        const chatDoc = await getDoc(doc(this.db, 'chats', chatId));
+        if (!chatDoc.exists()) return;
+
+        const data = chatDoc.data();
+        const participants = data['participants'] || [];
+        const isGroup = data['isGroup'];
+        const chatName = data['name'] || 'New Message'; // Use group name or generic
+
+        // 2. Loop and Send
+        for (const p of participants) {
+            const pid = String(p).trim();
+            if (excludeSender && pid === String(senderId).trim()) continue;
+
+            // TODO: Get Sender Name? For now use generic or chat name
+            const title = isGroup ? chatName : 'New Secure Message';
+
+            this.api.post('push.php', {
+                target_user_id: pid,
+                title: title,
+                body: messageText // Note: This might be encrypted content or just "New Audio/Image"
+            }).subscribe();
+        }
+    }
+
+    getChats(userId: string) {
+        return this.getMyChats();
+    }
+
+    // Helper to reduce duplication
+    public async handleMediaFanout(chatId: string, senderId: string, metadata: any, aesKeyRaw: ArrayBuffer, lastMsgText: string) {
+        // 3. Encrypt Metadata (Fan-out)
+        const chatDoc = await getDoc(doc(this.db, 'chats', chatId));
+        const participants = chatDoc.exists() ? chatDoc.data()['participants'] : [];
+        const isGroup = chatDoc.exists() ? chatDoc.data()['isGroup'] : false;
+
+        const contentMap: any = {};
+        const myPubKey = localStorage.getItem('public_key');
+        let encryptedSelf = '';
+
+        if (myPubKey) {
+            const encKey = await this.crypto.encryptMessage(this.crypto.arrayBufferToBase64(aesKeyRaw), myPubKey);
+            const myMeta = { ...metadata, k: encKey };
+            encryptedSelf = await this.crypto.encryptMessage(JSON.stringify(myMeta), myPubKey);
+            contentMap[senderId] = encryptedSelf;
+        }
+
+        for (const p of participants) {
+            const pid = String(p).trim();
+            if (pid === String(senderId).trim()) continue;
+
+            const res: any = await this.api.get(`keys.php?user_id=${pid}`).toPromise();
+            if (res && res.public_key) {
+                const encKey = await this.crypto.encryptMessage(this.crypto.arrayBufferToBase64(aesKeyRaw), res.public_key);
+                const userMeta = { ...metadata, k: encKey };
+                const cypher = await this.crypto.encryptMessage(JSON.stringify(userMeta), res.public_key);
+                contentMap[pid] = cypher;
+            }
+        }
+
+        // 4. Save
+        const payload: any = {
+            senderId,
+            timestamp: Date.now(),
+            content_self: encryptedSelf
+        };
+
+        if (isGroup) {
+            payload['content'] = contentMap;
+        } else {
+            const other = Object.keys(contentMap).find(k => k !== senderId);
+            payload['content'] = contentMap[other!] || contentMap;
+        }
+
+        await addDoc(collection(this.db, 'chats', chatId, 'messages'), payload);
+
+        await updateDoc(doc(this.db, 'chats', chatId), {
+            lastMessage: lastMsgText,
+            lastTimestamp: Date.now()
+        });
+
+        // After fanout, trigger push
+        this.sendPushNotification(chatId, senderId, lastMsgText);
     }
 
     async getOrCreateChat(otherUserId: string) {
@@ -246,6 +442,46 @@ export class ChatService {
         const chatRef = doc(this.db, 'chats', chatId);
         await updateDoc(chatRef, {
             [`unread_${myId}`]: 0
+        });
+    }
+    async deleteMessage(chatId: string, messageId: string, forEveryone: boolean) {
+        const myId = String(localStorage.getItem('user_id'));
+        const msgRef = doc(this.db, 'chats', chatId, 'messages', messageId);
+
+        if (forEveryone) {
+            // Delete content globally
+            await updateDoc(msgRef, {
+                isDeleted: true,
+                content: '',
+                content_self: '',
+                deletedBy: myId
+            });
+            // Optional: Trigger push to update UI? Not strictly needed for silent update.
+        } else {
+            // Delete for Me Only
+            await updateDoc(msgRef, {
+                deletedFor: arrayUnion(myId)
+            });
+        }
+    }
+
+    async addReaction(chatId: string, messageId: string, reaction: string) {
+        const myId = String(localStorage.getItem('user_id'));
+        const msgRef = doc(this.db, 'chats', chatId, 'messages', messageId);
+
+        await updateDoc(msgRef, {
+            [`reactions.${myId}`]: reaction
+        });
+    }
+
+    async removeReaction(chatId: string, messageId: string) {
+        const myId = String(localStorage.getItem('user_id'));
+        const msgRef = doc(this.db, 'chats', chatId, 'messages', messageId);
+
+        // Note: Ideally use deleteField() from firestore. 
+        // For now, setting to null works if UI handles it.
+        await updateDoc(msgRef, {
+            [`reactions.${myId}`]: null
         });
     }
 }

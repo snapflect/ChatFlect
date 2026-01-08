@@ -2,6 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { ProfileService } from 'src/app/services/profile.service';
 import { ToastController, NavController } from '@ionic/angular';
+import { LoggingService } from 'src/app/services/logging.service';
 
 @Component({
   selector: 'app-profile',
@@ -20,7 +21,8 @@ export class ProfilePage implements OnInit {
   constructor(
     private profileService: ProfileService,
     private toast: ToastController,
-    private nav: NavController
+    private nav: NavController,
+    private logger: LoggingService
   ) { }
 
   ngOnInit() {
@@ -34,7 +36,7 @@ export class ProfilePage implements OnInit {
         this.profile = { ...this.profile, ...res };
       }
     } catch (e) {
-      console.error(e);
+      this.logger.error("Profile Load Error", e);
     }
   }
 
@@ -74,7 +76,7 @@ export class ProfilePage implements OnInit {
         this.uploadImage(formData);
       }
     } catch (e) {
-      console.error('Camera Error', e);
+      this.logger.error('Camera Error', e);
     }
   }
 
@@ -103,7 +105,7 @@ export class ProfilePage implements OnInit {
         await this.toast.create({ message: 'Photo Uploaded!', duration: 1500 }).then(t => t.present());
       }
     } catch (e) {
-      console.error(e);
+      this.logger.error("Upload Error", e);
       await this.toast.create({ message: 'Upload Failed', duration: 1500 }).then(t => t.present());
     }
   }

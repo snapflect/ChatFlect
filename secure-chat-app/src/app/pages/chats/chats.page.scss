@@ -1,0 +1,109 @@
+ion-content {
+    --background: var(--ion-background-color);
+}
+
+.chat-item {
+    --padding-start: 10px;
+    --padding-end: 10px;
+    --inner-padding-end: 10px;
+    margin-bottom: 15px;
+    /* Spacing between items */
+    border-radius: 16px;
+    --background: transparent;
+}
+
+.chat-item:hover {
+    --background: rgba(255, 255, 255, 0.03);
+}
+
+.chat-avatar {
+    position: relative;
+    width: 55px;
+    height: 55px;
+    margin-right: 15px;
+    border: 2px solid var(--ion-color-secondary);
+    padding: 2px;
+}
+
+.online-indicator {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 14px;
+    height: 14px;
+    background-color: var(--ion-color-success);
+    border: 2px solid var(--ion-card-background);
+    border-radius: 50%;
+}
+
+.chat-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.chat-name {
+    font-weight: 700;
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.chat-time {
+    font-size: 0.8rem;
+    color: var(--ion-color-step-500);
+}
+
+.chat-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.chat-preview {
+    margin: 0;
+    color: var(--ion-color-step-400);
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 80%;
+}
+
+.unread-msg {
+    color: var(--ion-text-color) !important;
+    font-weight: 600;
+}
+
+.unread-badge {
+    border-radius: 50%;
+    padding: 6px;
+    min-width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+}
+
+.bg-transparent {
+    background: transparent !important;
+}
+
+/* Empty State */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 60vh;
+    text-align: center;
+    color: var(--ion-color-step-500);
+}
+
+.empty-icon {
+    font-size: 4rem;
+    color: var(--ion-color-primary);
+    opacity: 0.5;
+    margin-bottom: 20px;
+}

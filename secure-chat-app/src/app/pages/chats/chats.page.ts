@@ -28,15 +28,20 @@ export class ChatsPage implements OnInit {
         this.chats = res;
         // Resolve Names
         for (const chat of this.chats) {
-          const otherId = chat.participants.find((p: any) => String(p) !== String(this.myId));
-          if (otherId) {
-            // Try to find in contacts
-            const contact = this.contactService.localContacts.find((c: any) => String(c.user_id) === String(otherId));
-            if (contact) {
-              chat.name = contact.first_name + ' ' + contact.last_name;
-              chat.avatar = contact.photo_url;
-            } else {
-              chat.name = `User ${otherId.substr(0, 4)}`;
+          if (chat.isGroup) {
+            chat.name = chat.groupName || 'Unnamed Group';
+            chat.avatar = 'assets/group_placeholder.png'; // Todo: groupIcon
+          } else {
+            const otherId = chat.participants.find((p: any) => String(p) !== String(this.myId));
+            if (otherId) {
+              // Try to find in contacts
+              const contact = this.contactService.localContacts.find((c: any) => String(c.user_id) === String(otherId));
+              if (contact) {
+                chat.name = contact.first_name + ' ' + contact.last_name;
+                chat.avatar = contact.photo_url;
+              } else {
+                chat.name = `User ${otherId.substr(0, 4)}`;
+              }
             }
           }
         }

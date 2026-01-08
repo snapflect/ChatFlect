@@ -1,0 +1,26 @@
+<ion-header class="ion-no-border">
+    <ion-toolbar>
+        <ion-title class="gradient-text">Forward to...</ion-title>
+        <ion-buttons slot="end">
+            <ion-button (click)="close()">
+                <ion-icon name="close"></ion-icon>
+            </ion-button>
+        </ion-buttons>
+    </ion-toolbar>
+</ion-header>
+
+<ion-content>
+    <ion-list class="bg-transparent">
+        <ion-item *ngFor="let chat of chats" (click)="selectChat(chat)" detail lines="none" class="contact-item">
+            <ion-avatar slot="start">
+                <img
+                    [src]="chat.isGroup ? (chat.icon || 'assets/group_placeholder.png') : (chat.otherUser?.photo_url || 'assets/avatar-placeholder.png')" />
+            </ion-avatar>
+            <ion-label>
+                <h2>{{ chat.isGroup ? chat.groupName : (chat.otherUser?.first_name + ' ' + (chat.otherUser?.last_name ||
+                    '')) }}</h2>
+                <p>{{ chat.isGroup ? 'Group' : 'Personal Chat' }}</p>
+            </ion-label>
+        </ion-item>
+    </ion-list>
+</ion-content>

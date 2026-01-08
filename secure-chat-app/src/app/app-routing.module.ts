@@ -38,6 +38,30 @@ const routes: Routes = [
     path: 'chat-detail/:id',
     loadChildren: () => import('./pages/chat-detail/chat-detail.module').then(m => m.ChatDetailPageModule)
   },
+  {
+    path: 'new-group',
+    loadChildren: () => import('./pages/new-group/new-group.module').then( m => m.NewGroupPageModule)
+  },
+  {
+    path: 'status',
+    loadChildren: () => import('./pages/status/status.module').then( m => m.StatusPageModule)
+  },
+  {
+    path: 'status-viewer',
+    loadChildren: () => import('./pages/status-viewer/status-viewer.module').then( m => m.StatusViewerPageModule)
+  },
+  {
+    path: 'settings',
+    loadChildren: () => import('./pages/settings/settings.module').then( m => m.SettingsPageModule)
+  },
+  {
+    path: 'group-info',
+    loadChildren: () => import('./pages/group-info/group-info.module').then( m => m.GroupInfoPageModule)
+  },
+  {
+    path: 'image-preview-modal',
+    loadChildren: () => import('./pages/image-preview-modal/image-preview-modal.module').then( m => m.ImagePreviewModalPageModule)
+  },
 ];
 
 @NgModule({

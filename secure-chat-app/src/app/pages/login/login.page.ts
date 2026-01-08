@@ -2,6 +2,7 @@ import { Component, NgZone } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from 'src/app/services/auth.service';
 import { ToastController } from '@ionic/angular';
+import { LoggingService } from 'src/app/services/logging.service';
 
 @Component({
   selector: 'app-login',
@@ -18,7 +19,8 @@ export class LoginPage {
     private auth: AuthService,
     private router: Router,
     private toast: ToastController,
-    private zone: NgZone
+    private zone: NgZone,
+    private logger: LoggingService
   ) { }
 
   async sendOtp() {
@@ -28,7 +30,7 @@ export class LoginPage {
         this.showToast('OTP Sent! (Use 123456)');
       },
       error: (err) => {
-        console.error(err);
+        this.logger.error("Login Error", err);
         let msg = 'Error sending OTP';
         if (err.error && err.error.error) {
           msg = err.error.error; // PHP Error
@@ -46,7 +48,7 @@ export class LoginPage {
       this.showToast('Login Successful');
       this.zone.run(() => {
         this.router.navigate(['/profile']).then(nav => {
-          console.log('Navigation result:', nav);
+          this.logger.log('Navigation result:', nav);
           if (!nav) this.showToast('Navigation Failed');
         });
       });
