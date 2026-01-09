@@ -15,6 +15,9 @@ import { ForwardModalPageModule } from './pages/forward-modal/forward-modal.modu
 import { ReactionPickerComponent } from './components/reaction-picker/reaction-picker.component';
 import { GlobalErrorHandler } from './services/global-error-handler';
 
+import { environment } from 'src/environments/environment';
+import { initializeApp } from 'firebase/app';
+
 @NgModule({
   declarations: [AppComponent, ReactionPickerComponent],
   imports: [
@@ -31,4 +34,13 @@ import { GlobalErrorHandler } from './services/global-error-handler';
   ],
   bootstrap: [AppComponent],
 })
-export class AppModule { }
+export class AppModule {
+  constructor() {
+    try {
+      initializeApp(environment.firebase);
+      console.log('Firebase Initialized Globally');
+    } catch (e) {
+      console.warn('Firebase already initialized or error', e);
+    }
+  }
+}

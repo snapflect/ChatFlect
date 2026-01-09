@@ -3,7 +3,22 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'io.ionic.starter',
   appName: 'SecureChat',
-  webDir: 'www'
+  webDir: 'www',
+  server: {
+    androidScheme: 'http',
+    cleartext: true
+  },
+  plugins: {
+    SplashScreen: {
+      launchShowDuration: 3000,
+      launchAutoHide: true,
+      backgroundColor: "#ffffffff",
+      androidSplashResourceName: "splash",
+      showSpinner: true,
+      androidSpinnerStyle: "large",
+      spinnerColor: "#999999"
+    }
+  }
 };
 
 export default config;
