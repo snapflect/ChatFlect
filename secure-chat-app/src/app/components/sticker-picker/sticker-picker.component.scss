@@ -1,0 +1,33 @@
+.sticker-container {
+    height: 300px;
+    background: var(--ion-background-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.sticker-grid {
+    flex: 1;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 5px;
+    padding: 5px;
+}
+
+.sticker-item {
+    cursor: pointer;
+    border-radius: 8px;
+    overflow: hidden;
+    height: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f0f0f0;
+    /* placeholder */
+
+    img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+}

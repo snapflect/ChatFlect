@@ -1,68 +1,92 @@
 <?php
 require 'db.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $user_id = $conn->real_escape_string($_GET['user_id']);
-    $sql = "SELECT user_id, first_name, last_name, short_note, photo_url FROM users WHERE user_id = '$user_id'";
-    $result = $conn->query($sql);
-    if ($result->num_rows > 0) {
-        echo json_encode($result->fetch_assoc());
-    } else {
-        echo json_encode(["error" => "User not found"]);
-    }
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type");
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
     exit;
 }
 
-$data = json_decode(file_get_contents("php://input"), true);
+// POST { phone_number, public_key } -> Register/Login Confirm
+// POST { user_id, first_name, last_name, ... } -> Update Profile
+// GET { user_id } -> Get Profile
 
-if (isset($data['action']) && $data['action'] === 'confirm_otp') {
-    $phone = $conn->real_escape_string($data['phone_number']);
-    $pubKey = $conn->real_escape_string($data['public_key']);
+$method = $_SERVER['REQUEST_METHOD'];
+$json = file_get_contents("php://input");
+$data = json_decode($json);
 
-    $check = $conn->query("SELECT user_id FROM users WHERE phone_number = '$phone'");
-
-    if ($check->num_rows > 0) {
-        $row = $check->fetch_assoc();
-        echo json_encode(["status" => "success", "user_id" => $row['user_id'], "message" => "Login successful"]);
-    } else {
-        $user_id = uniqid('user_');
-        $sql = "INSERT INTO users (user_id, phone_number, public_key) VALUES ('$user_id', '$phone', '$pubKey')";
-        if ($conn->query($sql)) {
-            echo json_encode(["status" => "success", "user_id" => $user_id]);
-        } else {
-            http_response_code(500);
-            echo json_encode(["error" => $conn->error]);
-        }
-    }
+if ($method === 'POST' && json_last_error() !== JSON_ERROR_NONE) {
+    http_response_code(400);
+    echo json_encode(["error" => "Invalid JSON"]);
     exit;
 }
 
-if (isset($data['user_id'])) {
-    $uid = $conn->real_escape_string($data['user_id']);
-    $fname = isset($data['first_name']) ? $conn->real_escape_string($data['first_name']) : '';
-    $lname = isset($data['last_name']) ? $conn->real_escape_string($data['last_name']) : '';
-    $note = isset($data['short_note']) ? $conn->real_escape_string($data['short_note']) : '';
-    $photo = isset($data['photo_url']) ? $conn->real_escape_string($data['photo_url']) : '';
+if ($method === 'POST') {
+    if (isset($data->action) && $data->action === 'confirm_otp') {
+        // Finalize registration
+        $phone = $data->phone_number;
+        $publicKey = $data->public_key;
 
-    $updates = [];
-    if ($fname)
-        $updates[] = "first_name='$fname'";
-    if ($lname)
-        $updates[] = "last_name='$lname'";
-    if ($note)
-        $updates[] = "short_note='$note'";
-    if ($photo)
-        $updates[] = "photo_url='$photo'";
+        // Check if user exists
+        $stmt = $pdo->prepare("SELECT id, user_id FROM users WHERE phone_number = ?");
+        $stmt->execute([$phone]);
+        $user = $stmt->fetch();
 
-    if (count($updates) > 0) {
-        $sql = "UPDATE users SET " . implode(', ', $updates) . " WHERE user_id='$uid'";
-        if ($conn->query($sql)) {
-            echo json_encode(["status" => "success"]);
+        if ($user) {
+            // User exists, update key if needed? Or just return ID
+            // For E2E, changing key might break old chats, be careful. 
+            // For Phase 1, we assume new install = new key = new identity
+            // Update Key
+            $stmt = $pdo->prepare("UPDATE users SET public_key = ? WHERE id = ?");
+            $stmt->execute([$publicKey, $user['id']]);
+
+            // Check if user_id (UUID) is missing (Migration for old users)
+            if (empty($user['user_id'])) {
+                $publicUserId = bin2hex(random_bytes(16));
+                $stmt = $pdo->prepare("UPDATE users SET user_id = ? WHERE id = ?");
+                $stmt->execute([$publicUserId, $user['id']]);
+            } else {
+                $publicUserId = $user['user_id'];
+            }
         } else {
-            echo json_encode(["error" => $conn->error]);
+            // New User
+            // Generate a random public user_id (32 hex chars)
+            $publicUserId = bin2hex(random_bytes(16));
+
+            $stmt = $pdo->prepare("INSERT INTO users (user_id, phone_number, public_key) VALUES (?, ?, ?)");
+            $stmt->execute([$publicUserId, $phone, $publicKey]);
+            // $userId = $pdo->lastInsertId(); // We don't want to expose this authentication-wise if we want consistency
+
+            // Note: We don't use a separate profiles table anymore. Columns are in users.
         }
-    } else {
-        echo json_encode(["status" => "no_changes"]);
+        echo json_encode(["status" => "success", "user_id" => $publicUserId]);
+    } elseif (isset($data->user_id)) {
+        // Update Profile
+        $userId = $data->user_id;
+
+        // Sanitization
+        $firstName = htmlspecialchars(strip_tags($data->first_name ?? ''));
+        $lastName = htmlspecialchars(strip_tags($data->last_name ?? ''));
+        $note = htmlspecialchars(strip_tags($data->short_note ?? ''));
+
+        // Photo URL would be handled by a file upload script usually, skipping for brevity, assume URL sent
+        $photoUrl = filter_var($data->photo_url ?? '', FILTER_SANITIZE_URL);
+
+        // UPDATE users table directly
+        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, short_note=?, photo_url=? WHERE id=?");
+        $stmt->execute([$firstName, $lastName, $note, $photoUrl, $userId]);
+
+        echo json_encode(["status" => "profile_updated"]);
     }
+} elseif ($method === 'GET') {
+    // Get Profile
+    $userId = $_GET['user_id'];
+    $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+    $stmt->execute([$userId]);
+    $profile = $stmt->fetch();
+    echo json_encode($profile);
 }
 ?>

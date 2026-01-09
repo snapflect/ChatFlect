@@ -26,12 +26,21 @@
                 "output": "assets"
               },
               {
+                "glob": "firebase-messaging-sw.js",
+                "input": "src",
+                "output": "/"
+              },
+              {
                 "glob": "**/*.svg",
                 "input": "node_modules/ionicons/dist/ionicons/svg",
                 "output": "./svg"
               }
             ],
-            "styles": ["src/global.scss", "src/theme/variables.scss"],
+            "styles": [
+              "src/global.scss",
+              "src/theme/variables.scss",
+              "node_modules/leaflet/dist/leaflet.css"
+            ],
             "scripts": []
           },
           "configurations": {
@@ -111,7 +120,10 @@
                 "output": "./svg"
               }
             ],
-            "styles": ["src/global.scss", "src/theme/variables.scss"],
+            "styles": [
+              "src/global.scss",
+              "src/theme/variables.scss"
+            ],
             "scripts": []
           },
           "configurations": {

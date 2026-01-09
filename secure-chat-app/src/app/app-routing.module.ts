@@ -70,6 +70,14 @@ const routes: Routes = [
     path: 'backup',
     loadChildren: () => import('./pages/backup/backup.module').then(m => m.BackupPageModule)
   },
+  {
+    path: 'group-call',
+    loadChildren: () => import('./pages/group-call/group-call.module').then( m => m.GroupCallPageModule)
+  },
+  {
+    path: 'live-map',
+    loadChildren: () => import('./pages/live-map/live-map.module').then( m => m.LiveMapPageModule)
+  },
 ];
 
 @NgModule({

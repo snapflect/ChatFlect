@@ -62,10 +62,19 @@
         <!-- Forwarded Label -->
         <p *ngIf="msg.forwarded" class="forwarded-label"><ion-icon name="arrow-redo"></ion-icon> Forwarded</p>
 
-        <!-- Image -->
-        <div *ngIf="isImage(msg.text)" class="media-container">
-          <img [src]="getImgUrl(msg.text)" (click)="openImage(getImgUrl(msg.text))" />
-          <p *ngIf="msg.text.caption" class="caption">{{ msg.text.caption }}</p>
+        <div class="msg-content">
+          <img *ngIf="isImage(msg.text)" [src]="getImgUrl(msg.text)" (click)="openImage(getImgUrl(msg.text))">
+          <img *ngIf="isSticker(msg.text)" [src]="getStickerUrl(msg.text)" class="sticker-img">
+          <div
+            *ngIf="!isImage(msg.text) && !isSticker(msg.text) && (msg.text?.type !== 'audio' && msg.text?.type !== 'location')">
+            {{ msg.text }}</div>
+
+          <div *ngIf="msg.text?.type === 'audio'">
+            <audio controls [src]="msg.text.url"></audio>
+          </div>
+
+          <!-- Location Check -->
+          <!-- Ideally add isLocation(msg.text) later -->
         </div>
 
         <!-- Audio -->
@@ -93,17 +102,17 @@
         </div>
 
         <!-- Text -->
-        <p *ngIf="getMsgType(msg.text) === 'text'" class="msg-text">
+        <div *ngIf="getMsgType(msg.text) === 'text'" class="msg-text">
           {{ msg.text }}
           <!-- Link Preview -->
-        <div *ngIf="msg.linkMeta" class="link-preview" (click)="openLink(msg.linkMeta.url)">
-          <img *ngIf="msg.linkMeta.image" [src]="msg.linkMeta.image" />
-          <div class="link-info">
-            <b>{{ msg.linkMeta.domain }}</b>
-            <p>{{ msg.linkMeta.title }}</p>
+          <div *ngIf="msg.linkMeta" class="link-preview" (click)="openLink(msg.linkMeta.url)">
+            <img *ngIf="msg.linkMeta.image" [src]="msg.linkMeta.image" />
+            <div class="link-info">
+              <b>{{ msg.linkMeta.domain }}</b>
+              <p>{{ msg.linkMeta.title }}</p>
+            </div>
           </div>
         </div>
-        </p>
 
         <!-- Footer: Time + Read Status + Reactions -->
         <div class="msg-footer">
@@ -137,8 +146,14 @@
         <ion-icon name="add" slot="icon-only"></ion-icon>
       </ion-button>
 
-      <ion-input placeholder="Type a secure message..." [(ngModel)]="newMessage" (ngModelChange)="onTyping()"
-        class="msg-input"></ion-input>
+      <!-- Input Field -->
+      <ion-textarea autoGrow="true" rows="1" placeholder="Type a message..." [(ngModel)]="newMessage"
+        (ngModelChange)="onTyping()" class="chat-input-area"></ion-textarea>
+
+      <!-- Sticker Toggle -->
+      <ion-button fill="clear" (click)="toggleStickerPicker()">
+        <ion-icon name="happy-outline" slot="icon-only"></ion-icon>
+      </ion-button>
 
       <div *ngIf="!newMessage.trim()">
         <ion-button fill="clear" class="icon-btn">

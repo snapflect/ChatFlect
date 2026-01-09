@@ -8,7 +8,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit();
 }
 
-// IMPORTANT: UPDATE THESE CREDENTIALS
 // Production Credentials (Hostinger)
 $servername = 'localhost';
 $username = 'u668772406_chat_admin';

@@ -44,11 +44,17 @@ export class CallModalPage implements OnInit, OnDestroy {
             // Ideally pass it in navParams for outgoing too
         }
 
-        // Subscribe to Remote Stream
-        this.subRemote = this.callService.remoteStream.subscribe(stream => {
-            if (stream) {
-                this.remoteStream = stream;
-                this.attachRemoteMedia(stream);
+        // Subscribe to Remote Streams (Map)
+        this.subRemote = this.callService.remoteStreams.subscribe(map => {
+            if (map && map.size > 0) {
+                // For legacy modal (1:1), just take the first stream
+                const stream = map.values().next().value;
+                if (stream) {
+                    this.remoteStream = stream;
+                    this.attachRemoteMedia(stream);
+                }
+            } else {
+                this.remoteStream = null;
             }
         });
 

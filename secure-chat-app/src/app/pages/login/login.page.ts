@@ -1,8 +1,10 @@
-import { Component, NgZone } from '@angular/core';
+import { Component, NgZone, ViewChild, ElementRef, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from 'src/app/services/auth.service';
 import { ToastController } from '@ionic/angular';
 import { LoggingService } from 'src/app/services/logging.service';
+import { LinkService } from 'src/app/services/link.service';
+import * as QRCode from 'qrcode';
 
 @Component({
   selector: 'app-login',
@@ -10,18 +12,94 @@ import { LoggingService } from 'src/app/services/logging.service';
   styleUrls: ['./login.page.scss'],
   standalone: false
 })
-export class LoginPage {
+export class LoginPage implements OnDestroy {
+  @ViewChild('qrCanvas') qrCanvas!: ElementRef;
+
+  mode: 'phone' | 'qr' = 'phone';
   phoneNumber = '';
   otp = '';
   otpSent = false;
+  qrLoading = false;
+
+  private syncSub: any;
 
   constructor(
     private auth: AuthService,
+    private linkService: LinkService,
     private router: Router,
     private toast: ToastController,
     private zone: NgZone,
     private logger: LoggingService
   ) { }
+
+  ngOnDestroy() {
+    if (this.syncSub) this.syncSub.unsubscribe();
+  }
+
+  segmentChanged(ev: any) {
+    this.mode = ev.detail.value;
+    if (this.mode === 'qr') {
+      this.initQrLogin();
+    } else {
+      if (this.syncSub) this.syncSub.unsubscribe();
+    }
+  }
+
+  async initQrLogin() {
+    this.qrLoading = true;
+    try {
+      // 1. Generate Session
+      const session = await this.linkService.generateLinkSession();
+
+      // 2. Render QR
+      // Payload: SessionID + PubKey
+      const qrData = JSON.stringify({
+        sid: session.sessionId,
+        pk: session.publicKey
+      });
+
+      // Wait for view update
+      setTimeout(() => {
+        if (this.qrCanvas) {
+          QRCode.toCanvas(this.qrCanvas.nativeElement, qrData, {
+            width: 256,
+            margin: 2,
+            color: {
+              dark: '#5260ff', // Primary
+              light: '#ffffff'
+            }
+          }, (error: any) => {
+            if (error) this.logger.error('QR Gen Error', error);
+          });
+        }
+      }, 100);
+
+      // 3. Listen
+      this.syncSub = this.linkService.listenForSync(session.sessionId).subscribe(async (data) => {
+        if (data && data.payload) {
+          this.logger.log("Sync Payload Received!");
+          await this.handleSync(data.payload, session.privateKey, session.sessionId);
+        }
+      });
+
+    } catch (e) {
+      this.logger.error("QR Init Failed", e);
+      this.showToast("Failed to generate QR code");
+    } finally {
+      this.qrLoading = false;
+    }
+  }
+
+  async handleSync(payloadEnc: string, privKey: string, sessionId: string) {
+    try {
+      await this.linkService.completeHandshake(payloadEnc, privKey);
+      await this.linkService.cleanup(sessionId);
+      this.showToast("Device Linked Successfully!");
+      // Reload happens in service, but we can nav just in case
+    } catch (e) {
+      this.showToast("Linking Failed: Decryption Error");
+    }
+  }
 
   async sendOtp() {
     this.auth.requestOtp(this.phoneNumber).subscribe({

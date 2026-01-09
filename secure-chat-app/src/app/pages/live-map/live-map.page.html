@@ -1,0 +1,15 @@
+<ion-header [translucent]="true">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-back-button defaultHref="/tabs/chats"></ion-back-button>
+    </ion-buttons>
+    <ion-title>Live Location</ion-title>
+    <ion-buttons slot="end">
+      <ion-button color="danger" (click)="stopSharing()">Stop</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <div id="mapId" style="width: 100%; height: 100%;"></div>
+</ion-content>

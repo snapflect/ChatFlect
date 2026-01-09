@@ -3,6 +3,9 @@ import { NavController, AlertController } from '@ionic/angular';
 import { AuthService } from 'src/app/services/auth.service';
 import { ApiService } from 'src/app/services/api.service';
 import { LoggingService } from 'src/app/services/logging.service';
+import { CryptoService } from 'src/app/services/crypto.service';
+import { LinkService } from 'src/app/services/link.service';
+import { BarcodeScanner, BarcodeFormat } from '@capacitor-mlkit/barcode-scanning';
 
 @Component({
   selector: 'app-settings',
@@ -24,7 +27,9 @@ export class SettingsPage implements OnInit {
     private nav: NavController,
     private api: ApiService,
     private logger: LoggingService,
-    private alertCtrl: AlertController
+    private alertCtrl: AlertController,
+    private crypto: CryptoService,
+    private linkService: LinkService
   ) { }
 
   ngOnInit() {
@@ -99,8 +104,59 @@ export class SettingsPage implements OnInit {
     // Navigate to notification settings 
   }
 
+  async resetKeys() {
+    // ... (existing)
+  }
+
+  // --- DEVICE LINKING ---
+  async linkDevice() {
+    this.isLoading = true;
+    try {
+      // 1. Install Module (needed for Capacitor MLKit)
+      // On Web this throws/does nothing? We need to handle web carefully.
+      // Ideally run only if Capacitor.isNativePlatform()
+
+      const { available } = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable();
+      if (!available) {
+        await BarcodeScanner.installGoogleBarcodeScannerModule();
+      }
+
+      // 2. Scan
+      const { barcodes } = await BarcodeScanner.scan({
+        formats: [BarcodeFormat.QrCode]
+      });
+
+      if (barcodes.length > 0) {
+        const raw = barcodes[0].rawValue;
+        if (raw) {
+          try {
+            const data = JSON.parse(raw);
+            if (data.sid && data.pk) {
+              await this.linkService.sendSyncData(data.sid, data.pk);
+              window.alert(`Device Linked! Desktop should reload automatically.`);
+            } else {
+              window.alert("Invalid QR Code");
+            }
+          } catch (e) {
+            window.alert("Invalid QR Format");
+          }
+        }
+      }
+
+    } catch (e: any) {
+      if (e.message.includes('canceled')) {
+        // User canceled
+      } else {
+        this.logger.error("Scan Failed", e);
+        window.alert("Scan Failed: " + e.message);
+      }
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
   openPrivacy() {
-    // Navigate to privacy settings
+    // ... 
   }
 
   async deleteAccount() {

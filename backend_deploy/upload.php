@@ -1,22 +1,42 @@
 <?php
-require 'db.php';
+// upload.php - Blind Storage for Encrypted Blobs
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type");
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
-    $target_dir = "uploads/";
-    if (!file_exists($target_dir)) {
-        mkdir($target_dir, 0777, true);
-    }
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
 
-    $ext = pathinfo($_FILES['file']['name'], PATHINFO_EXTENSION);
-    $filename = uniqid() . '.' . $ext;
-    $target_file = $target_dir . $filename;
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    exit;
+}
 
-    if (move_uploaded_file($_FILES['file']['tmp_name'], $target_file)) {
-        // Return relative path. Frontend should prepend Base URL.
-        echo json_encode(["status" => "success", "url" => $target_file]);
+$uploadDir = '../uploads/';
+if (!is_dir($uploadDir)) {
+    mkdir($uploadDir, 0755, true);
+}
+
+if (isset($_FILES['file'])) {
+    $file = $_FILES['file'];
+    $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+    // Generate Random UUID/Name to anonymize
+    $filename = uniqid('enc_') . bin2hex(random_bytes(8)) . '.' . $ext;
+    $targetPath = $uploadDir . $filename;
+
+    if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+        // Return full URL (assuming relative for now, client app will prepend baseURL)
+        echo json_encode([
+            "status" => "success",
+            "url" => "uploads/" . $filename
+        ]);
     } else {
         http_response_code(500);
         echo json_encode(["error" => "Upload failed"]);
     }
+} else {
+    http_response_code(400);
+    echo json_encode(["error" => "No file received"]);
 }
 ?>

@@ -5,8 +5,9 @@ import { CryptoService } from './crypto.service';
 import { PushService } from './push.service';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { LoggingService } from './logging.service';
-import { AngularFirestore } from '@angular/fire/compat/firestore';
-import { take } from 'rxjs/operators';
+import { getFirestore, collection, doc, onSnapshot, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { initializeApp } from 'firebase/app';
+import { environment } from 'src/environments/environment';
 
 @Injectable({
     providedIn: 'root'
@@ -14,6 +15,7 @@ import { take } from 'rxjs/operators';
 export class AuthService {
     private userIdSource = new BehaviorSubject<string | null>(null);
     currentUserId = this.userIdSource.asObservable();
+    private db: any;
 
     // Blocked Users Stream
     private blockedUsersSubject = new BehaviorSubject<string[]>([]);
@@ -23,9 +25,11 @@ export class AuthService {
         private api: ApiService,
         private crypto: CryptoService,
         private pushService: PushService,
-        private logger: LoggingService,
-        private afs: AngularFirestore
+        private logger: LoggingService
     ) {
+        const app = initializeApp(environment.firebase);
+        this.db = getFirestore(app);
+
         const savedId = localStorage.getItem('user_id');
         if (savedId) {
             this.userIdSource.next(savedId);
@@ -34,8 +38,10 @@ export class AuthService {
     }
 
     private initBlockedListener(userId: string) {
-        this.afs.collection(`users/${userId}/blocked`).snapshotChanges().subscribe(snaps => {
-            const blocked = snaps.map(s => s.payload.doc.id);
+        // Modular SDK onSnapshot
+        const blockedCol = collection(this.db, `users/${userId}/blocked`);
+        onSnapshot(blockedCol, (snapshot) => {
+            const blocked = snapshot.docs.map(d => d.id);
             this.blockedUsersSubject.next(blocked);
         });
     }
@@ -45,13 +51,13 @@ export class AuthService {
         this.userIdSource.next(userId);
         this.initBlockedListener(userId);
 
-        // Save FCM Token now that we are logged in
+        // Save FCM Token
         PushNotifications.checkPermissions().then(async (res) => {
-            // Fix: Update PushService to check for stored token + UserID valid.
+            // ...
         });
 
-        // Actually, easiest way:
-        this.pushService.register(); // Re-trigger registration to get token again?
+        // Trigger Push Init
+        this.pushService.initPush();
     }
 
     // Phase 1: Simulate sending OTP
@@ -121,7 +127,7 @@ export class AuthService {
         const myId = this.userIdSource.value;
         if (!myId) return;
 
-        await this.afs.collection(`users/${myId}/blocked`).doc(targetId).set({
+        await setDoc(doc(this.db, 'users', myId, 'blocked', targetId), {
             blocked_at: new Date().toISOString()
         });
     }
@@ -130,15 +136,15 @@ export class AuthService {
         const myId = this.userIdSource.value;
         if (!myId) return;
 
-        await this.afs.collection(`users/${myId}/blocked`).doc(targetId).delete();
+        await deleteDoc(doc(this.db, 'users', myId, 'blocked', targetId));
     }
 
     async isUserBlocked(targetId: string): Promise<boolean> {
         const myId = this.userIdSource.value;
         if (!myId) return false;
 
-        const doc = await this.afs.collection(`users/${myId}/blocked`).doc(targetId).get().toPromise();
-        return doc ? doc.exists : false;
+        const d = await getDoc(doc(this.db, 'users', myId, 'blocked', targetId));
+        return d.exists();
     }
 
     async deleteAccount() {
@@ -149,8 +155,8 @@ export class AuthService {
         await this.api.post('delete_account.php', { user_id: myId }).toPromise();
 
         // 2. Delete Firestore (User Doc)
-        // using AngularFirestore
-        await this.afs.collection('users').doc(myId).delete();
+        // using Modular SDK
+        await deleteDoc(doc(this.db, 'users', myId));
 
         // 3. Clear Local Storage
         this.logout();

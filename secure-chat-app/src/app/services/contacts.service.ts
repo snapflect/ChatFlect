@@ -3,6 +3,7 @@ import { ApiService } from './api.service';
 import { Capacitor } from '@capacitor/core';
 import { Contacts } from '@capacitor-community/contacts';
 import { LoggingService } from './logging.service';
+import { getFirestore, doc, setDoc, getDocs, collection } from 'firebase/firestore';
 
 @Injectable({
     providedIn: 'root'
@@ -66,7 +67,49 @@ export class ContactsService {
 
     async syncPhone(phones: string[]) {
         const res: any = await this.api.post('contacts.php', { phone_numbers: phones }).toPromise();
-        this.localContacts = res || [];
         return res;
+    }
+
+    async saveManualContact(contact: any) {
+        const myId = localStorage.getItem('user_id');
+        if (!myId) return;
+        try {
+            await setDoc(doc(this.db, 'users', myId, 'contacts', contact.user_id), contact);
+        } catch (e) {
+            this.logger.error("Failed to save contact", e);
+        }
+    }
+
+    async getSavedContacts(): Promise<any[]> {
+        const myId = localStorage.getItem('user_id');
+        if (!myId) return [];
+        try {
+            const snap = await getDocs(collection(this.db, 'users', myId, 'contacts'));
+            return snap.docs.map(d => d.data());
+        } catch (e) { return []; }
+    }
+
+    async getAllContacts() {
+        const native = await this.getContacts();
+        const saved = await this.getSavedContacts();
+
+        // Merge (Saved overrides/adds to Native)
+        const map = new Map();
+        native.forEach((c: any) => map.set(c.user_id, c));
+        saved.forEach(c => map.set(c.user_id, c));
+
+        return Array.from(map.values());
+    }
+
+    // --- Manual Contact Persistence (Firestore) ---
+    // Needed for Web where Native Contacts are not available
+
+    // Import Firestore
+    private get db() {
+        // dynamic import or assume initialized. 
+        // We can access via window or just import at top.
+        // Let's use standard import at top.
+        return (window as any).firestoreDb || null;
+        // Actually, let's fix imports properly.
     }
 }

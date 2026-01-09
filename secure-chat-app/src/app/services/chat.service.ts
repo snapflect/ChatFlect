@@ -32,19 +32,7 @@ export class ChatService {
         const messagesRef = collection(this.db, 'chats', chatId, 'messages');
         const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
-        const combined$ = new Observable<any[]>(observer => {
-            // Subscribe to both Messages and Blocked lists
-            const unsubMsg = onSnapshot(q, (snapshot) => {
-                const blocked = this.auth.getBlockedListSnapshot(); // Helper or subscribe? 
-                // Better: rely on current value if behavior subject
-                // Wait, I can't easily sync snapshot and observable here without RxJS combineLatest.
-                // Simplified: Re-emit whenever messages change, filtering against *current* blocked list.
-
-                // We need to subscribe to blockedUsers inside here OR use combineLatest outside.
-                // Let's use combineLatest pattern in getMessages return or simpler:
-                // Just peek current blocked value if possible, or simple subscription
-            });
-        });
+        // Subscription Logic
 
         // Revised approach:
         return new Observable(observer => {
@@ -96,15 +84,17 @@ export class ChatService {
 
                         if (cipherText) {
                             try {
-                                const plain = await this.crypto.decryptMessage(cipherText, privateKeyStr);
-                                if (!plain.includes("[Decryption Error]") && plain !== '') {
+                                // PHASE 8: Use Double Ratchet (Auto-fallbacks to legacy inside service)
+                                const plain = await this.crypto.decryptWithRatchet(cipherText, senderId, privateKeyStr);
+
+                                if (!plain.includes("🔒") && plain !== '') {
                                     decrypted = plain;
                                     try {
                                         const metadata = JSON.parse(decrypted);
                                         if (metadata && metadata.type === 'image') decrypted = metadata;
                                     } catch (e) { }
                                 } else {
-                                    decrypted = "🔒 Decryption Failed";
+                                    decrypted = plain.includes("🔒") ? plain : "🔒 Decryption Failed";
                                 }
                             } catch (e) { decrypted = "🔒 Error"; }
                         } else { decrypted = "🔒 Encrypted (Not for you)"; }
@@ -182,13 +172,20 @@ export class ChatService {
             // Recipients
             for (const p of participants) {
                 const pid = String(p).trim();
+                // if (pid === String(senderId).trim()) continue; // We need to encrypt for self too via Ratchet if we want consistent history, or keep using self-key.
+                // For MVP: Encrypt for OTHERS using Ratchet. Encrypt for SELF using legacy or separate ratchet?
+                // Standard: Encrypt for self with own public key (Legacy is fine for self-copy).
+
                 if (pid === String(senderId).trim()) continue;
 
                 try {
                     const res: any = await this.api.get(`keys.php?user_id=${pid}`).toPromise();
                     if (res && res.public_key) {
-                        const cypher = await this.crypto.encryptMessage(plainText, res.public_key);
-                        contentMap[pid] = cypher;
+                        // PHASE 8: Use Double Ratchet
+                        const cypher = await this.crypto.encryptWithRatchet(plainText, pid, res.public_key);
+                        if (cypher) {
+                            contentMap[pid] = cypher;
+                        }
                     }
                 } catch (e) {
                     this.logger.error(`Failed to fetch key for ${pid}`, e);
@@ -356,6 +353,23 @@ export class ChatService {
 
         } catch (e) {
             this.logger.error("Location Send Failed", e);
+        }
+    }
+
+    async sendStickerMessage(chatId: string, url: string, senderId: string) {
+        try {
+            const dummyKey = await this.crypto.generateSessionKey();
+            const dummyKeyRaw = await window.crypto.subtle.exportKey("raw", dummyKey);
+
+            const metadata = {
+                type: 'sticker',
+                url: url
+            };
+
+            await this.handleMediaFanout(chatId, senderId, metadata, dummyKeyRaw, '👾 Sticker');
+
+        } catch (e) {
+            this.logger.error("Sticker Send Failed", e);
         }
     }
 

@@ -1,27 +1,63 @@
 <?php
+// contacts.php - Sync Contacts
 require 'db.php';
-$data = json_decode(file_get_contents("php://input"), true);
 
-if (isset($data['phone_numbers'])) {
-    $phones = $data['phone_numbers'];
-    if (empty($phones)) {
-        echo json_encode([]);
-        exit;
-    }
+header("Access-Control-Allow-Origin: *");
+header("Access-Control-Allow-Methods: POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type");
 
-    $escaped_phones = array_map(function ($p) use ($conn) {
-        return "'" . $conn->real_escape_string($p) . "'";
-    }, $phones);
-
-    $list = implode(',', $escaped_phones);
-
-    $sql = "SELECT user_id, first_name, last_name, phone_number, photo_url, short_note FROM users WHERE phone_number IN ($list)";
-    $result = $conn->query($sql);
-
-    $contacts = [];
-    while ($row = $result->fetch_assoc()) {
-        $contacts[] = $row;
-    }
-    echo json_encode($contacts);
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
 }
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    exit;
+}
+
+// POST { phone_numbers: ["+123", "+456"] }
+$json = file_get_contents("php://input");
+$data = json_decode($json);
+
+if (!isset($data->phone_numbers) || !is_array($data->phone_numbers)) {
+    echo json_encode([]);
+    exit;
+}
+
+$phones = $data->phone_numbers;
+// Sanitize
+$phones = array_map(function ($p) {
+    return preg_replace('/[^0-9+]/', '', $p);
+}, $phones);
+
+if (empty($phones)) {
+    echo json_encode([]);
+    exit;
+}
+
+// 1. Fetch ALL registered users (Lightweight for demo / <10k users)
+$stmt = $pdo->query("SELECT user_id, phone_number, first_name, last_name, photo_url, public_key FROM users");
+$allUsers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$matches = [];
+
+// 2. Fuzzy Match in PHP (Match last 10 digits)
+// This solves the +91 vs 0 vs raw issue without complex SQL
+foreach ($allUsers as $user) {
+    $dbPhone = preg_replace('/[^0-9]/', '', $user['phone_number']);
+    $dbLast10 = substr($dbPhone, -10);
+
+    foreach ($phones as $contactPhone) {
+        $contactClean = preg_replace('/[^0-9]/', '', $contactPhone);
+        $contactLast10 = substr($contactClean, -10);
+
+        if ($dbLast10 === $contactLast10) {
+            $matches[] = $user;
+            break; // Found match for this user
+        }
+    }
+}
+
+echo json_encode($matches);
 ?>

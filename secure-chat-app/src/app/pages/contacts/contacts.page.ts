@@ -45,7 +45,7 @@ export class ContactsPage implements OnInit {
 
     // 2. Sync Native in Background
     try {
-      const fresh = await this.contactsService.getContacts(); // Triggers plugin
+      const fresh = await this.contactsService.getAllContacts(); // Triggers plugin + Firestore
       if (fresh && fresh.length > 0) {
         this.contacts = fresh;
         localStorage.setItem('contacts_cache', JSON.stringify(fresh));
@@ -56,31 +56,58 @@ export class ContactsPage implements OnInit {
   }
 
   async addContact() {
-    // "New Contact" -> For this MVP, we'll offer to "Message a Number" directly
-    // since writing to Native Contacts is permission-heavy and complex across Android versions.
     const alert = await this.alertCtrl.create({
-      header: 'New Chat',
+      header: 'New Contact',
       message: 'Enter phone number (with country code):',
       inputs: [
+        { name: 'name', type: 'text', placeholder: 'Name (Optional)' },
         { name: 'phone', type: 'tel', placeholder: '+1234567890' }
       ],
       buttons: [
         { text: 'Cancel', role: 'cancel' },
         {
-          text: 'Message',
+          text: 'Add & Chat',
           handler: async (data) => {
             if (data.phone) {
-              // Find user by phone via API? 
-              // Or just try to start chat if they exist.
-              // We need 'user_id' to start a chat.
-              // Let's call API to look them up.
-              await this.findAndChat(data.phone);
+              await this.manualAdd(data.phone, data.name || data.phone);
             }
           }
         }
       ]
     });
     await alert.present();
+  }
+
+  async manualAdd(phone: string, name: string) {
+    try {
+      const res: any = await this.contactsService.syncPhone([phone]);
+      if (res && res.length > 0) {
+        const user = res[0];
+        // Add to local contacts list
+        const newContact = {
+          ...user,
+          displayName: name, // User's custom name for them
+          api_user: true
+        };
+
+        // Deduplicate
+        const exists = this.contacts.find(c => c.user_id === user.user_id);
+        if (!exists) {
+          this.contacts.push(newContact);
+          localStorage.setItem('contacts_cache', JSON.stringify(this.contacts));
+          // Persist
+          this.contactsService.saveManualContact(newContact);
+        }
+
+        this.startChat(newContact);
+      } else {
+        const t = await this.toast.create({ message: 'User not found.', duration: 2000 });
+        t.present();
+        // ask to invite
+      }
+    } catch (e) {
+      this.logger.error("Manual Add Error", e);
+    }
   }
 
   async findAndChat(phone: string) {

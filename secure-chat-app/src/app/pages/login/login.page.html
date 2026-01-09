@@ -6,29 +6,53 @@
         <p class="subtitle">Secure. Vibrant. Fast.</p>
       </div>
 
-      <div *ngIf="!otpSent" class="input-group">
-        <ion-item lines="none" class="custom-input">
-          <ion-icon name="call-outline" slot="start" color="primary"></ion-icon>
-          <ion-input type="tel" [(ngModel)]="phoneNumber" placeholder="Phone Number (+123...)"></ion-input>
-        </ion-item>
+      <ion-segment [(ngModel)]="mode" (ionChange)="segmentChanged($event)" class="ion-margin-bottom">
+        <ion-segment-button value="phone">
+          <ion-icon name="call"></ion-icon>
+        </ion-segment-button>
+        <ion-segment-button value="qr">
+          <ion-icon name="qr-code"></ion-icon>
+        </ion-segment-button>
+      </ion-segment>
 
-        <ion-button expand="block" shape="round" class="vibrant-btn" (click)="sendOtp()" [disabled]="!phoneNumber">
-          Send OTP <ion-icon name="arrow-forward-outline" slot="end"></ion-icon>
-        </ion-button>
+      <!-- PHONE MODE -->
+      <div *ngIf="mode === 'phone'">
+        <div *ngIf="!otpSent" class="input-group">
+          <ion-item lines="none" class="custom-input">
+            <ion-icon name="call-outline" slot="start" color="primary"></ion-icon>
+            <ion-input type="tel" [(ngModel)]="phoneNumber" placeholder="Phone Number (+123...)"></ion-input>
+          </ion-item>
+
+          <ion-button expand="block" shape="round" class="vibrant-btn" (click)="sendOtp()" [disabled]="!phoneNumber">
+            Send OTP <ion-icon name="arrow-forward-outline" slot="end"></ion-icon>
+          </ion-button>
+        </div>
+
+        <div *ngIf="otpSent" class="input-group">
+          <ion-item lines="none" class="custom-input">
+            <ion-icon name="key-outline" slot="start" color="secondary"></ion-icon>
+            <ion-input type="text" [(ngModel)]="otp" placeholder="Enter OTP"></ion-input>
+          </ion-item>
+
+          <p class="ion-text-center hint-text">Mock OTP: 123456</p>
+
+          <ion-button expand="block" shape="round" class="vibrant-btn" (click)="verifyOtp()" [disabled]="!otp">
+            Verify & Login
+          </ion-button>
+        </div>
       </div>
 
-      <div *ngIf="otpSent" class="input-group">
-        <ion-item lines="none" class="custom-input">
-          <ion-icon name="key-outline" slot="start" color="secondary"></ion-icon>
-          <ion-input type="text" [(ngModel)]="otp" placeholder="Enter OTP"></ion-input>
-        </ion-item>
+      <!-- QR MODE -->
+      <div *ngIf="mode === 'qr'" class="ion-text-center">
+        <p class="hint-text ion-margin-bottom">Scan this code with your Mobile App</p>
 
-        <p class="ion-text-center hint-text">Mock OTP: 123456</p>
+        <div class="qr-container">
+          <canvas #qrCanvas width="256" height="256"></canvas>
+        </div>
 
-        <ion-button expand="block" shape="round" class="vibrant-btn" (click)="verifyOtp()" [disabled]="!otp">
-          Verify & Login
-        </ion-button>
+        <p class="hint-text small">Settings > Link a Device</p>
       </div>
+
     </div>
   </div>
 </ion-content>

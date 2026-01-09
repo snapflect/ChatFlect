@@ -1,0 +1,64 @@
+<ion-content [fullscreen]="true" class="call-content">
+
+  <!-- INCOMING CALL -->
+  <div *ngIf="(callService.callStatus | async) === 'incoming'" class="overlay-container incoming">
+    <div class="ion-text-center">
+      <ion-avatar class="caller-avatar">
+        <img src="assets/avatar-placeholder.png" />
+      </ion-avatar>
+      <h2>Incoming Call</h2>
+      <p>Group Call</p>
+
+      <div class="actions">
+        <ion-button shape="round" color="danger" (click)="endCall()">
+          <ion-icon name="close"></ion-icon>
+        </ion-button>
+        <ion-button shape="round" color="success" (click)="callService.answerCall()">
+          <ion-icon name="call"></ion-icon>
+        </ion-button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CALLING -->
+  <div *ngIf="(callService.callStatus | async) === 'calling'" class="overlay-container calling">
+    <h2>Calling...</h2>
+    <ion-spinner></ion-spinner>
+    <ion-button fill="clear" color="light" (click)="endCall()">Cancel</ion-button>
+  </div>
+
+  <!-- CONNECTED GRID -->
+  <div *ngIf="(callService.callStatus | async) === 'connected'" class="video-grid">
+
+    <!-- Remote Peers -->
+    <div class="remote-wrapper" *ngFor="let peer of asArray(remoteStreams)" [class.single]="remoteStreams.size === 1">
+      <!-- Use Property Binding for srcObject -->
+      <video [srcObject]="peer[1]" autoplay playsinline class="remote-video"></video>
+    </div>
+
+    <!-- Local Self View (Floating) -->
+    <div class="local-wrapper">
+      <video [srcObject]="localStream" autoplay playsinline muted class="local-video"></video>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-bar glass-card">
+      <ion-button fill="clear" (click)="toggleVideo()">
+        <ion-icon [name]="videoEnabled ? 'videocam' : 'videocam-off'"></ion-icon>
+      </ion-button>
+
+      <ion-button fill="clear" (click)="toggleMic()">
+        <ion-icon [name]="micEnabled ? 'mic' : 'mic-off'"></ion-icon>
+      </ion-button>
+
+      <ion-button fill="clear" (click)="switchCamera()">
+        <ion-icon name="camera-reverse"></ion-icon>
+      </ion-button>
+
+      <ion-button fill="clear" color="danger" (click)="endCall()">
+        <ion-icon name="call"></ion-icon>
+      </ion-button>
+    </div>
+  </div>
+
+</ion-content>

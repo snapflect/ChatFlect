@@ -1,0 +1,9 @@
+<div class="sticker-container">
+  <ion-searchbar placeholder="Search GIFs..." (ionInput)="onSearch($event)" animated="true"></ion-searchbar>
+
+  <div class="sticker-grid">
+    <div class="sticker-item" *ngFor="let sticker of stickers" (click)="selectSticker(sticker.url)">
+      <img [src]="sticker.url" [alt]="sticker.title" loading="lazy">
+    </div>
+  </div>
+</div>

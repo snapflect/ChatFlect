@@ -17,9 +17,16 @@ import { ReactionPickerComponent } from 'src/app/components/reaction-picker/reac
 import { LoggingService } from 'src/app/services/logging.service';
 // ... imports
 import { PresenceService } from 'src/app/services/presence.service';
+import { LocationService } from 'src/app/services/location.service';
 
 // ... 
 
+@Component({
+  selector: 'app-chat-detail',
+  templateUrl: './chat-detail.page.html',
+  styleUrls: ['./chat-detail.page.scss'],
+  standalone: false
+})
 export class ChatDetailPage implements OnInit {
   @ViewChild(IonContent, { static: false }) content!: IonContent;
 
@@ -54,7 +61,8 @@ export class ChatDetailPage implements OnInit {
     private alertCtrl: AlertController,
     private popoverCtrl: PopoverController,
     private logger: LoggingService,
-    private presence: PresenceService
+    private presence: PresenceService,
+    private locationService: LocationService
   ) {
     this.auth.currentUserId.subscribe(id => this.currentUserId = String(id));
   }
@@ -188,17 +196,35 @@ export class ChatDetailPage implements OnInit {
 
   // ... rest of class remains similar
 
-  async makeCall(type: 'audio' | 'video') {
-    if (this.isGroup) {
-      const t = await this.toastCtrl.create({ message: 'Group calls coming soon!', duration: 2000 });
-      t.present();
-      return;
+  async startCall(type: 'audio' | 'video') {
+    if (!this.chatId) return;
+    try {
+      // Group Call (Mesh P2P) logic handles both 1:1 and Group
+      // For 1:1, we just pass the chatId (which acts as the Other User ID in 1:1 context usually, 
+      // OR we derive participants. In this app, chat-detail separates Group/User logic.
+      // If !isGroup, chatId is usually the UserID of the other person? 
+      // Let's verify chatService.getChatDetails logic.
+      // If 1:1, chatId might be the RoomID or the UserId?
+      // In this app, route param 'id' is used.
+      // If it's a 1:1 chat, 'id' is often the Other User's ID.
+      // If it's a "Group" chat, 'id' is the Group UUID.
+
+      let participants = [this.chatId];
+
+      if (this.isGroup) {
+        // If Group, we need to fetch all participants to ring them?
+        // Or just join the room 'chatId'.
+        // CallService.startGroupCall expects 'participantIds' to ring?
+        // Actually, CallService creates a NEW CallDoc. 
+        // If we want to call the WHOLE group, we pass all participant IDs.
+        participants = this.participants.filter(p => String(p) !== String(this.currentUserId));
+      }
+
+      await this.callService.startGroupCall(participants, type);
+      this.nav.navigateForward(['/group-call']);
+    } catch (e) {
+      this.logger.error("Start Call Failed", e);
     }
-
-    const otherId = this.participants.find(p => String(p) !== String(this.currentUserId));
-    if (!otherId) return;
-
-    this.callService.startCall(otherId, type);
   }
 
   extractUrl(text: string): string | null {
@@ -419,12 +445,53 @@ export class ChatDetailPage implements OnInit {
         { text: 'Camera', icon: 'camera', handler: () => { this.logger.log('Open Camera'); } },
         { text: 'Gallery', icon: 'image', handler: () => { this.pickImage(); } },
         { text: 'Audio', icon: 'musical-notes', handler: () => { this.logger.log('Pick Audio'); } },
-        { text: 'Location', icon: 'location', handler: () => { this.shareLocation(); } },
+        { text: 'Location (Static)', icon: 'location', handler: () => { this.shareLocation(); } },
+        { text: 'Live Location', icon: 'navigate', handler: () => { this.shareLiveLocation(); } },
         { text: 'Contact', icon: 'person', handler: () => { this.logger.log('Share Contact'); } },
         { text: 'Cancel', icon: 'close', role: 'cancel' }
       ]
     });
     await actionSheet.present();
+  }
+
+  async shareLiveLocation() {
+    if (!this.chatId) return;
+    await this.locationService.startSharing(this.chatId);
+    this.showToast("Live Location started. You can stop it in the Map view.");
+
+    // Optionally send a message
+    // await this.chatService.sendMessage(this.chatId, "📍 Started sharing Live Location", this.currentUserId);
+    this.viewLiveMap();
+  }
+
+  viewLiveMap() {
+    if (this.chatId) {
+      this.nav.navigateForward(['/live-map', { chatId: this.chatId }]);
+    }
+  }
+
+  showStickerPicker = false;
+
+  toggleStickerPicker() {
+    this.showStickerPicker = !this.showStickerPicker;
+    if (this.showStickerPicker) {
+      // Scroll to bottom after opening
+      setTimeout(() => this.content.scrollToBottom(300), 100);
+    }
+  }
+
+  sendSticker(url: string) {
+    if (!this.chatId) return;
+    this.chatService.sendStickerMessage(this.chatId, url, this.currentUserId);
+    this.showStickerPicker = false;
+  }
+
+  isSticker(msg: any): boolean {
+    return msg && msg.type === 'sticker' && !!msg.url;
+  }
+
+  getStickerUrl(msg: any): string {
+    return msg.url;
   }
 
   pickImage() {
@@ -789,6 +856,11 @@ export class ChatDetailPage implements OnInit {
           text: `Disappearing Messages (${this.getTimerLabel()})`,
           icon: 'timer',
           handler: () => this.promptDisappearingMessages()
+        },
+        {
+          text: 'View Live Map',
+          icon: 'map',
+          handler: () => this.viewLiveMap()
         },
         {
           text: isBlocked ? 'Unblock User' : 'Block User',
