@@ -5,6 +5,7 @@ import { CryptoService } from './crypto.service';
 import { PushService } from './push.service';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { LoggingService } from './logging.service';
+import { CallService } from './call.service';
 import { getFirestore, collection, doc, onSnapshot, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { initializeApp } from 'firebase/app';
 import { environment } from 'src/environments/environment';
@@ -25,7 +26,8 @@ export class AuthService {
         private api: ApiService,
         private crypto: CryptoService,
         private pushService: PushService,
-        private logger: LoggingService
+        private logger: LoggingService,
+        private callService: CallService
     ) {
         const app = initializeApp(environment.firebase);
         this.db = getFirestore(app);
@@ -51,13 +53,9 @@ export class AuthService {
         this.userIdSource.next(userId);
         this.initBlockedListener(userId);
 
-        // Save FCM Token
-        PushNotifications.checkPermissions().then(async (res) => {
-            // ...
-        });
-
-        // Trigger Push Init
-        this.pushService.initPush();
+        // Force Push Registration / Sync
+        this.pushService.syncToken();
+        this.callService.init();
     }
 
     // Phase 17: Email OTP
@@ -165,5 +163,25 @@ export class AuthService {
 
         // 3. Clear Local Storage
         this.logout();
+    }
+    async isProfileComplete(): Promise<boolean> {
+        const userId = this.userIdSource.value || localStorage.getItem('user_id');
+        if (!userId) return false;
+
+        // Check local storage first (optimization)
+        const cachedName = localStorage.getItem('user_first_name');
+        if (cachedName) return true;
+
+        try {
+            const profile: any = await this.getProfile(userId);
+            if (profile && profile.first_name) {
+                // Cache it
+                localStorage.setItem('user_first_name', profile.first_name);
+                return true;
+            }
+            return false;
+        } catch (e) {
+            return false;
+        }
     }
 }

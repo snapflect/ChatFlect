@@ -335,6 +335,10 @@ export class CryptoService {
         return raw ? JSON.parse(raw) : null;
     }
 
+    clearSession(contactId: string) {
+        localStorage.removeItem(this.getSessionKey(contactId));
+    }
+
     // --- High-Level Ratchet Operations --- //
 
     async encryptWithRatchet(plainText: string, recipientId: string, recipientPubKeyStr: string): Promise<string> {

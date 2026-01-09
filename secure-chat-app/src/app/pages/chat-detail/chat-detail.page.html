@@ -26,10 +26,16 @@
       </div>
     </ion-title>
     <ion-buttons slot="end">
+      <ion-button (click)="startCall('video')">
+        <ion-icon name="videocam-outline"></ion-icon>
+      </ion-button>
+      <ion-button (click)="startCall('audio')">
+        <ion-icon name="call-outline"></ion-icon>
+      </ion-button>
       <ion-button (click)="toggleSearch()">
         <ion-icon name="search"></ion-icon>
       </ion-button>
-      <ion-button (click)="openChatInfo()">
+      <ion-button (click)="presentChatOptions()">
         <ion-icon name="ellipsis-vertical"></ion-icon>
       </ion-button>
     </ion-buttons>
@@ -42,7 +48,7 @@
 
 <ion-content [fullscreen]="true" class="chat-content">
   <!-- (Existing List) -->
-  <ion-list lines="none" class="bg-transparent" style="padding-top: 70px;">
+  <ion-list lines="none" class="bg-transparent" style="padding-top: 130px; padding-bottom: 20px;">
     <div *ngFor="let msg of filteredMessages" class="message-wrapper">
 
       <!-- Date Divider (Optional) -->

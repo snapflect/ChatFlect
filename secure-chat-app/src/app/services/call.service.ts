@@ -1,12 +1,14 @@
 import { Injectable } from '@angular/core';
 import { ApiService } from './api.service';
-import { BehaviorSubject } from 'rxjs';
+import { BehaviorSubject, from } from 'rxjs';
 import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, where, addDoc, getDocs } from 'firebase/firestore';
 import { LoggingService } from './logging.service';
+import { PushService } from './push.service';
 
 interface PeerSession {
     connection: RTCPeerConnection;
     stream?: MediaStream;
+    candidateBuffer: any[];
 }
 
 @Injectable({
@@ -24,6 +26,7 @@ export class CallService {
     public activeCallType: 'audio' | 'video' = 'audio';
     public currentCallId: string | null = null;
     public incomingCallData: any = null;
+    private signalBuffer: any[] = []; // Buffer for Pre-Answer signals
 
     private signalUnsub: any = null;
     private callDocUnsub: any = null;
@@ -31,13 +34,18 @@ export class CallService {
     private servers = {
         iceServers: [
             { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' }
-        ]
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' }
+        ],
+        iceCandidatePoolSize: 10
     };
 
     constructor(
         private api: ApiService,
-        private logger: LoggingService
+        private logger: LoggingService,
+        private pushService: PushService
     ) { }
 
     init() {
@@ -45,9 +53,9 @@ export class CallService {
         const myId = localStorage.getItem('user_id');
         if (!myId) return;
 
+        // Listen for incoming calls (Invitations)
         const callsRef = collection(this.db, 'calls');
         // Simple Query: Find calls where I am in 'participants' and status is 'active' or 'offer'
-        // Firestore Array-Contains is useful here
         const q = query(callsRef, where('participants', 'array-contains', myId), where('status', '==', 'offer'));
 
         this.callDocUnsub = onSnapshot(q, (snapshot) => {
@@ -56,14 +64,38 @@ export class CallService {
                     const data: any = change.doc.data();
                     // Ignore if I initiated it
                     if (data.callerId !== myId && this.callStatus.value === 'idle') {
+                        // IGNORE STALE CALLS (> 5 Minutes Old)
+                        const now = Date.now();
+                        const callTime = data.created_at || 0;
+                        if (now - callTime > 300000) {
+                            this.logger.log("[Call] Ignoring stale call invite:", change.doc.id);
+                            return;
+                        }
+
                         this.incomingCallData = { id: change.doc.id, ...data };
                         this.activeCallType = data.type || 'audio';
                         this.currentCallId = change.doc.id;
+                        // Subscribe immediately to catch Early Media/Candidates
+                        this.subscribeToSignals(this.currentCallId!);
                         this.callStatus.next('incoming');
                     }
                 }
             });
         });
+
+        // Listen for Signals (Global Listener for My ID)
+        // Note: In a real app, signals should probably be sub-collection of 'calls' OR a top-level 'signals' collection.
+        // Current logic: `calls/{callId}/signals`. This makes global listening hard without knowing Call ID.
+        // ISSUE: We only know Call ID *after* we get the invitation.
+        // FIX: The current logic `subscribeToSignals(callId)` is actually correct for this schema, 
+        // BUT we must ensure it's called IMMEDIATELY upon receiving the invite (even before answering?)
+        // OR better: The Caller sends the OFFER signal *after* creating the doc.
+        // We receive the Invite (Call Doc Added) -> We know Call ID -> We Subscribe to Signals -> We see Offer?
+        // Let's verify `answerCall` logic. It calls `subscribeToSignals` too late?
+        // Correct Flow:
+        // 1. Incoming Call Detected (lines 53-66).
+        // 2. We should subscribe to signals *immediately* here to buffer candidates/offers?
+        //    YES.
     }
 
     // --- Actions ---
@@ -103,9 +135,26 @@ export class CallService {
         // In Mesh, the Caller offers to everyone else.
         this.callStatus.next('calling');
 
-        for (const pid of participantIds) {
-            await this.initiatePeerConnection(pid, this.currentCallId);
-        }
+        // Parallel: Connection Init & Push Notification
+        const promises = participantIds.map(async (pid) => {
+            // A. WebRTC Connection
+            await this.initiatePeerConnection(pid, this.currentCallId!);
+
+            // B. Push Notification (Wake up the device)
+            await this.pushService.sendPush(
+                pid,
+                'Incoming Call',
+                'Tap to answer',
+                {
+                    type: 'call_invite',
+                    callId: this.currentCallId,
+                    callerId: myId,
+                    callType: type
+                }
+            );
+        });
+
+        await Promise.all(promises);
     }
 
     async answerCall() {
@@ -118,8 +167,13 @@ export class CallService {
         await this.getMedia(this.activeCallType);
         this.callStatus.next('connected');
 
-        // Subscribe to signals in this room
-        this.subscribeToSignals(callId);
+        // Subscribe to signals in this room - ALREADY SUBSCRIBED IN INIT
+        // But we need to process the BUFFERED signals now.
+        this.logger.log("[Call] Processing Buffered Signals:", this.signalBuffer.length);
+        while (this.signalBuffer.length > 0) {
+            const data = this.signalBuffer.shift();
+            await this.handleSignal(data);
+        }
 
         // --- FULL MESH LOGIC ---
         // 1. Join the call document (add myself to participants if not there? 
@@ -186,12 +240,41 @@ export class CallService {
     }
 
     private async handleSignal(data: any) {
+        // BUFFERING: If we are in 'incoming' state (haven't answered yet), buffer the signal.
+        if (this.callStatus.value === 'incoming') {
+            this.logger.log("[Signal] Buffering signal (Pre-Answer):", data.type);
+            this.signalBuffer.push(data);
+            return;
+        }
+
         const remotePeerId = data.from;
+
+        // SECURITY CHECK: Verify the sender is actually a participant in this call
+        // This prevents random users from injecting signals to disrupt/hijack the call.
+        if (this.incomingCallData && this.incomingCallData.participants) {
+            const participants: string[] = this.incomingCallData.participants;
+            if (!participants.includes(remotePeerId)) {
+                this.logger.error("[Security] dropping signal from unknown peer:", remotePeerId);
+                return;
+            }
+        }
+
+        this.logger.log("[Signal] Processing:", data.type, "from", remotePeerId);
 
         // 1. OFFER
         if (data.type === 'offer') {
             const pc = this.getOrCreatePeer(remotePeerId, this.currentCallId!);
             await pc.setRemoteDescription(new RTCSessionDescription(data.payload));
+
+            // Process Buffered Candidates
+            const session = this.peers.get(remotePeerId);
+            if (session && session.candidateBuffer.length > 0) {
+                for (const candidate of session.candidateBuffer) {
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                }
+                session.candidateBuffer = []; // Clear buffer
+            }
+
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
 
@@ -208,9 +291,15 @@ export class CallService {
 
         // 3. CANDIDATE
         else if (data.type === 'candidate') {
-            const pc = this.peers.get(remotePeerId)?.connection;
-            if (pc) {
-                await pc.addIceCandidate(new RTCIceCandidate(data.payload));
+            const session = this.peers.get(remotePeerId);
+            if (session) {
+                const pc = session.connection;
+                if (pc.remoteDescription) {
+                    await pc.addIceCandidate(new RTCIceCandidate(data.payload));
+                } else {
+                    // Buffer it
+                    session.candidateBuffer.push(data.payload);
+                }
             }
         }
     }
@@ -249,7 +338,7 @@ export class CallService {
         };
 
         // Store
-        this.peers.set(peerId, { connection: pc });
+        this.peers.set(peerId, { connection: pc, candidateBuffer: [] });
         return pc;
     }
 
@@ -344,9 +433,25 @@ export class CallService {
 
     getCallHistory(): any {
         const myId = localStorage.getItem('user_id');
-        return this.api.post('calls.php', {
-            action: 'history',
-            user_id: myId
-        });
+        if (!myId) return Promise.resolve([]);
+
+        const callsRef = collection(this.db, 'calls');
+        const q = query(callsRef, where('participants', 'array-contains', myId));
+
+        return from(getDocs(q).then(snap => {
+            return snap.docs.map(d => {
+                const data = d.data();
+                return {
+                    id: d.id,
+                    ...data,
+                    // Map generic fields to what UI expects
+                    caller_id: data['callerId'] || data['caller_id'],
+                    created_at: data['created_at'] || Date.now()
+                };
+            }).sort((a: any, b: any) => b.created_at - a.created_at);
+        }).catch(e => {
+            this.logger.error("Get Call History Failed", e);
+            return [];
+        }));
     }
 }

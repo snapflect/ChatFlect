@@ -51,9 +51,12 @@ export class PushService {
         }
     }
 
+    private cachedToken: string | null = null;
+
     private addNativeListeners() {
         PushNotifications.addListener('registration', (token: any) => {
             this.logger.log('Native Push Token:', token.value);
+            this.cachedToken = token.value;
             this.saveToken(token.value);
         });
         PushNotifications.addListener('registrationError', (err: any) => {
@@ -123,7 +126,10 @@ export class PushService {
 
     async saveToken(token: string) {
         const userId = localStorage.getItem('user_id');
-        if (!userId) return;
+        if (!userId) {
+            this.logger.log("Push Token received but no user logged in. Cached for later.");
+            return;
+        }
 
         try {
             await this.api.post('register.php', {
@@ -134,6 +140,29 @@ export class PushService {
             this.logger.log('FCM Token Saved to Backend');
         } catch (e) {
             this.logger.error('Failed to save FCM token', e);
+        }
+    }
+
+    async syncToken() {
+        if (this.cachedToken) {
+            this.logger.log("Syncing cached push token...");
+            await this.saveToken(this.cachedToken);
+        } else {
+            // Try to get permission/token again if missing
+            this.initPush();
+        }
+    }
+
+    async sendPush(targetUserId: string, title: string, body: string, data: any = {}) {
+        try {
+            await this.api.post('push.php', {
+                target_user_id: targetUserId,
+                title: title,
+                body: body,
+                data: JSON.stringify(data)
+            }).toPromise();
+        } catch (e) {
+            this.logger.error("Send Push Failed", e);
         }
     }
 }

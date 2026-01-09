@@ -21,6 +21,10 @@ const routes: Routes = [
         loadChildren: () => import('../calls/calls.module').then(m => m.CallsPageModule)
       },
       {
+        path: 'status',
+        loadChildren: () => import('../status/status.module').then(m => m.StatusPageModule)
+      },
+      {
         path: '',
         redirectTo: '/tabs/chats',
         pathMatch: 'full'

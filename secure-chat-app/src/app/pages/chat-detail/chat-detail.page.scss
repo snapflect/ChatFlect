@@ -12,6 +12,16 @@ ion-content.chat-content {
     --padding-end: 10px;
     margin-bottom: 5px;
     --min-height: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.msg-me {
+    align-items: flex-end;
+}
+
+.msg-them {
+    align-items: flex-start;
 }
 
 .glass-bubble {

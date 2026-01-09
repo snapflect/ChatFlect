@@ -40,6 +40,7 @@ export class ChatDetailPage implements OnInit {
   chatName: string = '';
   isGroup: boolean = false;
   participants: string[] = [];
+  otherUserId: string | null = null;
 
   // Presence
   otherUserPresence: any = null; // { state: 'online' | 'offline', last_changed... }
@@ -81,7 +82,9 @@ export class ChatDetailPage implements OnInit {
             this.chatName = chat.groupName;
           } else {
             // 1:1 Chat - Find the other user and fetch their profile
-            const otherId = this.participants.find(p => String(p) !== String(this.currentUserId));
+            const otherId = this.participants.find(p => String(p) !== String(this.currentUserId)) || null;
+            this.otherUserId = otherId;
+
             if (otherId) {
               // Determine name (Try cache/contact list first, then API)
               // For now, simpler: check locally or hit API
@@ -223,15 +226,19 @@ export class ChatDetailPage implements OnInit {
       // If it's a 1:1 chat, 'id' is often the Other User's ID.
       // If it's a "Group" chat, 'id' is the Group UUID.
 
-      let participants = [this.chatId];
+      let participants: string[] = [];
 
       if (this.isGroup) {
-        // If Group, we need to fetch all participants to ring them?
-        // Or just join the room 'chatId'.
-        // CallService.startGroupCall expects 'participantIds' to ring?
-        // Actually, CallService creates a NEW CallDoc. 
-        // If we want to call the WHOLE group, we pass all participant IDs.
         participants = this.participants.filter(p => String(p) !== String(this.currentUserId));
+      } else {
+        // 1:1 Chat: Use the explicitly resolved participant ID, NOT the Chat ID (which might be composite)
+        const otherId = this.participants.find(p => String(p) !== String(this.currentUserId));
+        if (otherId) {
+          participants = [otherId];
+        } else {
+          this.logger.error("Start Call Failed: No participants found");
+          return;
+        }
       }
 
       await this.callService.startGroupCall(participants, type);
@@ -341,9 +348,11 @@ export class ChatDetailPage implements OnInit {
     await actionSheet.present();
   }
 
+
+
   async confirmDelete(msg: any) {
     const isMe = this.isMyMsg(msg);
-    const buttons = [
+    const buttons: any[] = [
       {
         text: 'Delete for me',
         handler: () => this.chatService.deleteMessage(this.chatId!, msg.id, false)
@@ -357,7 +366,7 @@ export class ChatDetailPage implements OnInit {
       });
     }
 
-    buttons.push({ text: 'Cancel' } as any);
+    buttons.push({ text: 'Cancel', role: 'cancel' });
 
     const alert = await this.alertCtrl.create({
       header: 'Delete Message?',
@@ -365,6 +374,7 @@ export class ChatDetailPage implements OnInit {
     });
     await alert.present();
   }
+
 
   async forwardMessage(msg: any) {
     const modal = await this.modalController.create({
@@ -649,14 +659,62 @@ export class ChatDetailPage implements OnInit {
   }
 
   async openDocument(docData: any) {
-    // Trigger decryption if needed, or if already decrypted (blobUrl), open it
-    if (docData._blobUrl && typeof docData._blobUrl === 'object') { // SafeUrl
-      const url = docData._blobUrl.changingThisBreaksApplicationSecurity || docData._blobUrl;
+    if (docData._blobUrl) {
+      const url = (docData._blobUrl.changingThisBreaksApplicationSecurity || docData._blobUrl);
       window.open(url, '_blank');
-    } else if (typeof docData._blobUrl === 'string') {
-      window.open(docData._blobUrl, '_blank');
+      return;
+    }
+
+    // Try re-decrypting if missing
+    this.showToast('Decrypting document...');
+    const result = await this.retryDecrypt(docData);
+    if (result) {
+      window.open(result, '_blank');
     } else {
-      this.logger.log("Document not ready or decrypted yet");
+      this.showToast('Document decryption failed.');
+    }
+  }
+
+  async retryDecrypt(metadata: any): Promise<string | null> {
+    try {
+      if (!metadata.url) return null;
+      const blobEnc = await this.api.getBlob(metadata.url).toPromise();
+      const myPrivKeyStr = localStorage.getItem('private_key');
+      if (!myPrivKeyStr || !blobEnc) return null;
+
+      const myPrivKey = await this.crypto.importKey(myPrivKeyStr, 'private');
+      const isMe = String(this.currentUserId).trim() === String(this.currentUserId).trim(); // Always me context here
+      // Wait, we need the senderId validation?
+      // Assume metadata has 'k'.
+
+      const keyEncBase64 = metadata.k;
+      if (!keyEncBase64) return null;
+
+      const aesKeyRaw = await window.crypto.subtle.decrypt(
+        { name: "RSA-OAEP" },
+        myPrivKey,
+        this.crypto.base64ToArrayBuffer(keyEncBase64)
+      );
+
+      const aesKey = await window.crypto.subtle.importKey(
+        "raw",
+        aesKeyRaw,
+        { name: "AES-GCM" },
+        true,
+        ["encrypt", "decrypt"]
+      );
+
+      if (!metadata.i) return null;
+      const blobDec = await this.crypto.decryptBlob(
+        blobEnc,
+        aesKey,
+        new Uint8Array(this.crypto.base64ToArrayBuffer(metadata.i))
+      );
+
+      return URL.createObjectURL(blobDec);
+    } catch (e) {
+      this.logger.error("Retry Decrypt Failed", e);
+      return null;
     }
   }
 
@@ -781,11 +839,38 @@ export class ChatDetailPage implements OnInit {
 
   getMsgType(text: any): string {
     if (typeof text === 'object' && text !== null) return text.type || 'unknown';
+    if (typeof text === 'string' && text.startsWith('{')) {
+      try {
+        let parsed = JSON.parse(text);
+        if (typeof parsed === 'string' && parsed.startsWith('{')) {
+          try { parsed = JSON.parse(parsed); } catch (e) { }
+        }
+        if (parsed.type) return parsed.type;
+      } catch (e) { }
+    }
     return 'text';
   }
 
   getMsgContent(msg: any): string {
-    if (typeof msg.text === 'string') return msg.text;
+    if (typeof msg.text === 'string') {
+      if (msg.text.startsWith('{')) {
+        try {
+          let parsed = JSON.parse(msg.text);
+          // Handle double-encoded JSON
+          if (typeof parsed === 'string' && parsed.startsWith('{')) {
+            try { parsed = JSON.parse(parsed); } catch (e) { }
+          }
+          if (parsed.type) {
+            // It is a media object, but stored as string.
+            // Be careful to update the reference if possible so we don't re-parse constantly, 
+            // OR just return empty string so the Media UI handles it (via getMsgType check)
+            msg.text = parsed; // Auto-convert for next cycle
+            return '';
+          }
+        } catch (e) { }
+      }
+      return msg.text;
+    }
     if (typeof msg.text === 'object') {
       // If it's a media object, we shouldn't be calling this for text display anyway, 
       // but as a fallback:
@@ -980,6 +1065,15 @@ export class ChatDetailPage implements OnInit {
           text: 'Cancel',
           role: 'cancel',
           icon: 'close'
+        },
+        {
+          text: 'Reset Encryption Session',
+          icon: 'refresh',
+          role: 'destructive',
+          handler: () => {
+            this.crypto.clearSession(otherId);
+            this.showToast('Encryption session reset.');
+          }
         }
       ]
     });
