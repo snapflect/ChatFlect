@@ -16,26 +16,33 @@ ion-content.chat-content {
 
 .glass-bubble {
     margin-left: auto;
-    background: linear-gradient(135deg, var(--ion-color-primary), #6243b8);
-    color: white;
+    /* Light Gradient for "My" messages: Light Blue/Lavender */
+    background: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%);
+    color: #000000;
+    /* Black text */
     padding: 12px 16px;
     border-radius: 18px 18px 0 18px;
     max-width: 80%;
-    box-shadow: 0 4px 15px rgba(127, 90, 240, 0.3);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    /* Softer shadow */
     position: relative;
+    font-weight: 500;
 }
 
 .glass-bubble-them {
     margin-right: auto;
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: white;
+    /* White Glass for "Their" messages */
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: #000000;
+    /* Black text */
     padding: 12px 16px;
     border-radius: 18px 18px 18px 0;
     max-width: 80%;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+    font-weight: 500;
 }
 
 .msg-text {
@@ -43,7 +50,8 @@ ion-content.chat-content {
     font-size: 1rem;
     line-height: 1.4;
     white-space: pre-wrap;
-    /* Preserve line breaks */
+    color: #000000;
+    /* Ensure black text */
 }
 
 /* Link Preview */
@@ -94,9 +102,14 @@ ion-content.chat-content {
 }
 
 .msg-image {
-    max-width: 100%;
+    max-width: 240px;
+    /* Mini Tile effect */
+    max-height: 240px;
+    width: 100%;
+    object-fit: cover;
     border-radius: 12px;
     margin-bottom: 2px;
+    display: block;
 }
 
 .msg-caption {
@@ -144,69 +157,135 @@ ion-footer {
     background: var(--ion-background-color);
 }
 
+/* Footer & Input */
+ion-footer {
+    background: transparent;
+    border: none;
+}
+
 .input-toolbar {
-    padding: 10px;
     --background: transparent;
+    padding: 0;
+}
+
+/* Chat Footer (Floating Pill) */
+.chat-footer {
+    background: rgba(18, 18, 20, 0.85);
+    /* Dark Glass */
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    padding: 8px 10px calc(8px + var(--ion-safe-area-bottom));
+    display: flex;
+    align-items: flex-end;
+    /* Align bottom for multiline input */
+    gap: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .input-container {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.08);
+    /* Light pill bg */
+    border-radius: 24px;
+    padding: 4px 12px;
     display: flex;
     align-items: center;
-    padding: 5px 10px;
-    border-radius: 24px !important;
-    background: rgba(36, 38, 41, 0.9);
-    /* Slightly more opaque for input */
+    min-height: 44px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: all 0.2s ease;
+
+    &:focus-within {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.2);
+        box-shadow: 0 0 10px rgba(127, 90, 240, 0.1);
+    }
 }
 
-.icon-btn {
-    --color: var(--ion-color-medium);
+.chat-input {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: white;
+    padding: 8px 0;
+    outline: none;
+    font-size: 15px;
+    resize: none;
+    max-height: 120px;
+    font-family: inherit;
+}
+
+.action-btn {
+    --padding-start: 8px;
+    --padding-end: 8px;
+    --color: #a0a0a0;
     margin: 0;
-}
+    --background: transparent;
 
-.msg-input {
-    --padding-start: 10px;
-    /* --placeholder-color: var(--ion-color-medium); */
-    font-size: 1rem;
+    &:hover {
+        --color: white;
+    }
 }
 
 .send-btn {
-    --color: var(--ion-color-secondary);
-    font-weight: bold;
+    --background: var(--ion-color-primary);
+    --border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    --padding-start: 0;
+    --padding-end: 0;
+    --box-shadow: 0 4px 15px rgba(127, 90, 240, 0.4);
+    transition: transform 0.2s;
+
+    &:active {
+        transform: scale(0.9);
+    }
+
+    ion-icon {
+        font-size: 20px;
+        margin-left: 3px;
+        /* Optical center */
+    }
 }
 
-/* Reaction Badge */
+/* Sticker Drawer */
 .sticker-drawer {
-    height: 300px;
-    background: var(--ion-background-color);
-    border-top: 1px solid var(--ion-color-medium);
+    background: rgba(30, 30, 35, 0.95);
+    backdrop-filter: blur(20px);
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    padding: 15px;
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .sticker-img {
-    max-width: 150px;
-    border-radius: 8px;
-    display: block;
-    margin: 5px 0;
+    border-radius: 12px;
+    transition: transform 0.2s;
+
+    &:active {
+        transform: scale(0.95);
+    }
 }
 
+/* Reaction Badge */
 .reactions-display {
     position: absolute;
-    bottom: -10px;
-    right: 10px;
-    background: #444;
-    border: 2px solid #1a1b1e;
+    bottom: -8px;
+    right: 12px;
+    background: #2a2a30;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     padding: 2px 6px;
+    font-size: 11px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    z-index: 5;
     display: flex;
     align-items: center;
-    gap: 2px;
-    font-size: 0.8rem;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-    z-index: 10;
-    cursor: pointer;
+    gap: 3px;
 }
 
 .reaction-count {
-    font-size: 0.7em;
+    font-size: 0.85em;
     color: #ccc;
-    margin-left: 2px;
+    font-weight: 600;
 }

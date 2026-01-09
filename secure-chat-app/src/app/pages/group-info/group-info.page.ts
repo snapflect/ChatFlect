@@ -2,6 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { NavController, ActionSheetController, AlertController, ToastController } from '@ionic/angular';
 import { ApiService } from 'src/app/services/api.service';
+import { ChatService } from 'src/app/services/chat.service';
 
 @Component({
   selector: 'app-group-info',
@@ -22,7 +23,8 @@ export class GroupInfoPage implements OnInit {
     private nav: NavController,
     private actionSheetCtrl: ActionSheetController,
     private alertCtrl: AlertController, // Fix: Added AlertController
-    private toast: ToastController
+    private toast: ToastController,
+    private chatService: ChatService
   ) {
     this.myId = localStorage.getItem('user_id') || '';
   }
@@ -154,7 +156,16 @@ export class GroupInfoPage implements OnInit {
     await alert.present();
   }
 
-  openChat(member: any) {
-    // Todo: Navigate to 1v1 chat
+  async openChat(member: any) {
+    if (!member.user_id) return;
+    try {
+      const chatId = await this.chatService.getOrCreateChat(member.user_id);
+      this.nav.navigateForward(['/chat-detail', chatId]);
+      // Close Action Sheet by not doing anything (it closes auto)
+    } catch (e) {
+      console.error("Failed to open chat", e);
+      const t = await this.toast.create({ message: 'Could not start chat', duration: 2000 });
+      t.present();
+    }
   }
 }

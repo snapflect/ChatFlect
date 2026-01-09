@@ -23,8 +23,14 @@
             <ion-input type="tel" [(ngModel)]="phoneNumber" placeholder="Phone Number (+123...)"></ion-input>
           </ion-item>
 
-          <ion-button expand="block" shape="round" class="vibrant-btn" (click)="sendOtp()" [disabled]="!phoneNumber">
-            Send OTP <ion-icon name="arrow-forward-outline" slot="end"></ion-icon>
+          <ion-item lines="none" class="custom-input">
+            <ion-icon name="mail-outline" slot="start" color="tertiary"></ion-icon>
+            <ion-input type="email" [(ngModel)]="email" placeholder="Email (For Verification)"></ion-input>
+          </ion-item>
+
+          <ion-button expand="block" shape="round" class="vibrant-btn" (click)="sendOtp()"
+            [disabled]="!phoneNumber || !email">
+            Send OTP to Email <ion-icon name="arrow-forward-outline" slot="end"></ion-icon>
           </ion-button>
         </div>
 

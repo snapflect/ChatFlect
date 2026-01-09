@@ -8,6 +8,9 @@
       </ion-avatar>
       <h2>Incoming Call</h2>
       <p>Group Call</p>
+      <div class="encrypted-badge">
+        <ion-icon name="lock-closed"></ion-icon> End-to-End Encrypted
+      </div>
 
       <div class="actions">
         <ion-button shape="round" color="danger" (click)="endCall()">
@@ -39,6 +42,12 @@
     <!-- Local Self View (Floating) -->
     <div class="local-wrapper">
       <video [srcObject]="localStream" autoplay playsinline muted class="local-video"></video>
+    </div>
+
+    <!-- Encryption Badge -->
+    <div class="encrypted-toast glass-card">
+      <ion-icon name="lock-closed" color="success"></ion-icon>
+      <span>End-to-End Encrypted</span>
     </div>
 
     <!-- Controls -->

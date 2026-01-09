@@ -37,84 +37,134 @@
 @import "@ionic/angular/css/palettes/dark.system.css";
 
 /* -------------------------------------------------------------------------- */
-/*                           CUSTOM VIBRANT DESIGN                            */
+/*                           CUSTOM PREMIUM DESIGN                            */
 /* -------------------------------------------------------------------------- */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
 :root {
-    --ion-font-family: 'Inter', sans-serif;
+    --ion-font-family: 'Outfit', sans-serif;
+    --app-bg-gradient: radial-gradient(circle at 10% 20%, rgb(30, 30, 35) 0%, rgb(18, 18, 20) 90.2%);
+    --glass-border: 1px solid rgba(255, 255, 255, 0.08);
+    --glass-bg: rgba(28, 28, 30, 0.65);
+    --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
 }
 
 body {
-    font-family: 'Inter', sans-serif !important;
+    font-family: 'Outfit', sans-serif !important;
+    background: var(--ion-background-color);
+}
+
+/* Background Mesh Effect (Pseudo) */
+ion-content {
+    --background: var(--app-bg-gradient);
 }
 
 /* Glassmorphism Card Utility */
 .glass-card {
-    background: rgba(36, 38, 41, 0.7);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
-    border-radius: 16px;
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: var(--glass-border);
+    box-shadow: var(--glass-shadow);
+    border-radius: 20px;
+    padding: 16px;
+    margin: 10px;
+}
+
+/* Inset Groups (iOS Style) */
+.inset-list {
+    background: transparent;
+    padding: 0 16px;
+
+    ion-item-group {
+        border-radius: 16px;
+        overflow: hidden;
+        margin-bottom: 20px;
+        border: var(--glass-border);
+    }
+
+    ion-item {
+        --background: rgba(35, 35, 40, 0.8);
+        --border-color: rgba(255, 255, 255, 0.05);
+    }
 }
 
 /* Gradient Text */
 .gradient-text {
-    background: linear-gradient(135deg, var(--ion-color-secondary), var(--ion-color-primary));
+    background: linear-gradient(135deg, #FF0080 0%, #7928CA 100%);
+    /* Hot Pink to Purple */
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
-    font-weight: 700;
+    font-weight: 800;
+    letter-spacing: -0.5px;
 }
 
 /* Vibrant Button */
 .vibrant-btn {
-    --background: linear-gradient(135deg, var(--ion-color-primary), #6243b8);
-    --box-shadow: 0 4px 15px rgba(127, 90, 240, 0.4);
-    --border-radius: 12px;
+    --background: linear-gradient(90deg, #4b6cb7 0%, #182848 100%);
+    /* Deep Blue */
+    --background: linear-gradient(135deg, var(--ion-color-primary) 0%, var(--ion-color-secondary) 100%);
+    --box-shadow: 0 10px 20px -10px rgba(127, 90, 240, 0.5);
+    --border-radius: 14px;
     font-weight: 600;
     letter-spacing: 0.5px;
     text-transform: none;
-    --padding-top: 15px;
-    --padding-bottom: 15px;
+    --padding-top: 18px;
+    --padding-bottom: 18px;
+    transition: transform 0.2s ease;
+
+    &.button-pressed {
+        transform: scale(0.97);
+    }
 }
 
-/* Input Styles */
+/* Floating Input */
 ion-item.custom-input {
-    --background: rgba(255, 255, 255, 0.05);
-    --border-radius: 12px;
-    --padding-start: 15px;
-    margin-bottom: 15px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    --background: rgba(0, 0, 0, 0.2);
+    --border-radius: 16px;
+    --padding-start: 16px;
+    --inner-padding-end: 16px;
+    margin-bottom: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+
+    &.item-has-focus {
+        border-color: var(--ion-color-primary);
+        box-shadow: 0 0 15px rgba(127, 90, 240, 0.15);
+    }
 }
 
-ion-item.custom-input:focus-within {
-    border-color: var(--ion-color-primary);
-    box-shadow: 0 0 0 1px var(--ion-color-primary);
-    transition: all 0.3s ease;
+/* Avatar Ring */
+.avatar-ring {
+    border: 2px solid var(--ion-color-secondary);
+    padding: 2px;
+    border-radius: 50%;
 }
 
-/* Toolbar Overrides */
-ion-toolbar {
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fade-in {
+    animation: fadeIn 0.4s ease-out forwards;
+}
+
+/* Global Header Polish */
+ion-header.ion-no-border ion-toolbar {
     --background: transparent;
-    --border-color: transparent;
-}
-
-ion-header {
-    box-shadow: none;
-    /* Add subtle blur for sticky headers if needed, generally handled by page content */
 }
 
 ion-title {
     font-weight: 700;
-    letter-spacing: -0.5px;
-    font-size: 1.2rem;
-}
-
-/* List Item Overrides */
-ion-item {
-    --background: transparent;
-    --color: var(--ion-text-color);
+    font-size: 1.5rem;
 }

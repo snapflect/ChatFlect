@@ -1,8 +1,9 @@
 import { Component, OnInit } from '@angular/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { ProfileService } from 'src/app/services/profile.service';
-import { ToastController, NavController } from '@ionic/angular';
+import { ToastController, NavController, ModalController } from '@ionic/angular';
 import { LoggingService } from 'src/app/services/logging.service';
+import { ImagePreviewModalPage } from '../image-preview-modal/image-preview-modal.page';
 
 @Component({
   selector: 'app-profile',
@@ -22,7 +23,8 @@ export class ProfilePage implements OnInit {
     private profileService: ProfileService,
     private toast: ToastController,
     private nav: NavController,
-    private logger: LoggingService
+    private logger: LoggingService,
+    private modalCtrl: ModalController
   ) { }
 
   ngOnInit() {
@@ -56,10 +58,10 @@ export class ProfilePage implements OnInit {
   async changePhoto() {
     try {
       const image = await Camera.getPhoto({
-        quality: 70,
-        allowEditing: false,
-        resultType: CameraResultType.Base64,
-        source: CameraSource.Prompt // Ask: Camera or Photos
+        quality: 80, // Increased quality slightly
+        allowEditing: true, // User request: "allow crop and resize"
+        resultType: CameraResultType.Base64, // Still use Base64 for handling
+        source: CameraSource.Prompt
       });
 
       if (image.base64String) {
@@ -107,6 +109,18 @@ export class ProfilePage implements OnInit {
     } catch (e) {
       this.logger.error("Upload Error", e);
       await this.toast.create({ message: 'Upload Failed', duration: 1500 }).then(t => t.present());
+    }
+  }
+
+  async viewPhoto() {
+    if (this.profile.photo_url) {
+      const modal = await this.modalCtrl.create({
+        component: ImagePreviewModalPage,
+        componentProps: {
+          imageUrl: this.profile.photo_url
+        }
+      });
+      return await modal.present();
     }
   }
 

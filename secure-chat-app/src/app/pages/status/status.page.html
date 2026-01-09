@@ -37,6 +37,10 @@
       <h2>My Status</h2>
       <p *ngIf="!myStatus">Tap to add to my status</p>
       <p *ngIf="myStatus">{{ myStatus.updates.length }} active update{{ myStatus.updates.length > 1 ? 's' : '' }}</p>
+
+      <div class="view-count-badge" *ngIf="myStatus?.view_count > 0" (click)="showViewers($event, myStatus)">
+        <ion-icon name="eye"></ion-icon> {{ myStatus.view_count }}
+      </div>
     </ion-label>
   </ion-item>
 
@@ -141,5 +145,37 @@
     height: 100%;
     opacity: 0;
     z-index: 10;
+  }
+
+  .view-count-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.85rem;
+    color: var(--ion-color-medium);
+    margin-top: 5px;
+    padding: 2px 8px;
+    background: rgba(var(--ion-color-light-rgb), 0.5);
+    border-radius: 12px;
+
+    ion-icon {
+      font-size: 14px;
+    }
+  }
+
+  .view-count-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.85rem;
+    color: var(--ion-color-medium);
+    margin-top: 5px;
+    padding: 2px 8px;
+    background: rgba(var(--ion-color-light-rgb), 0.5);
+    border-radius: 12px;
+
+    ion-icon {
+      font-size: 14px;
+    }
   }
 </style>

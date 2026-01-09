@@ -72,6 +72,12 @@ export class CallService {
         const myId = localStorage.getItem('user_id');
         if (!myId) return;
 
+        if (participantIds.length > 7) { // 7 others + me = 8
+            this.logger.error("Call Limit Exceeded");
+            // Ideally assume caller UI handles the error via catch, but let's throw
+            throw new Error("Group Call Limit: Max 8 Participants");
+        }
+
         this.activeCallType = type;
         await this.getMedia(type);
 
@@ -105,19 +111,51 @@ export class CallService {
     async answerCall() {
         if (!this.incomingCallData || !this.currentCallId) return;
         const myId = localStorage.getItem('user_id');
+        if (!myId) return;
+
+        const callId = this.currentCallId;
 
         await this.getMedia(this.activeCallType);
         this.callStatus.next('connected');
 
         // Subscribe to signals in this room
-        this.subscribeToSignals(this.currentCallId);
+        this.subscribeToSignals(callId);
 
-        // Update Call Status to 'active' if I'm the first answerer? 
-        // Or just join.
-        // For Mesh: When I join, I check existing signals.
-        // But also, I should issue OFFERS to anyone who hasn't offered to me?
-        // Simplified: The Caller already sent Offers to me (via Signals collection).
-        // I process them.
+        // --- FULL MESH LOGIC ---
+        // 1. Join the call document (add myself to participants if not there? 
+        //    Actually, usually the caller adds everyone. Assuming I am in the list.)
+
+        // 2. Connect to existing peers
+        // Logic: Iterate all participants.
+        // If (MyID < TheirID) AND (Not Connected), I OFFER.
+        // If (MyID > TheirID), I WAIT (They will OFFER).
+        // Exception: The Caller (Initiator) usually offers to everyone regardless of ID to kickstart?
+        //    Current implementation: Caller offers to everyone in startGroupCall.
+        //    So if I am NOT Caller, I wait for Caller's offer (which is already sent).
+        //    But for OTHER Joiners (Fellow Guests), we need to peer up.
+
+        const participants = this.incomingCallData.participants || [];
+        const callerId = this.incomingCallData.callerId;
+
+        for (const pid of participants) {
+            if (pid === myId) continue; // Skip self
+
+            // Check if already connected (e.g. Caller)
+            if (this.peers.has(pid)) continue;
+
+            // If it's the Caller, I expect an Offer from them (standard flow).
+            // But if I missed it? The signals query should catch it (onSnapshot).
+            if (pid === callerId) continue;
+
+            // For other peers (Guests):
+            // Deterministic Rule: Lower ID offers to Higher ID.
+            if (myId < pid) {
+                this.logger.log(`[Mesh] Initiating connection to peer ${pid} (I am Lower ID)`);
+                await this.initiatePeerConnection(pid, callId);
+            } else {
+                this.logger.log(`[Mesh] Waiting for peer ${pid} to offer (I am Higher ID)`);
+            }
+        }
     }
 
     async endCall() {

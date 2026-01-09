@@ -7,6 +7,7 @@ import { PresenceService } from './services/presence.service';
 import { App } from '@capacitor/app';
 import { NativeBiometric } from 'capacitor-native-biometric';
 import { AlertController } from '@ionic/angular';
+import { Router } from '@angular/router';
 
 @Component({
   selector: 'app-root',
@@ -20,7 +21,8 @@ export class AppComponent implements OnInit {
     private modalCtrl: ModalController,
     private pushService: PushService,
     private presence: PresenceService,
-    private alertCtrl: AlertController
+    private alertCtrl: AlertController,
+    private router: Router
   ) { }
 
   async ngOnInit() {
@@ -29,6 +31,15 @@ export class AppComponent implements OnInit {
 
     // Presence Logic
     this.presence.setPresence('online');
+
+    // Deep Linking (Push)
+    this.pushService.messageSubject.subscribe(notification => {
+      if (notification && notification.data && notification.data.chatId) {
+        const chatId = notification.data.chatId;
+        // Use NgZone if coming from outside Angular
+        this.router.navigateByUrl(`/chat-detail/${chatId}`);
+      }
+    });
 
     App.addListener('appStateChange', async ({ isActive }) => {
       this.presence.setPresence(isActive ? 'online' : 'offline');

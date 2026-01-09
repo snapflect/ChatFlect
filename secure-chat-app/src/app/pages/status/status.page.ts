@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { StatusService } from 'src/app/services/status.service';
-import { ModalController, ToastController } from '@ionic/angular';
+import { ModalController, ToastController, AlertController } from '@ionic/angular';
 import { StatusViewerPage } from '../status-viewer/status-viewer.page';
 
 @Component({
@@ -17,8 +17,35 @@ export class StatusPage implements OnInit {
   constructor(
     private statusService: StatusService,
     private modalCtrl: ModalController,
-    private toast: ToastController
+    private toast: ToastController,
+    private alertCtrl: AlertController
   ) { }
+
+  // ...
+
+  async showViewers(event: Event, status: any) {
+    event.stopPropagation(); // Don't open viewer
+
+    const viewers: any = await this.statusService.getViewers(status.id).toPromise();
+
+    if (!viewers || viewers.length === 0) {
+      const t = await this.toast.create({ message: 'No views yet', duration: 1000 });
+      t.present();
+      return;
+    }
+
+    const alert = await this.alertCtrl.create({
+      header: 'Viewed By',
+      inputs: viewers.map((v: any) => ({
+        type: 'radio',
+        label: `${v.first_name} ${v.last_name} (${new Date(v.viewed_at).toLocaleTimeString()})`,
+        value: v.viewer_id,
+        disabled: true // Just for display
+      })),
+      buttons: ['Close']
+    });
+    await alert.present();
+  }
 
   ngOnInit() {
     this.loadStatus();

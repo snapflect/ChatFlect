@@ -12,11 +12,11 @@ export class StatusService {
         return this.api.get('status.php?action=feed');
     }
 
-    // Upload Media Status
-    uploadStatus(file: File, caption: string, privacy: string = 'everyone') {
+    // Upload Media Status (Image/Video/Audio)
+    uploadStatus(file: File, caption: string, type: 'image' | 'video' | 'audio' = 'image', privacy: string = 'everyone') {
         const formData = new FormData();
         formData.append('file', file);
-        formData.append('type', 'image'); // Default assumption, could be video
+        formData.append('type', type);
         formData.append('caption', caption);
         formData.append('privacy', privacy);
         formData.append('user_id', localStorage.getItem('user_id') || '');
@@ -35,5 +35,16 @@ export class StatusService {
         formData.append('user_id', localStorage.getItem('user_id') || '');
 
         return this.api.post('status.php', formData);
+    }
+
+    recordView(statusId: string) {
+        return this.api.post('status.php?action=view', {
+            status_id: statusId,
+            viewer_id: localStorage.getItem('user_id')
+        });
+    }
+
+    getViewers(statusId: string) {
+        return this.api.get(`status.php?action=viewers&status_id=${statusId}`);
     }
 }

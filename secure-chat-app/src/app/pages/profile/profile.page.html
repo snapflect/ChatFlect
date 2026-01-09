@@ -12,7 +12,7 @@
 <ion-content [fullscreen]="true">
   <div class="profile-header ion-text-center">
     <div class="avatar-container">
-      <ion-avatar class="profile-avatar">
+      <ion-avatar class="profile-avatar" (click)="viewPhoto()">
         <img [src]="profile.photo_url || 'https://gravatar.com/avatar?d=mp'" />
       </ion-avatar>
       <ion-button fill="clear" class="change-photo-btn" (click)="changePhoto()">

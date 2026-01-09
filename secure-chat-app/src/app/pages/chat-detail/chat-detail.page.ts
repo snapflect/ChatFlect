@@ -71,19 +71,33 @@ export class ChatDetailPage implements OnInit {
     this.chatId = this.route.snapshot.paramMap.get('id');
     if (this.chatId) {
       // Fetch Chat Metadata (Includes Typing Info)
-      this.chatService.getChatDetails(this.chatId).subscribe((chat: any) => {
+      // Fetch Chat Metadata (Includes Typing Info)
+      this.chatService.getChatDetails(this.chatId).subscribe(async (chat: any) => {
         if (chat) {
           this.isGroup = chat.isGroup;
-          this.isGroup = chat.isGroup;
-          this.chatName = chat.isGroup ? chat.groupName : 'User';
           this.participants = chat.participants || [];
-          this.currentTimer = chat.autoDeleteTimer || 0;
 
-          // 1. Presence (1:1 Only)
-          if (!this.isGroup && this.participants.length === 2) {
+          if (this.isGroup) {
+            this.chatName = chat.groupName;
+          } else {
+            // 1:1 Chat - Find the other user and fetch their profile
             const otherId = this.participants.find(p => String(p) !== String(this.currentUserId));
             if (otherId) {
-              // Subscribe to their status
+              // Determine name (Try cache/contact list first, then API)
+              // For now, simpler: check locally or hit API
+              // Assuming we might have it in a separate contact service, but let's query Auth/Profile
+              try {
+                const profile: any = await this.api.post('profile.php', { action: 'get_profile', user_id: otherId }).toPromise();
+                if (profile && profile.username) {
+                  this.chatName = profile.username;
+                } else {
+                  this.chatName = 'User';
+                }
+              } catch (e) {
+                this.chatName = 'User';
+              }
+
+              // Presence
               this.presence.getPresence(otherId).subscribe(p => {
                 this.otherUserPresence = p;
               });
@@ -442,9 +456,8 @@ export class ChatDetailPage implements OnInit {
       header: 'Share Media',
       buttons: [
         { text: 'Document', icon: 'document', handler: () => { this.pickDocument(); } },
-        { text: 'Camera', icon: 'camera', handler: () => { this.logger.log('Open Camera'); } },
-        { text: 'Gallery', icon: 'image', handler: () => { this.pickImage(); } },
-        { text: 'Audio', icon: 'musical-notes', handler: () => { this.logger.log('Pick Audio'); } },
+        { text: 'Gallery (Photo/Video)', icon: 'image', handler: () => { this.pickMedia(); } },
+        { text: 'Audio', icon: 'musical-notes', handler: () => { this.pickAudio(); } },
         { text: 'Location (Static)', icon: 'location', handler: () => { this.shareLocation(); } },
         { text: 'Live Location', icon: 'navigate', handler: () => { this.shareLiveLocation(); } },
         { text: 'Contact', icon: 'person', handler: () => { this.logger.log('Share Contact'); } },
@@ -454,20 +467,89 @@ export class ChatDetailPage implements OnInit {
     await actionSheet.present();
   }
 
+  // --- Media Pcking ---
+
+  pickMedia() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,video/*';
+    input.onchange = (e) => this.onMediaSelected(e);
+    input.click();
+  }
+
+  async onMediaSelected(event: any) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (file.type.startsWith('video/')) {
+      await this.handleVideoUpload(file);
+    } else {
+      await this.uploadImage(event); // Existing Image Logic
+    }
+  }
+
+  async handleVideoUpload(file: File) {
+    if (!this.chatId) return;
+    const load = await this.toastCtrl.create({ message: 'Processing Video...', duration: 2000 });
+    load.present();
+
+    // Generate Thumbnail
+    const thumb = await this.generateVideoThumbnail(file);
+    const duration = 10; // TODO: Get actual duration
+
+    await this.chatService.sendVideoMessageClean(
+      this.chatId,
+      file,
+      this.currentUserId,
+      duration,
+      thumb,
+      '' // Caption TODO
+    );
+    this.scrollToBottom();
+  }
+
+  generateVideoThumbnail(file: File): Promise<Blob | null> {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.src = URL.createObjectURL(file);
+      video.currentTime = 1; // Capture at 1s
+
+      video.onloadeddata = () => {
+        // Wait slightly for seek
+        setTimeout(() => {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.7);
+        }, 500);
+      };
+      video.onerror = () => resolve(null);
+    });
+  }
+
+  pickAudio() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*';
+    input.onchange = (e: any) => {
+      const file = e.target.files[0];
+      if (file && this.chatId) {
+        // 0 duration for file uploads unless we parse it.
+        this.chatService.sendAudioMessage(this.chatId, file, this.currentUserId, 0);
+        this.scrollToBottom();
+      }
+    };
+    input.click();
+  }
+
+  // ... (Live Location, etc)
+
   async shareLiveLocation() {
     if (!this.chatId) return;
     await this.locationService.startSharing(this.chatId);
-    this.showToast("Live Location started. You can stop it in the Map view.");
-
-    // Optionally send a message
-    // await this.chatService.sendMessage(this.chatId, "📍 Started sharing Live Location", this.currentUserId);
     this.viewLiveMap();
-  }
-
-  viewLiveMap() {
-    if (this.chatId) {
-      this.nav.navigateForward(['/live-map', { chatId: this.chatId }]);
-    }
   }
 
   showStickerPicker = false;
@@ -475,7 +557,6 @@ export class ChatDetailPage implements OnInit {
   toggleStickerPicker() {
     this.showStickerPicker = !this.showStickerPicker;
     if (this.showStickerPicker) {
-      // Scroll to bottom after opening
       setTimeout(() => this.content.scrollToBottom(300), 100);
     }
   }
@@ -492,15 +573,6 @@ export class ChatDetailPage implements OnInit {
 
   getStickerUrl(msg: any): string {
     return msg.url;
-  }
-
-  pickImage() {
-    // Trigger file input programmatically
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = (e: any) => this.uploadImage(e);
-    input.click();
   }
 
   // --- Voice Recording ---
@@ -588,6 +660,16 @@ export class ChatDetailPage implements OnInit {
     }
   }
 
+  openVideo(vidData: any) {
+    if (vidData._blobUrl) {
+      let url = vidData._blobUrl;
+      if (typeof url === 'object' && url.changingThisBreaksApplicationSecurity) url = url.changingThisBreaksApplicationSecurity;
+      window.open(url, '_blank');
+    }
+  }
+
+
+
 
 
   async shareLocation() {
@@ -613,6 +695,12 @@ export class ChatDetailPage implements OnInit {
     }
   }
 
+  viewLiveMap() {
+    if (this.chatId) {
+      this.nav.navigateForward(['/live-map', { chatId: this.chatId }]);
+    }
+  }
+
   openLocation(lat: number, lng: number) {
     const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
     window.open(url, '_blank');
@@ -623,22 +711,28 @@ export class ChatDetailPage implements OnInit {
   async uploadImage(event: any) {
     const file = event.target.files[0];
     if (file && this.chatId) {
-      // 1. Compress
-      const compressed = await this.compressImage(file);
+      // 1. Compress (Skip if GIF to preserve animation)
+      let finalBlob: Blob = file;
+      if (file.type !== 'image/gif') {
+        try {
+          finalBlob = await this.compressImage(file);
+        } catch (e) {
+          this.logger.error("Compression Error", e);
+          // Fallback to original
+          finalBlob = file;
+        }
+      }
 
       // 2. Open Preview Modal
       const modal = await this.modalController.create({
         component: ImagePreviewModalPage,
-        componentProps: { imageFile: compressed }
+        componentProps: { imageFile: finalBlob }
       });
 
       modal.onDidDismiss().then(async (result) => {
         if (result.role === 'send' && result.data) {
           // 3. Send
-          // NOTE: We haven't refactored sendImageMessage to use the new helper in Service yet, 
-          // but it still works as is. The Service has the old method too? 
-          // Wait, I didn't delete the old sendImageMessage, so it's fine.
-          await this.chatService.sendImageMessage(this.chatId!, compressed, this.currentUserId, result.data.caption);
+          await this.chatService.sendImageMessage(this.chatId!, finalBlob, this.currentUserId, result.data.caption);
           this.scrollToBottom();
         }
       });
@@ -649,12 +743,13 @@ export class ChatDetailPage implements OnInit {
 
   async compressImage(file: File): Promise<Blob> {
     return new Promise((resolve, reject) => {
+      // Logic same as before
       const img = new Image();
       img.src = URL.createObjectURL(file);
       img.onload = () => {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        const maxWidth = 1024; // Resize to max 1024px
+        const maxWidth = 1024;
         let width = img.width;
         let height = img.height;
 
@@ -670,7 +765,7 @@ export class ChatDetailPage implements OnInit {
         canvas.toBlob((blob) => {
           if (blob) resolve(blob);
           else reject(new Error('Compression failed'));
-        }, 'image/jpeg', 0.7); // 70% Quality
+        }, 'image/jpeg', 0.7);
       };
       img.onerror = (e) => reject(e);
     });
@@ -687,6 +782,19 @@ export class ChatDetailPage implements OnInit {
   getMsgType(text: any): string {
     if (typeof text === 'object' && text !== null) return text.type || 'unknown';
     return 'text';
+  }
+
+  getMsgContent(msg: any): string {
+    if (typeof msg.text === 'string') return msg.text;
+    if (typeof msg.text === 'object') {
+      // If it's a media object, we shouldn't be calling this for text display anyway, 
+      // but as a fallback:
+      if (msg.text.type) return ''; // Handled by specific media UI
+
+      // If it's pure JSON metadata (failed decryption?)
+      return '[Encrypted Message]';
+    }
+    return '';
   }
 
   // --- Audio Logic ---

@@ -17,6 +17,7 @@ export class LoginPage implements OnDestroy {
 
   mode: 'phone' | 'qr' = 'phone';
   phoneNumber = '';
+  email = ''; // Added
   otp = '';
   otpSent = false;
   qrLoading = false;
@@ -102,18 +103,23 @@ export class LoginPage implements OnDestroy {
   }
 
   async sendOtp() {
-    this.auth.requestOtp(this.phoneNumber).subscribe({
+    if (!this.phoneNumber || !this.email) {
+      this.showToast("Please enter Phone Number and Email");
+      return;
+    }
+
+    this.auth.requestOtp(this.phoneNumber, this.email).subscribe({
       next: (res: any) => {
         this.otpSent = true;
-        this.showToast('OTP Sent! (Use 123456)');
+        this.showToast('OTP Sent to Email!');
       },
       error: (err) => {
         this.logger.error("Login Error", err);
         let msg = 'Error sending OTP';
         if (err.error && err.error.error) {
-          msg = err.error.error; // PHP Error
+          msg = err.error.error;
         } else if (err.message) {
-          msg = err.message; // JS/Network Error
+          msg = err.message;
         }
         this.showToast(msg);
       }
@@ -122,11 +128,12 @@ export class LoginPage implements OnDestroy {
 
   async verifyOtp() {
     try {
-      await this.auth.verifyOtp(this.phoneNumber, this.otp);
+      const res: any = await this.auth.verifyOtp(this.phoneNumber, this.otp, this.email);
       this.showToast('Login Successful');
+
       this.zone.run(() => {
-        this.router.navigate(['/profile']).then(nav => {
-          this.logger.log('Navigation result:', nav);
+        const targetRoute = (res.is_new_user) ? '/profile' : '/tabs';
+        this.router.navigate([targetRoute]).then(nav => {
           if (!nav) this.showToast('Navigation Failed');
         });
       });

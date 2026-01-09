@@ -60,17 +60,19 @@ export class AuthService {
         this.pushService.initPush();
     }
 
-    // Phase 1: Simulate sending OTP
-    requestOtp(phoneNumber: string) {
+    // Phase 17: Email OTP
+    requestOtp(phoneNumber: string, email: string) {
         if (!/^\+?[0-9]{10,15}$/.test(phoneNumber)) {
-            // Return error observable
-            return throwError(() => new Error('Invalid phone number format (10-15 digits required)'));
+            return throwError(() => new Error('Invalid phone number format'));
         }
-        return this.api.post('register.php', { phone_number: phoneNumber });
+        if (!email || !email.includes('@')) {
+            return throwError(() => new Error('Invalid email address'));
+        }
+        return this.api.post('register.php', { phone_number: phoneNumber, email: email });
     }
 
-    // Phase 1: Verify OTP and Register/Login
-    async verifyOtp(phoneNumber: string, otp: string) {
+    // Phase 17: Verify OTP and Register/Login
+    async verifyOtp(phoneNumber: string, otp: string, email: string) {
         try {
             // 1. Generate Key Pair (Real)
             const keys = await this.crypto.generateKeyPair();
@@ -81,16 +83,19 @@ export class AuthService {
             localStorage.setItem('private_key', privateKeyStr);
             localStorage.setItem('public_key', publicKeyStr);
 
-            // 2. Call API to confirm and upload Public Key
+            // 2. Call API to confirm
             const response: any = await this.api.post('profile.php', {
                 action: 'confirm_otp',
                 phone_number: phoneNumber,
+                email: email,
+                otp: otp,
                 public_key: publicKeyStr
             }).toPromise();
 
             if (response && response.status === 'success') {
                 this.setSession(response.user_id);
-                return { success: true };
+                // Also save email locally if needed? Not critical.
+                return response;
             }
             throw new Error(response.message || 'API Error: Registration Failed');
         } catch (e: any) {

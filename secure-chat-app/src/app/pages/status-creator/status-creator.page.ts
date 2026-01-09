@@ -10,7 +10,7 @@ import { ToastController, LoadingController } from '@ionic/angular';
   standalone: false
 })
 export class StatusCreatorPage {
-  type: 'text' | 'image' = 'text';
+  type: 'text' | 'image' | 'video' | 'audio' = 'text';
 
   // Text Mode Data
   textContent = '';
@@ -19,7 +19,7 @@ export class StatusCreatorPage {
   colors = ['#EF5350', '#AB47BC', '#5C6BC0', '#26A69A', '#66BB6A', '#FFA726', '#8D6E63', '#455A64'];
   fonts = ['sans-serif', 'serif', 'monospace', 'cursive'];
 
-  // Image Mode Data
+  // Media Mode Data
   selectedFile: File | null = null;
   previewUrl: string | null = null;
   caption = '';
@@ -35,7 +35,10 @@ export class StatusCreatorPage {
   ) { }
 
   onTypeChange() {
-    // Reset validations if needed
+    // Reset validations when switching types
+    this.selectedFile = null;
+    this.previewUrl = null;
+    this.textContent = '';
   }
 
   toggleFont() {
@@ -47,9 +50,20 @@ export class StatusCreatorPage {
     const file = event.target.files[0];
     if (file) {
       this.selectedFile = file;
-      const reader = new FileReader();
-      reader.onload = (e: any) => this.previewUrl = e.target.result;
-      reader.readAsDataURL(file);
+      const mime = file.type;
+
+      if (mime.startsWith('image')) {
+        this.type = 'image';
+        const reader = new FileReader();
+        reader.onload = (e: any) => this.previewUrl = e.target.result;
+        reader.readAsDataURL(file);
+      } else if (mime.startsWith('video')) {
+        this.type = 'video';
+        this.previewUrl = URL.createObjectURL(file); // For video preview
+      } else if (mime.startsWith('audio')) {
+        this.type = 'audio';
+        this.previewUrl = null; // No visual preview for audio
+      }
     }
   }
 
@@ -59,7 +73,10 @@ export class StatusCreatorPage {
 
     try {
       if (this.type === 'text') {
-        if (!this.textContent.trim()) return;
+        if (!this.textContent.trim()) {
+          loading.dismiss();
+          return;
+        }
         await this.statusService.uploadTextStatus(
           this.textContent,
           this.backgroundColor,
@@ -67,18 +84,24 @@ export class StatusCreatorPage {
           this.privacy
         ).toPromise();
       } else {
-        if (!this.selectedFile) return;
+        if (!this.selectedFile) {
+          loading.dismiss();
+          return;
+        }
+
         await this.statusService.uploadStatus(
           this.selectedFile,
           this.caption,
+          this.type,
           this.privacy
         ).toPromise();
       }
 
       loading.dismiss();
       this.showToast('Status Posted!');
-      this.router.navigate(['/status']); // Assuming there is a Status Feed page
+      this.router.navigate(['/tabs/status']);
     } catch (e) {
+      console.error(e);
       loading.dismiss();
       this.showToast('Failed to post status');
     }

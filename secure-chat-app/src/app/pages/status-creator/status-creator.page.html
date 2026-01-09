@@ -21,7 +21,7 @@
         <ion-label>Text</ion-label>
       </ion-segment-button>
       <ion-segment-button value="image">
-        <ion-label>Image</ion-label>
+        <ion-label>Media</ion-label>
       </ion-segment-button>
     </ion-segment>
   </div>
@@ -47,19 +47,28 @@
     </div>
   </div>
 
-  <!-- IMAGE MODE -->
-  <div *ngIf="type === 'image'" class="image-container">
-    <div class="upload-box" (click)="fileInput.click()" *ngIf="!previewUrl">
-      <ion-icon name="image-outline"></ion-icon>
-      <p>Tap to select image</p>
+  <!-- MEDIA MODE (Image/Video/Audio) -->
+  <div *ngIf="type !== 'text'" class="image-container">
+    <div class="upload-box" (click)="fileInput.click()" *ngIf="!selectedFile">
+      <ion-icon name="cloud-upload-outline"></ion-icon>
+      <p>Tap to select Photo, Video or Audio</p>
     </div>
 
-    <img *ngIf="previewUrl" [src]="previewUrl" class="preview-img" />
+    <!-- Previews -->
+    <img *ngIf="type === 'image' && previewUrl" [src]="previewUrl" class="preview-img" />
 
-    <ion-input [(ngModel)]="caption" placeholder="Add a caption..." class="caption-input" *ngIf="previewUrl">
+    <video *ngIf="type === 'video' && previewUrl" [src]="previewUrl" controls class="preview-img"></video>
+
+    <div *ngIf="type === 'audio' && selectedFile" class="audio-preview">
+      <ion-icon name="musical-notes" size="large"></ion-icon>
+      <p>{{ selectedFile.name }}</p>
+    </div>
+
+
+    <ion-input [(ngModel)]="caption" placeholder="Add a caption..." class="caption-input" *ngIf="selectedFile">
     </ion-input>
 
-    <input #fileInput type="file" (change)="onFileSelected($event)" hidden accept="image/*" />
+    <input #fileInput type="file" (change)="onFileSelected($event)" hidden accept="image/*,video/*,audio/*" />
   </div>
 
   <!-- PRIVACY SETTING -->

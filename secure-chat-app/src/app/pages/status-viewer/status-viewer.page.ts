@@ -1,5 +1,6 @@
 import { Component, Input, OnInit, OnDestroy } from '@angular/core';
 import { ModalController } from '@ionic/angular';
+import { StatusService } from 'src/app/services/status.service';
 
 @Component({
   selector: 'app-status-viewer',
@@ -17,10 +18,14 @@ export class StatusViewerPage implements OnInit, OnDestroy {
 
   isPaused = false;
 
-  constructor(private modalCtrl: ModalController) { }
+  constructor(
+    private modalCtrl: ModalController,
+    private statusService: StatusService
+  ) { }
 
   ngOnInit() {
     this.startTimer();
+    this.recordCurrentView();
   }
 
   ngOnDestroy() {
@@ -53,10 +58,19 @@ export class StatusViewerPage implements OnInit, OnDestroy {
     this.isPaused = false;
   }
 
+  recordCurrentView() {
+    const currentStatus = this.userStatuses[this.currentIndex];
+    if (currentStatus && currentStatus.id) {
+      // Fire and forget view recording
+      this.statusService.recordView(currentStatus.id).subscribe();
+    }
+  }
+
   next() {
     if (this.currentIndex < this.userStatuses.length - 1) {
       this.currentIndex++;
       this.progress = 0; // Reset progress for next slide
+      this.recordCurrentView(); // Record view for next slide
     } else {
       this.close();
     }
