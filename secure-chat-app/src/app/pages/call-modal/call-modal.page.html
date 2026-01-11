@@ -3,14 +3,19 @@
 
         <!-- Video UI -->
         <div class="video-container" *ngIf="isVideo">
-            <video id="remoteVideo" autoplay playsinline class="remote-video"></video>
-            <video id="localVideo" autoplay playsinline muted class="local-video"></video>
+            <!-- Hide Remote Video while Incoming/Calling. Only show when connected. -->
+            <video id="remoteVideo" autoplay playsinline controls="false" class="remote-video"
+                [class.hidden]="status !== 'connected'"></video>
+
+            <!-- Local Preview: Show only if stream available. Avoid placeholder. -->
+            <video id="localVideo" autoplay playsinline muted controls="false" class="local-video"
+                *ngIf="localStream"></video>
         </div>
 
         <!-- Audio UI (Avatar) - Hide if Video connected -->
         <div class="call-header ion-text-center" *ngIf="!isVideo || status !== 'connected'">
             <ion-avatar class="large-avatar">
-                <img src="assets/avatar-placeholder.png" />
+                <img [src]="callerPhoto" />
             </ion-avatar>
             <h2>{{ callerName }}</h2>
             <p class="status-text animate-pulse">

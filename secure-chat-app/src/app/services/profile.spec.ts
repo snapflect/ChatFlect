@@ -1,13 +1,19 @@
 import { TestBed } from '@angular/core/testing';
+import { ProfileService } from './profile.service';
+import { ApiService } from './api.service';
+import { of } from 'rxjs';
 
-import { Profile } from './profile';
-
-describe('Profile', () => {
-  let service: Profile;
+describe('ProfileService', () => {
+  let service: ProfileService;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({});
-    service = TestBed.inject(Profile);
+    TestBed.configureTestingModule({
+      providers: [
+        ProfileService,
+        { provide: ApiService, useValue: jasmine.createSpyObj('ApiService', ['get', 'post']) }
+      ]
+    });
+    service = TestBed.inject(ProfileService);
   });
 
   it('should be created', () => {

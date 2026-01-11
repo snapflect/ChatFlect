@@ -9,6 +9,8 @@ import { App } from '@capacitor/app';
 import { NativeBiometric } from 'capacitor-native-biometric';
 import { AlertController } from '@ionic/angular';
 import { Router } from '@angular/router';
+import { SoundService } from './services/sound.service';
+import { ChatService } from './services/chat.service';
 
 @Component({
   selector: 'app-root',
@@ -23,7 +25,9 @@ export class AppComponent implements OnInit {
     private pushService: PushService,
     private presence: PresenceService,
     private alertCtrl: AlertController,
-    private router: Router
+    private router: Router,
+    private soundService: SoundService,
+    private chatService: ChatService
   ) { }
 
   async ngOnInit() {
@@ -40,13 +44,18 @@ export class AppComponent implements OnInit {
     // Presence Logic
     this.presence.setPresence('online');
 
-    // Deep Linking (Push)
+    // Push Notification Messages (deep link on tap)
     this.pushService.messageSubject.subscribe(notification => {
       if (notification && notification.data && notification.data.chatId) {
-        const chatId = notification.data.chatId;
-        // Use NgZone if coming from outside Angular
-        this.router.navigateByUrl(`/chat-detail/${chatId}`);
+        // Deep link when user taps notification
+        this.router.navigateByUrl(`/chat-detail/${notification.data.chatId}`);
       }
+    });
+
+    // Real-time Message Sound (from Firestore listener)
+    this.chatService.newMessage$.subscribe(msg => {
+      // SoundService checks if user is already in this chat
+      this.soundService.playMessageSound(msg.chatId);
     });
 
     App.addListener('appStateChange', async ({ isActive }) => {
@@ -60,21 +69,26 @@ export class AppComponent implements OnInit {
       }
     });
 
-    // Global Call Listener
+    // Global Call Listener - Only show modal for INCOMING calls
+    // Outgoing calls navigate directly to /group-call page (handled by chat-detail.page.ts)
     this.callService.callStatus.subscribe(async (status) => {
-      if (status === 'incoming' || status === 'calling') {
-        const callType = (this.callService as any).activeCallType || 'audio';
+      if (status === 'incoming') {
+        const callType = this.callService.activeCallType || 'audio';
+        const isGroup = this.callService.isGroupCall;
 
         const modal = await this.modalCtrl.create({
           component: CallModalPage,
           componentProps: {
             status: status,
-            callerName: 'Contact',
+            callerName: isGroup ? 'Group Call' : 'Contact',
             callType: callType
           },
           backdropDismiss: false
         });
         await modal.present();
+      } else if (status === 'connected') {
+        // Ensure we navigate to the main call screen
+        this.router.navigate(['/group-call']);
       }
     });
   }

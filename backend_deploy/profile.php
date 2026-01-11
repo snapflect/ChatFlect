@@ -29,40 +29,63 @@ if ($method === 'POST') {
         // Finalize registration
         $phone = $data->phone_number;
         $publicKey = $data->public_key;
+        $otpInput = $data->otp ?? '';
+        $email = $data->email ?? null;
 
-        // Check if user exists
-        $stmt = $pdo->prepare("SELECT id, user_id FROM users WHERE phone_number = ?");
-        $stmt->execute([$phone]);
-        $user = $stmt->fetch();
+        if (empty($otpInput)) {
+            http_response_code(400);
+            echo json_encode(["error" => "OTP required"]);
+            exit;
+        }
+
+        // 1. Verify OTP
+        $stmt = $conn->prepare("SELECT id, expires_at FROM otps WHERE phone_number = ? AND otp_code = ? AND expires_at > NOW() ORDER BY id DESC LIMIT 1");
+        $stmt->bind_param("ss", $phone, $otpInput);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $otpRecord = $res->fetch_assoc();
+
+        if (!$otpRecord) {
+            http_response_code(400);
+            echo json_encode(["error" => "Invalid or Expired OTP"]);
+            exit;
+        }
+
+        // OTP Valid! Delete used
+        $del = $conn->prepare("DELETE FROM otps WHERE phone_number = ?");
+        $del->bind_param("s", $phone);
+        $del->execute();
+
+        // 2. Proceed with User Logic
+        $stmt = $conn->prepare("SELECT id, user_id FROM users WHERE phone_number = ?");
+        $stmt->bind_param("s", $phone);
+        $stmt->execute();
+        $user = $stmt->get_result()->fetch_assoc();
 
         if ($user) {
-            // User exists, update key if needed? Or just return ID
-            // For E2E, changing key might break old chats, be careful. 
-            // For Phase 1, we assume new install = new key = new identity
-            // Update Key
-            $stmt = $pdo->prepare("UPDATE users SET public_key = ? WHERE id = ?");
-            $stmt->execute([$publicKey, $user['id']]);
+            $isNewUser = false;
+            $update = $conn->prepare("UPDATE users SET public_key = ?, email = ? WHERE id = ?");
+            $update->bind_param("ssi", $publicKey, $email, $user['id']);
+            $update->execute();
 
-            // Check if user_id (UUID) is missing (Migration for old users)
             if (empty($user['user_id'])) {
                 $publicUserId = bin2hex(random_bytes(16));
-                $stmt = $pdo->prepare("UPDATE users SET user_id = ? WHERE id = ?");
-                $stmt->execute([$publicUserId, $user['id']]);
+                $u_up = $conn->prepare("UPDATE users SET user_id = ? WHERE id = ?");
+                $u_up->bind_param("si", $publicUserId, $user['id']);
+                $u_up->execute();
             } else {
                 $publicUserId = $user['user_id'];
             }
         } else {
             // New User
-            // Generate a random public user_id (32 hex chars)
+            $isNewUser = true;
             $publicUserId = bin2hex(random_bytes(16));
-
-            $stmt = $pdo->prepare("INSERT INTO users (user_id, phone_number, public_key) VALUES (?, ?, ?)");
-            $stmt->execute([$publicUserId, $phone, $publicKey]);
-            // $userId = $pdo->lastInsertId(); // We don't want to expose this authentication-wise if we want consistency
-
-            // Note: We don't use a separate profiles table anymore. Columns are in users.
+            $ins = $conn->prepare("INSERT INTO users (user_id, phone_number, email, public_key) VALUES (?, ?, ?, ?)");
+            $ins->bind_param("ssss", $publicUserId, $phone, $email, $publicKey);
+            $ins->execute();
         }
-        echo json_encode(["status" => "success", "user_id" => $publicUserId]);
+
+        echo json_encode(["status" => "success", "user_id" => $publicUserId, "is_new_user" => $isNewUser]);
     } elseif (isset($data->user_id)) {
         // Update Profile
         $userId = $data->user_id;
@@ -72,21 +95,24 @@ if ($method === 'POST') {
         $lastName = htmlspecialchars(strip_tags($data->last_name ?? ''));
         $note = htmlspecialchars(strip_tags($data->short_note ?? ''));
 
-        // Photo URL would be handled by a file upload script usually, skipping for brevity, assume URL sent
+        // Photo URL 
         $photoUrl = filter_var($data->photo_url ?? '', FILTER_SANITIZE_URL);
 
-        // UPDATE users table directly
-        $stmt = $pdo->prepare("UPDATE users SET first_name=?, last_name=?, short_note=?, photo_url=? WHERE id=?");
-        $stmt->execute([$firstName, $lastName, $note, $photoUrl, $userId]);
+        // UPDATE users table directly (MySQLi)
+        // We use user_id (UUID string) as the selector, not the auto-inc ID
+        $stmt = $conn->prepare("UPDATE users SET first_name=?, last_name=?, short_note=?, photo_url=? WHERE user_id=?");
+        $stmt->bind_param("sssss", $firstName, $lastName, $note, $photoUrl, $userId);
+        $stmt->execute();
 
         echo json_encode(["status" => "profile_updated"]);
     }
 } elseif ($method === 'GET') {
     // Get Profile
     $userId = $_GET['user_id'];
-    $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ?");
-    $stmt->execute([$userId]);
-    $profile = $stmt->fetch();
+    $stmt = $conn->prepare("SELECT * FROM users WHERE user_id = ?");
+    $stmt->bind_param("s", $userId);
+    $stmt->execute();
+    $profile = $stmt->get_result()->fetch_assoc();
     echo json_encode($profile);
 }
 ?>

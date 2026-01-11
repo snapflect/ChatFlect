@@ -29,19 +29,27 @@ export class CallModalPage implements OnInit, OnDestroy {
 
     get isVideo() { return this.callType === 'video'; }
 
-    ngOnInit() {
-        this.status = this.navParams.get('status') || 'calling';
-        this.callerName = this.navParams.get('callerName') || 'Contact';
+    callerPhoto = 'assets/avatar-placeholder.png';
 
-        // Determine type from CallService or NavParams? 
-        // Ideally CallService has the current call info regardless.
+    // ...
+
+    async ngOnInit() {
+        this.status = this.navParams.get('status') || 'calling';
+        // this.callerName = this.navParams.get('callerName') || 'Contact'; // Legacy
+
+        // Determine type and Fetch Caller Info
         if (this.callService.incomingCallData) {
             this.callType = this.callService.incomingCallData.type || 'audio';
+            const cid = this.callService.incomingCallData.callerId;
+            if (cid) {
+                const info = await this.callService.getCallerInfo(cid);
+                this.callerName = info.username || 'Unknown';
+                if (info.photo) this.callerPhoto = info.photo;
+            }
         } else {
             // Outgoing
-            this.callType = 'audio'; // Default, but should check service or nav params if passed
-            // For now, assume we passed it or check activeCallDoc...
-            // Ideally pass it in navParams for outgoing too
+            this.callType = this.callService.activeCallType || 'audio';
+            this.callerName = this.navParams.get('callerName') || 'Unknown';
         }
 
         // Subscribe to Remote Streams (Map)
@@ -71,7 +79,8 @@ export class CallModalPage implements OnInit, OnDestroy {
             if (s === 'idle') {
                 this.dismiss();
             } else if (s === 'connected') {
-                this.status = 'connected';
+                // Determine navigation handled by AppComponent/Parent
+                this.dismiss();
             }
         });
     }

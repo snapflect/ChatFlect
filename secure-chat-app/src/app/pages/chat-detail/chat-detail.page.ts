@@ -1,4 +1,4 @@
-import { Component, OnInit, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { ChatService } from 'src/app/services/chat.service';
 import { AuthService } from 'src/app/services/auth.service';
@@ -18,6 +18,7 @@ import { LoggingService } from 'src/app/services/logging.service';
 // ... imports
 import { PresenceService } from 'src/app/services/presence.service';
 import { LocationService } from 'src/app/services/location.service';
+import { SoundService } from 'src/app/services/sound.service';
 
 // ... 
 
@@ -27,7 +28,7 @@ import { LocationService } from 'src/app/services/location.service';
   styleUrls: ['./chat-detail.page.scss'],
   standalone: false
 })
-export class ChatDetailPage implements OnInit {
+export class ChatDetailPage implements OnInit, OnDestroy {
   @ViewChild(IonContent, { static: false }) content!: IonContent;
 
   chatId: string | null = null;
@@ -63,14 +64,23 @@ export class ChatDetailPage implements OnInit {
     private popoverCtrl: PopoverController,
     private logger: LoggingService,
     private presence: PresenceService,
-    private locationService: LocationService
+    private locationService: LocationService,
+    private soundService: SoundService
   ) {
     this.auth.currentUserId.subscribe(id => this.currentUserId = String(id));
+  }
+
+  ngOnDestroy() {
+    // Clear active chat so sounds resume on other screens
+    this.soundService.clearActiveChat();
   }
 
   async ngOnInit() {
     this.chatId = this.route.snapshot.paramMap.get('id');
     if (this.chatId) {
+      // Set active chat to prevent message sounds while viewing
+      this.soundService.setActiveChat(this.chatId);
+
       // Fetch Chat Metadata (Includes Typing Info)
       // Fetch Chat Metadata (Includes Typing Info)
       this.chatService.getChatDetails(this.chatId).subscribe(async (chat: any) => {

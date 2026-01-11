@@ -4,6 +4,10 @@
     flex-direction: column;
 }
 
+.hidden {
+    display: none !important;
+}
+
 .call-container {
     height: 100%;
     display: flex;

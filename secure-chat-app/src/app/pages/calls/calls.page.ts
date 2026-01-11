@@ -49,7 +49,23 @@ export class CallsPage implements OnInit {
 
   getColor(call: any) {
     const isCaller = String(call.caller_id) === String(this.myId);
-    if (!isCaller && call.status === 'offer') return 'danger'; // Missed
+    if (!isCaller && (call.status === 'offer' || call.status === 'missed' || call.status === 'declined' || call.status === 'busy')) {
+      return 'danger'; // Red for incoming missed/declined
+    }
     return 'medium';
+  }
+
+  getStatusLabel(call: any) {
+    const isCaller = String(call.caller_id) === String(this.myId);
+    if (isCaller) {
+      if (call.status === 'declined') return 'Declined';
+      if (call.status === 'busy') return 'Busy';
+      return 'Outgoing';
+    }
+
+    if (call.status === 'offer' || call.status === 'missed') return 'Missed';
+    if (call.status === 'declined') return 'Declined';
+    if (call.status === 'busy') return 'Busy';
+    return 'Incoming';
   }
 }

@@ -21,6 +21,9 @@ export class ChatsPage implements OnInit {
     this.loadChats();
   }
 
+  resolvedUsers = new Map<string, { name: string, photo: string }>();
+  // ...
+
   loadChats() {
     // Ensure contacts are loaded first to map Names
     this.contactService.getContacts().then(() => {
@@ -34,18 +37,32 @@ export class ChatsPage implements OnInit {
           } else {
             const otherId = chat.participants.find((p: any) => String(p) !== String(this.myId));
             if (otherId) {
-              // Try to find in contacts
+              // 1. Check Cache
+              if (this.resolvedUsers.has(otherId)) {
+                const cached = this.resolvedUsers.get(otherId);
+                chat.name = cached?.name;
+                chat.avatar = cached?.photo || chat.avatar;
+                continue;
+              }
+
+              // 2. Check Contacts
               const contact = this.contactService.localContacts.find((c: any) => String(c.user_id) === String(otherId));
               if (contact) {
                 chat.name = contact.first_name + ' ' + contact.last_name;
                 chat.avatar = contact.photo_url;
+                this.resolvedUsers.set(otherId, { name: chat.name, photo: chat.avatar });
               } else {
-                chat.name = `User ${otherId.substr(0, 4)}`;
+                // 3. Fetch from Server (Async)
+                chat.name = `User ${otherId.substr(0, 4)}`; // Temporary
+                this.chatService.getUserInfo(otherId).then(info => {
+                  chat.name = info.username;
+                  if (info.photo) chat.avatar = info.photo;
+                  this.resolvedUsers.set(otherId, { name: info.username, photo: info.photo });
+                });
               }
             }
           }
         }
-        // Filter out empty chats (no lastMessage or very old timestamp default)
         // Filter out empty chats (no lastMessage or very old timestamp default)
         this.chats = this.chats.filter(c => c.lastMessage && c.lastMessage.trim() !== '');
         this.filteredChats = [...this.chats];

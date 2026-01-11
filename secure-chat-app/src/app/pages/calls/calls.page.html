@@ -12,7 +12,7 @@
       </div>
 
       <ion-label>
-        <h2>{{ call.caller_id === myId ? 'Outgoing' : 'Incoming' }}</h2>
+        <h2>{{ getStatusLabel(call) }}</h2>
         <div class="call-details">
           <ion-icon [name]="getCallStatusIcon(call)" [color]="getColor(call)"></ion-icon>
           <p>{{ call.created_at | date:'short' }}</p>

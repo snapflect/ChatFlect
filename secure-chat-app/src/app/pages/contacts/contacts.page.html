@@ -37,10 +37,11 @@
 
       <ion-item *ngFor="let c of contacts" button (click)="startChat(c)" class="contact-item">
         <ion-avatar slot="start" class="contact-avatar">
-          <img [src]="c.photo_url || 'https://gravatar.com/avatar?d=mp'" />
+          <img [src]="c.photo_url || c.avatar || 'https://gravatar.com/avatar?d=mp'" />
         </ion-avatar>
         <ion-label>
-          <h2 class="contact-name">{{ c.first_name || 'Unknown' }} {{ c.last_name || '' }}</h2>
+          <h2 class="contact-name">{{ c.displayName || c.username || c.first_name || 'Unknown' }} {{ (!c.displayName &&
+            !c.username) ? (c.last_name || '') : '' }}</h2>
           <p class="contact-number">{{ c.short_note || c.phone_number }}</p>
         </ion-label>
         <ion-button slot="end" fill="clear" color="primary">

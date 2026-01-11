@@ -60,7 +60,20 @@ if (isset($data['target_user_id']) && isset($data['title'])) {
             exit;
         }
 
-        // V1 Payload Structure
+        // Get custom data and channel from request
+        $customData = isset($data['data']) ? json_decode($data['data'], true) : [];
+        $androidChannelId = $data['android_channel_id'] ?? 'messages';
+
+        // Determine sound based on notification type
+        // FIX: Use 'default' to prevent OS from playing a long looping ringtone that duplicates the App's ringtone.
+        // The App (SoundService) will handle the ringing when active.
+        $isCallNotification = ($customData['type'] ?? '') === 'call_invite';
+        $sound = 'default'; // Always use default system sound (short beep/ding)
+
+        // Set priority - calls need high priority to wake device
+        $priority = $isCallNotification ? 'high' : 'normal';
+
+        // V1 Payload Structure with Android-specific settings
         $payload = [
             'message' => [
                 'token' => $to,
@@ -68,9 +81,27 @@ if (isset($data['target_user_id']) && isset($data['title'])) {
                     'title' => $data['title'],
                     'body' => $data['body'] ?? 'New Message'
                 ],
-                'data' => [
+                'data' => array_merge([
                     'click_action' => 'FCM_PLUGIN_ACTIVITY',
                     'id' => uniqid()
+                ], $customData),
+                'android' => [
+                    'priority' => $priority,
+                    'notification' => [
+                        'channel_id' => $androidChannelId,
+                        'sound' => $sound,
+                        'default_vibrate_timings' => false,
+                        'vibrate_timings' => ['0.5s', '0.5s', '0.5s', '0.5s'],
+                        'default_light_settings' => true
+                    ]
+                ],
+                'apns' => [
+                    'payload' => [
+                        'aps' => [
+                            'sound' => $isCallNotification ? 'ringtone.caf' : 'default',
+                            'content-available' => 1
+                        ]
+                    ]
                 ]
             ]
         ];

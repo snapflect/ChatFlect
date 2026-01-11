@@ -22,6 +22,7 @@ dependencies {
     implementation project(':capacitor-splash-screen')
     implementation project(':capacitor-status-bar')
     implementation project(':capacitor-native-biometric')
+    implementation project(':capacitor-plugin-audio-toggle')
     implementation project(':capacitor-voice-recorder')
 
 }

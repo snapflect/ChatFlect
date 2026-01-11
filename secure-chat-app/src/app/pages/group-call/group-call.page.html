@@ -4,16 +4,19 @@
   <div *ngIf="(callService.callStatus | async) === 'incoming'" class="overlay-container incoming">
     <div class="ion-text-center">
       <ion-avatar class="caller-avatar">
-        <img src="assets/avatar-placeholder.png" />
+        <img [src]="callerPhoto" />
       </ion-avatar>
-      <h2>Incoming Call</h2>
-      <p>Group Call</p>
+      <h2>{{ callerName }}</h2>
+      <p class="status-subtitle">
+        <ion-icon [name]="callService.activeCallType === 'video' ? 'videocam' : 'call'"></ion-icon>
+        Incoming {{ callService.activeCallType === 'video' ? 'Video' : 'Audio' }} Call
+      </p>
       <div class="encrypted-badge">
         <ion-icon name="lock-closed"></ion-icon> End-to-End Encrypted
       </div>
 
       <div class="actions">
-        <ion-button shape="round" color="danger" (click)="endCall()">
+        <ion-button shape="round" color="danger" (click)="callService.declineCall()">
           <ion-icon name="close"></ion-icon>
         </ion-button>
         <ion-button shape="round" color="success" (click)="callService.answerCall()">
@@ -24,35 +27,89 @@
   </div>
 
   <!-- CALLING -->
-  <div *ngIf="(callService.callStatus | async) === 'calling'" class="overlay-container calling">
-    <h2>Calling...</h2>
-    <ion-spinner></ion-spinner>
-    <ion-button fill="clear" color="light" (click)="endCall()">Cancel</ion-button>
+  <div *ngIf="(callService.callStatus | async) === 'calling'" class="calling-overlay">
+    <div class="ion-text-center">
+      <ion-avatar class="caller-avatar">
+        <img [src]="callerPhoto" />
+      </ion-avatar>
+      <h2>{{ callerName }}</h2>
+      <p class="status-subtitle">Calling...</p>
+
+      <div class="calling-actions">
+        <ion-button shape="round" color="danger" (click)="endCall()">
+          <ion-icon name="call-outline"></ion-icon>
+        </ion-button>
+      </div>
+    </div>
+
+    <!-- Show Local Video Preview While Calling -->
+    <div class="local-preview" *ngIf="localStream && callService.activeCallType === 'video'">
+      <video [srcObject]="localStream" autoplay playsinline muted controls="false" class="local-video-mini"></video>
+    </div>
+  </div>
+
+  <!-- DECLINED / BUSY -->
+  <div *ngIf="(callService.callStatus | async) === 'declined' || (callService.callStatus | async) === 'busy'"
+    class="overlay-container feedback">
+    <div class="ion-text-center">
+      <ion-avatar class="caller-avatar">
+        <img [src]="callerPhoto" />
+      </ion-avatar>
+      <h2>{{ callerName }}</h2>
+      <h3 class="feedback-text">{{ (callService.callStatus | async) === 'declined' ? 'Call Declined' : 'User is Busy' }}
+      </h3>
+      <ion-icon [name]="(callService.callStatus | async) === 'declined' ? 'close-circle' : 'time'" size="large"
+        color="danger"></ion-icon>
+    </div>
   </div>
 
   <!-- CONNECTED GRID -->
-  <div *ngIf="(callService.callStatus | async) === 'connected'" class="video-grid">
-
+  <!-- CONNECTED: VIDEO MODE -->
+  <div *ngIf="(callService.callStatus | async) === 'connected' && callService.activeCallType === 'video'"
+    class="video-grid">
     <!-- Remote Peers -->
-    <div class="remote-wrapper" *ngFor="let peer of asArray(remoteStreams)" [class.single]="remoteStreams.size === 1">
-      <!-- Use Property Binding for srcObject -->
-      <video [srcObject]="peer[1]" autoplay playsinline class="remote-video"></video>
+    <div class="remote-wrapper" *ngFor="let peer of asArray(remoteStreams); trackBy: trackByPeerId"
+      [class.single]="remoteStreams.size === 1">
+      <video [srcObject]="peer[1]" autoplay playsinline controls="false" class="remote-video"></video>
     </div>
 
     <!-- Local Self View (Floating) -->
     <div class="local-wrapper">
-      <video [srcObject]="localStream" autoplay playsinline muted class="local-video"></video>
+      <video [srcObject]="localStream" autoplay playsinline muted controls="false" class="local-video"></video>
+    </div>
+  </div>
+
+  <!-- CONNECTED: AUDIO MODE -->
+  <div *ngIf="(callService.callStatus | async) === 'connected' && callService.activeCallType === 'audio'"
+    class="audio-connected">
+    <div class="ion-text-center">
+      <div class="avatar-ripple animate-pulse">
+        <ion-avatar class="large-avatar">
+          <img [src]="callerPhoto" />
+        </ion-avatar>
+      </div>
+      <h2>{{ callerName }}</h2>
+      <div class="timer-badge">{{ callDuration }}</div>
+      <p class="status-subtitle">Audio Call Encrypted</p>
     </div>
 
-    <!-- Encryption Badge -->
-    <div class="encrypted-toast glass-card">
-      <ion-icon name="lock-closed" color="success"></ion-icon>
-      <span>End-to-End Encrypted</span>
+    <!-- Hidden Audio Playback for Audio Mode -->
+    <div *ngFor="let peer of asArray(remoteStreams); trackBy: trackByPeerId" style="display: none">
+      <audio [srcObject]="peer[1]" autoplay playsinline controls="false"></audio>
+    </div>
+  </div>
+
+  <!-- GLOBAL CONTROLS (Common for Connected State) -->
+  <div *ngIf="(callService.callStatus | async) === 'connected'" class="controls-overlay-wrapper">
+    <!-- Video Timer Overlay (Top Center) -->
+    <div *ngIf="callService.activeCallType === 'video'" class="video-timer glass-card">
+      {{ callDuration }}
     </div>
 
-    <!-- Controls -->
     <div class="controls-bar glass-card">
-      <ion-button fill="clear" (click)="toggleVideo()">
+      <!-- Timer removed from here -->
+
+      <ion-button *ngIf="callService.activeCallType === 'video'" fill="clear" (click)="toggleVideo()">
         <ion-icon [name]="videoEnabled ? 'videocam' : 'videocam-off'"></ion-icon>
       </ion-button>
 
@@ -60,14 +117,25 @@
         <ion-icon [name]="micEnabled ? 'mic' : 'mic-off'"></ion-icon>
       </ion-button>
 
-      <ion-button fill="clear" (click)="switchCamera()">
+      <ion-button fill="clear" (click)="toggleSpeaker()">
+        <ion-icon [name]="speakerEnabled ? 'volume-high' : 'volume-low'"></ion-icon>
+      </ion-button>
+
+      <!-- Camera Flip only for Video -->
+      <ion-button *ngIf="callService.activeCallType === 'video'" fill="clear" (click)="switchCamera()">
         <ion-icon name="camera-reverse"></ion-icon>
       </ion-button>
 
       <ion-button fill="clear" color="danger" (click)="endCall()">
-        <ion-icon name="call"></ion-icon>
+        <ion-icon name="call" class="rotate-down"></ion-icon>
       </ion-button>
     </div>
+  </div>
+
+  <!-- Hold Indicator -->
+  <div *ngIf="callService.isOnHold | async" class="hold-overlay glass-card">
+    <ion-icon name="pause-circle" size="large"></ion-icon>
+    <p>CALL ON HOLD</p>
   </div>
 
 </ion-content>

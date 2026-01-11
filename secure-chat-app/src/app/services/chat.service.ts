@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion } from 'firebase/firestore';
 import { environment } from 'src/environments/environment';
-import { Observable, BehaviorSubject } from 'rxjs';
+import { Observable, BehaviorSubject, Subject } from 'rxjs';
 import { CryptoService } from './crypto.service';
 import { ApiService } from './api.service';
 import { ToastController } from '@ionic/angular';
@@ -15,6 +15,10 @@ import { AuthService } from './auth.service';
 export class ChatService {
     private db: any;
     private messagesSubject = new BehaviorSubject<any[]>([]);
+
+    // Event emitter for new incoming messages (for sound notifications)
+    public newMessage$ = new Subject<{ chatId: string; senderId: string; timestamp: number }>();
+    private lastKnownTimestamps: Map<string, number> = new Map();
 
     constructor(
         private crypto: CryptoService,
@@ -53,6 +57,10 @@ export class ChatService {
                 const msgsRaw = [];
                 const privateKeyStr = localStorage.getItem('private_key');
                 const myId = String(localStorage.getItem('user_id')).trim();
+
+                // Track last known timestamp for this chat
+                const lastKnown = this.lastKnownTimestamps.get(chatId) || 0;
+                let newestTimestamp = lastKnown;
 
                 for (const d of snapshot.docs) {
                     const data = d.data();
@@ -100,7 +108,28 @@ export class ChatService {
                         } else { decrypted = "🔒 Encrypted (Not for you)"; }
                     }
                     msgsRaw.push({ id: d.id, ...data, text: decrypted });
+
+                    // Track newest message timestamp
+                    const msgTimestamp = data['timestamp'] || 0;
+                    if (msgTimestamp > newestTimestamp) {
+                        newestTimestamp = msgTimestamp;
+                    }
+
+                    // Emit new message event for sound notification
+                    // Only for messages from others, newer than last known, and recent (within 10 seconds)
+                    const senderId = String(data['senderId']).trim();
+                    const isNewMessage = msgTimestamp > lastKnown;
+                    const isFromOther = senderId !== myId;
+                    const isRecent = (Date.now() - msgTimestamp) < 10000; // Within 10 seconds
+
+                    if (isNewMessage && isFromOther && isRecent) {
+                        this.newMessage$.next({ chatId, senderId, timestamp: msgTimestamp });
+                    }
                 }
+
+                // Update last known timestamp
+                this.lastKnownTimestamps.set(chatId, newestTimestamp);
+
                 messages = msgsRaw;
                 update();
             });
@@ -153,7 +182,7 @@ export class ChatService {
 
     async sendMessage(chatId: string, plainText: string, senderId: string, replyTo: any = null) {
         try {
-            const chatDoc = await getDoc(doc(this.db, 'chats', chatId));
+            const chatDoc = await this.getChatDoc(chatId);
             if (!chatDoc.exists()) return;
 
             const chatData = chatDoc.data();
@@ -220,7 +249,7 @@ export class ChatService {
                 payload['content'] = (other && contentMap[other]) ? contentMap[other] : contentMap;
             }
 
-            await addDoc(collection(this.db, 'chats', chatId, 'messages'), payload);
+            await this.addMessageDoc(chatId, payload);
 
             // Update Parent
             const updatePayload: any = {
@@ -234,15 +263,28 @@ export class ChatService {
                 }
             });
 
-            await updateDoc(doc(this.db, 'chats', chatId), updatePayload);
+            await this.updateChatDoc(chatId, updatePayload);
             this.sendPushNotification(chatId, senderId, "🔒 Encrypted Message");
 
-            await updateDoc(doc(this.db, 'chats', chatId), updatePayload);
+            await this.updateChatDoc(chatId, updatePayload);
             this.sendPushNotification(chatId, senderId, "🔒 Encrypted Message");
 
         } catch (e) {
             this.logger.error("Send Error", e);
         }
+    }
+
+    // Helper methods for mocking in tests
+    protected async getChatDoc(chatId: string) {
+        return await getDoc(doc(this.db, 'chats', chatId));
+    }
+
+    protected async addMessageDoc(chatId: string, payload: any) {
+        return await addDoc(collection(this.db, 'chats', chatId, 'messages'), payload);
+    }
+
+    protected async updateChatDoc(chatId: string, payload: any) {
+        return await updateDoc(doc(this.db, 'chats', chatId), payload);
     }
 
     // Update Auto-Delete Timer (0 = Off, otherwise ms)
@@ -679,5 +721,24 @@ export class ChatService {
         await updateDoc(msgRef, {
             [`reactions.${myId}`]: null
         });
+    }
+
+    async getUserInfo(userId: string): Promise<{ username: string, photo: string }> {
+        if (!userId) return { username: 'Unknown', photo: '' };
+        try {
+            const userDoc = await getDoc(doc(this.db, 'users', userId));
+            if (userDoc.exists()) {
+                const data = userDoc.data();
+                // Prefer username (constructed from first/last), then first_name, then fallback
+                const name = data['username'] || (data['first_name'] ? `${data['first_name']} ${data['last_name'] || ''}`.trim() : `User ${userId.substr(0, 4)}`);
+                return {
+                    username: name,
+                    photo: data['photo_url'] || data['avatar'] || ''
+                };
+            }
+        } catch (e) {
+            this.logger.error("Failed to fetch user info", e);
+        }
+        return { username: `User ${userId.substr(0, 4)}`, photo: '' };
     }
 }

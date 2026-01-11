@@ -155,14 +155,28 @@ export class PushService {
 
     async sendPush(targetUserId: string, title: string, body: string, data: any = {}) {
         try {
+            // Determine channel based on notification type
+            const channelId = data.type === 'call_invite' ? 'incoming_call' : 'messages';
+
             await this.api.post('push.php', {
                 target_user_id: targetUserId,
                 title: title,
                 body: body,
-                data: JSON.stringify(data)
+                data: JSON.stringify(data),
+                android_channel_id: channelId
             }).toPromise();
         } catch (e) {
             this.logger.error("Send Push Failed", e);
+        }
+    }
+
+    async clearNotifications() {
+        if (this.platform.is('capacitor')) {
+            try {
+                await PushNotifications.removeAllDeliveredNotifications();
+            } catch (e) {
+                this.logger.error("Failed to clear notifications", e);
+            }
         }
     }
 }
