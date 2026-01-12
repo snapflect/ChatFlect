@@ -452,7 +452,7 @@ export class CryptoService {
                 this.saveSession(senderId, session);
             }
 
-            if (!session) return "🔒 Error: No Session";
+            if (!session) return "ERROR_NO_SESSION";
 
             // 2. Ratchet Forward (Receiver)
             // Note: In real Double Ratchet, we handle out-of-order via "Skipped Message Keys".
@@ -480,7 +480,8 @@ export class CryptoService {
 
         } catch (e) {
             this.logger.error("Ratchet Decrypt Failed", e);
-            return "🔒 Decryption Failed (Ratchet)";
+            // Return specific error for auto-healing
+            return "ERROR_RATCHET_DECRYPTION_FAILED";
         }
     }
 }

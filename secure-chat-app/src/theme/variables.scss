@@ -27,6 +27,13 @@
     --ion-color-tertiary-shade: #27a06e;
     --ion-color-tertiary-tint: #41bd8a;
 
+    /** Chat Theme Variables **/
+    --chat-bubble-me-bg: linear-gradient(135deg, var(--ion-color-primary) 0%, var(--ion-color-secondary) 100%);
+    --chat-bubble-me-text: #ffffff;
+    --chat-bubble-them-bg: rgba(255, 255, 255, 0.1);
+    --chat-bubble-them-text: #ffffff;
+
+
     /** Success **/
     --ion-color-success: #2CB67D;
     --ion-color-success-rgb: 44, 182, 125;

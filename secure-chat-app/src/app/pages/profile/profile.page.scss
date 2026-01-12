@@ -1,7 +1,3 @@
-ion-content {
-    --background: var(--ion-background-color);
-}
-
 .profile-header {
     padding: 40px 0 20px;
 }
@@ -35,14 +31,7 @@ ion-content {
     --padding-end: 0;
 }
 
-.glass-card {
-    border-radius: 20px;
-}
-
 ion-label {
     font-weight: 600;
     margin-bottom: 8px;
 }
-
-/* Override input background for this specific card look if needed, 
-   but reusing global .custom-input is good for consistency. */

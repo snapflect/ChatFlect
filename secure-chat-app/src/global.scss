@@ -56,9 +56,15 @@ body {
 }
 
 /* Background Mesh Effect (Pseudo) */
+/* Background Mesh Effect (Pseudo) - GLOBAL ENFORCEMENT */
 ion-content {
-    --background: var(--app-bg-gradient);
+    --background: var(--app-bg-gradient) !important;
+
+    &::part(background) {
+        background: var(--app-bg-gradient) !important;
+    }
 }
+
 
 /* Glassmorphism Card Utility */
 .glass-card {
@@ -167,4 +173,150 @@ ion-header.ion-no-border ion-toolbar {
 ion-title {
     font-weight: 700;
     font-size: 1.5rem;
+}
+
+/* Global Utilities */
+.bg-transparent {
+    background: transparent !important;
+}
+
+.premium-bg {
+    --background: var(--app-bg-gradient) !important;
+}
+
+.glass-bubble {
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         CONSOLIDATED UTILITIES                             */
+/* -------------------------------------------------------------------------- */
+
+/* Glass Item for Lists */
+.glass-item {
+    --background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    margin-bottom: 8px;
+}
+
+/* Centered Content Flex */
+.centered-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Text Truncation */
+.text-truncate {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Empty State (Reusable) */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 60vh;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.4);
+
+    .empty-icon {
+        font-size: 5rem;
+        background: linear-gradient(135deg, var(--ion-color-primary), var(--ion-color-secondary));
+        background-clip: text;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin-bottom: 20px;
+        opacity: 0.8;
+    }
+}
+
+/* Text Danger Color */
+.text-danger {
+    color: var(--ion-color-danger) !important;
+
+    ion-icon {
+        color: var(--ion-color-danger) !important;
+    }
+}
+
+/* Pulse Animation */
+@keyframes pulse {
+    0% {
+        opacity: 0.6;
+    }
+
+    50% {
+        opacity: 1;
+    }
+
+    100% {
+        opacity: 0.6;
+    }
+}
+
+.animate-pulse {
+    animation: pulse 1.5s infinite;
+}
+
+/* Float Orb Animation (Login) */
+@keyframes floatOrb {
+    0% {
+        transform: translate(0, 0);
+    }
+
+    50% {
+        transform: translate(30px, 50px);
+    }
+
+    100% {
+        transform: translate(0, 0);
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         RESPONSIVE UTILITIES                               */
+/* -------------------------------------------------------------------------- */
+
+/* Responsive Container */
+.responsive-container {
+    width: 100%;
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 0 16px;
+}
+
+/* Hide on Mobile */
+@media (max-width: 767px) {
+    .hide-mobile {
+        display: none !important;
+    }
+}
+
+/* Hide on Desktop */
+@media (min-width: 768px) {
+    .hide-desktop {
+        display: none !important;
+    }
+}
+
+/* Responsive Grid */
+.responsive-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: 1fr;
+
+    @media (min-width: 768px) {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    @media (min-width: 992px) {
+        grid-template-columns: repeat(3, 1fr);
+    }
 }

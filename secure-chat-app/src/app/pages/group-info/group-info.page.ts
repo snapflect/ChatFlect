@@ -1,8 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
-import { NavController, ActionSheetController, AlertController, ToastController } from '@ionic/angular';
+import { NavController, ActionSheetController, AlertController, ToastController, ModalController } from '@ionic/angular';
 import { ApiService } from 'src/app/services/api.service';
 import { ChatService } from 'src/app/services/chat.service';
+import { getFirestore, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { PickContactModalComponent } from 'src/app/components/pick-contact-modal/pick-contact-modal.component';
 
 @Component({
   selector: 'app-group-info',
@@ -16,15 +18,18 @@ export class GroupInfoPage implements OnInit {
   members: any[] = [];
   myId: string = '';
   iAmAdmin: boolean = false;
+  db = getFirestore();
 
   constructor(
     private route: ActivatedRoute,
     private api: ApiService,
     private nav: NavController,
     private actionSheetCtrl: ActionSheetController,
-    private alertCtrl: AlertController, // Fix: Added AlertController
+    private alertCtrl: AlertController,
+    private modalCtrl: ModalController,
     private toast: ToastController,
-    private chatService: ChatService
+    private chatService: ChatService,
+    private cdr: ChangeDetectorRef
   ) {
     this.myId = localStorage.getItem('user_id') || '';
   }
@@ -35,16 +40,30 @@ export class GroupInfoPage implements OnInit {
   }
 
   async loadGroupInfo() {
-    // 1. Get Group Details (from List for now, ideal: get specific)
+    // 1. Get Group Details (Merge MySQL + Firestore)
+    // MySQL for basic info
     const groups: any = await this.api.get(`groups.php?action=list&user_id=${this.myId}`).toPromise();
-    this.group = groups.find((g: any) => g.group_id === this.groupId) || this.group;
+    const sqlGroup = groups.find((g: any) => String(g.group_id) === String(this.groupId)) || { name: 'Loading...' };
+
+    // Firestore for Icon & Real-time updates
+    const chatDoc = await getDoc(doc(this.db, 'chats', this.groupId));
+    let fsGroup = {};
+    if (chatDoc.exists()) {
+      fsGroup = chatDoc.data();
+    }
+
+    this.group = { ...sqlGroup, ...fsGroup };
+    // Map Firestore groupName to name if present
+    if (this.group.groupName) this.group.name = this.group.groupName;
+    if (this.group.groupIcon) this.group.icon_url = this.group.groupIcon;
 
     // 2. Get Members
     this.members = await this.api.get(`groups.php?action=members&group_id=${this.groupId}`).toPromise() as any[];
 
     // 3. Check my role
-    const me = this.members.find(m => m.user_id === this.myId);
+    const me = this.members.find(m => String(m.user_id) === String(this.myId));
     this.iAmAdmin = (me && me.role === 'admin');
+    this.cdr.detectChanges();
 
     // 4. If Admin, get Invite Code
     if (this.iAmAdmin) {
@@ -134,26 +153,80 @@ export class GroupInfoPage implements OnInit {
   }
 
   async addMember() {
-    const alert = await this.alertCtrl.create({
-      header: 'Add Member',
-      message: 'Enter the User ID to add (Email lookup coming soon)',
-      inputs: [{ name: 'userId', type: 'text', placeholder: 'User UUID' }],
-      buttons: [
-        { text: 'Cancel', role: 'cancel' },
-        {
-          text: 'Add',
-          handler: async (data) => {
-            if (data.userId) {
-              await this.api.post('groups.php', {
-                action: 'add_member', group_id: this.groupId, user_id: data.userId
-              }).toPromise();
-              this.loadGroupInfo();
-            }
-          }
-        }
-      ]
+    // Collect existing member IDs to exclude
+    const excludeIds = this.members.map(m => String(m.user_id));
+
+    const modal = await this.modalCtrl.create({
+      component: PickContactModalComponent,
+      componentProps: { excludeIds }
     });
-    await alert.present();
+
+    await modal.present();
+
+    const { data } = await modal.onWillDismiss();
+
+    if (data && data.length > 0) {
+      // Loop through selected IDs and add them
+      // Note: Ideally backend supports bulk add, or we loop api calls
+      const loading = await this.toast.create({ message: 'Adding members...', duration: 2000 });
+      loading.present();
+
+      for (const uid of data) {
+        try {
+          await this.api.post('groups.php', {
+            action: 'add_member', group_id: this.groupId, user_id: uid
+          }).toPromise();
+        } catch (e) {
+          console.error("Failed to add " + uid, e);
+        }
+      }
+      loading.dismiss();
+      this.loadGroupInfo();
+      this.showToast(`Added ${data.length} member(s)`);
+    }
+  }
+
+  async showToast(msg: string) {
+    const t = await this.toast.create({ message: msg, duration: 2000 });
+    t.present();
+  }
+
+  async triggerIconUpload() {
+    if (!this.iAmAdmin) return;
+    document.getElementById('groupIconInput')?.click();
+  }
+
+  async onFileSelected(event: any) {
+    const file = event.target.files[0];
+    if (file) {
+      await this.uploadGroupIcon(file);
+    }
+  }
+
+  async uploadGroupIcon(file: File) {
+    const loading = await this.toast.create({ message: 'Updating icon...', duration: 2000 }); // Simple loading indicator
+    loading.present();
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res: any = await this.api.post('upload.php', formData).toPromise();
+      if (res && res.url) {
+        // Update Firestore
+        await updateDoc(doc(this.db, 'chats', this.groupId), {
+          groupIcon: res.url
+        });
+        // Update Local
+        this.group.icon_url = res.url;
+        this.group.groupIcon = res.url;
+        loading.dismiss();
+        const t = await this.toast.create({ message: 'Group icon updated!', duration: 1500 });
+        t.present();
+      }
+    } catch (e) {
+      console.error(e);
+      let t = await this.toast.create({ message: 'Failed to update icon', duration: 2000 });
+      t.present();
+    }
   }
 
   async openChat(member: any) {
@@ -161,7 +234,6 @@ export class GroupInfoPage implements OnInit {
     try {
       const chatId = await this.chatService.getOrCreateChat(member.user_id);
       this.nav.navigateForward(['/chat-detail', chatId]);
-      // Close Action Sheet by not doing anything (it closes auto)
     } catch (e) {
       console.error("Failed to open chat", e);
       const t = await this.toast.create({ message: 'Could not start chat', duration: 2000 });

@@ -8,6 +8,9 @@
       <ion-button routerLink="/profile" class="vibrant-icon-btn">
         <ion-icon name="person-circle" color="secondary" style="font-size: 28px;"></ion-icon>
       </ion-button>
+      <ion-button (click)="presentMoreOptions()">
+        <ion-icon name="ellipsis-vertical"></ion-icon>
+      </ion-button>
     </ion-buttons>
   </ion-toolbar>
   <ion-toolbar>
@@ -17,29 +20,83 @@
 
 <ion-content [fullscreen]="true">
   <div class="ion-padding-top">
-    <ion-list lines="none" class="bg-transparent">
-      <ion-item *ngFor="let chat of filteredChats" button [routerLink]="['/chat-detail', chat.id]" class="chat-item">
-        <ion-avatar slot="start" class="chat-avatar">
-          <img [src]="chat.avatar || 'assets/placeholder_user.png'" />
-          <!-- Online indicator placeholder -->
-          <div class="online-indicator"></div>
-        </ion-avatar>
 
+    <!-- Skeleton Loading State (WhatsApp Parity) -->
+    <ion-list *ngIf="isLoading" lines="none" class="bg-transparent">
+      <ion-item *ngFor="let i of [1,2,3,4,5]" class="chat-item skeleton-item">
+        <ion-avatar slot="start" class="chat-avatar">
+          <ion-skeleton-text animated class="skeleton-avatar"></ion-skeleton-text>
+        </ion-avatar>
         <ion-label>
           <div class="chat-header">
-            <h2 class="chat-name">{{ chat.name }}</h2>
-            <span class="chat-time">{{ chat.lastTimestamp | date:'shortTime' }}</span>
+            <ion-skeleton-text animated style="width: 40%; height: 14px;"></ion-skeleton-text>
+            <ion-skeleton-text animated style="width: 50px; height: 10px;"></ion-skeleton-text>
           </div>
-
           <div class="chat-footer">
-            <p [class.unread-msg]="getUnreadCount(chat) > 0" class="chat-preview">
-              {{ chat.lastMessage || 'Start conversation' }}
-            </p>
-            <ion-badge color="secondary" *ngIf="getUnreadCount(chat) > 0" class="unread-badge">{{ getUnreadCount(chat)
-              }}</ion-badge>
+            <ion-skeleton-text animated style="width: 70%; height: 12px; margin-top: 8px;"></ion-skeleton-text>
           </div>
         </ion-label>
       </ion-item>
+    </ion-list>
+
+    <!-- Actual Chat List -->
+    <ion-list *ngIf="!isLoading" lines="none" class="bg-transparent">
+
+      <!-- Archived Chats entry (WhatsApp Parity) -->
+      <ion-item *ngIf="archivedCount > 0" button routerLink="/archived-chats" class="archived-row">
+        <ion-icon name="archive-outline" slot="start"></ion-icon>
+        <ion-label>Archived</ion-label>
+        <ion-note slot="end" color="primary">{{ archivedCount }}</ion-note>
+      </ion-item>
+
+      <ion-item-sliding *ngFor="let chat of filteredChats" #slidingItem>
+        <!-- Swipe Left Options (WhatsApp Parity) -->
+        <ion-item-options side="start">
+          <ion-item-option color="primary" (click)="pinChat(chat.id, slidingItem)">
+            <ion-icon slot="icon-only" [name]="isPinned(chat.id) ? 'pin' : 'pin-outline'"></ion-icon>
+          </ion-item-option>
+        </ion-item-options>
+
+        <!-- Main Chat Item (WhatsApp Parity: long press for context menu) -->
+        <ion-item button [routerLink]="['/chat-detail', chat.id]" (longPress)="presentChatOptions(chat)"
+          class="chat-item">
+          <ion-avatar slot="start" class="chat-avatar">
+            <img [src]="chat.avatar || 'assets/placeholder_user.png'" />
+            <!-- Online indicator (WhatsApp Parity) - only for 1:1 chats when user is online -->
+            <div *ngIf="!chat.isGroup && chat.otherUserId && isUserOnline(chat.otherUserId)" class="online-indicator">
+            </div>
+          </ion-avatar>
+
+          <ion-label>
+            <div class="chat-header">
+              <div class="chat-name-row">
+                <h2 class="chat-name">{{ chat.name }}</h2>
+                <ion-icon *ngIf="isPinned(chat.id)" name="pin" class="pin-icon"></ion-icon>
+                <ion-icon *ngIf="isMuted(chat.id)" name="notifications-off-outline" class="mute-icon"></ion-icon>
+              </div>
+              <span class="chat-time">{{ chat.lastTimestamp | date:'shortTime' }}</span>
+            </div>
+
+            <div class="chat-footer">
+              <p [class.unread-msg]="getUnreadCount(chat) > 0" class="chat-preview">
+                {{ chat.lastMessage || 'Start conversation' }}
+              </p>
+              <ion-badge color="secondary" *ngIf="getUnreadCount(chat) > 0" class="unread-badge">{{ getUnreadCount(chat)
+                }}</ion-badge>
+            </div>
+          </ion-label>
+        </ion-item>
+
+        <!-- Swipe Right Options (WhatsApp Parity) -->
+        <ion-item-options side="end">
+          <ion-item-option color="warning" (click)="muteChat(chat.id, slidingItem)">
+            <ion-icon slot="icon-only" [name]="isMuted(chat.id) ? 'notifications' : 'notifications-off'"></ion-icon>
+          </ion-item-option>
+          <ion-item-option color="danger" (click)="archiveChat(chat.id, slidingItem)">
+            <ion-icon slot="icon-only" name="archive"></ion-icon>
+          </ion-item-option>
+        </ion-item-options>
+      </ion-item-sliding>
     </ion-list>
 
     <div *ngIf="chats.length === 0" class="empty-state">

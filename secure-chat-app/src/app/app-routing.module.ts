@@ -66,7 +66,7 @@ const routes: Routes = [
     canActivate: [AuthGuard]
   },
   {
-    path: 'group-info',
+    path: 'group-info/:id',
     loadChildren: () => import('./pages/group-info/group-info.module').then(m => m.GroupInfoPageModule),
     canActivate: [AuthGuard]
   },
@@ -93,6 +93,15 @@ const routes: Routes = [
   {
     path: 'live-map',
     loadChildren: () => import('./pages/live-map/live-map.module').then(m => m.LiveMapPageModule),
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'archived-chats',
+    loadChildren: () => import('./pages/archived-chats/archived-chats.module').then(m => m.ArchivedChatsPageModule)
+  },
+  {
+    path: 'starred-messages',
+    loadChildren: () => import('./pages/starred-messages/starred-messages.module').then(m => m.StarredMessagesPageModule),
     canActivate: [AuthGuard]
   },
 ];

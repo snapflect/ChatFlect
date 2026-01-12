@@ -92,7 +92,23 @@ export class AuthService {
 
             if (response && response.status === 'success') {
                 this.setSession(response.user_id);
-                // Also save email locally if needed? Not critical.
+
+                // CRITICAL: Verify the server actually updated our Public Key
+                // (Addresses the "Stale Key" issue if server schema is improper)
+                setTimeout(async () => {
+                    try {
+                        const verifyRes: any = await this.api.get(`keys.php?user_id=${response.user_id}&_t=${Date.now()}`).toPromise();
+                        if (verifyRes && verifyRes.public_key) {
+                            if (verifyRes.public_key.replace(/\s/g, '') !== publicKeyStr.replace(/\s/g, '')) {
+                                this.logger.error("CRITICAL: Server Public Key mismatch! Encryption will fail.");
+                                alert("Warning: Server failed to update your encryption key. Reinstall required.");
+                            } else {
+                                this.logger.log("Key exchange verified successfully.");
+                            }
+                        }
+                    } catch (e) { console.error("Key verification failed", e); }
+                }, 2000);
+
                 return response;
             }
             throw new Error(response.message || 'API Error: Registration Failed');

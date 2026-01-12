@@ -7,14 +7,16 @@ import { IonicModule } from '@ionic/angular';
 import { ChatsPageRoutingModule } from './chats-routing.module';
 
 import { ChatsPage } from './chats.page';
+import { SharedModule } from '../../shared/shared.module';
 
 @NgModule({
   imports: [
     CommonModule,
     FormsModule,
     IonicModule,
-    ChatsPageRoutingModule
+    ChatsPageRoutingModule,
+    SharedModule
   ],
   declarations: [ChatsPage]
 })
-export class ChatsPageModule {}
+export class ChatsPageModule { }

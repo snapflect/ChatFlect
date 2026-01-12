@@ -10,42 +10,15 @@
 <ion-content class="ion-padding">
   <!-- Profile Header -->
   <!-- Profile Header -->
-  <div class="profile-section ion-text-center ion-margin-bottom">
-    <input type="file" id="avatarInput" (change)="onFileSelected($event)" hidden accept="image/*" />
-
-    <div class="avatar-wrapper" (click)="triggerFile()">
-      <ion-avatar class="big-avatar">
-        <img [src]="user.photo_url || 'assets/avatar-placeholder.png'" />
-      </ion-avatar>
-      <div class="edit-badge">
-        <ion-icon name="camera" color="light"></ion-icon>
-      </div>
-      <div *ngIf="isLoading" class="loading-overlay">
-        <ion-spinner></ion-spinner>
-      </div>
+  <!-- Profile Header (Simplified) -->
+  <div class="profile-header ion-margin-bottom" routerLink="/profile">
+    <ion-avatar class="small-avatar">
+      <img [src]="user.photo_url || 'assets/avatar-placeholder.png'" />
+    </ion-avatar>
+    <div class="profile-info">
+      <h2>{{ user.first_name }} {{ user.last_name }}</h2>
+      <p class="status-preview">{{ user.short_note || 'Available' }}</p>
     </div>
-
-    <h2 class="username">{{ user.first_name }} {{ user.last_name }}</h2>
-    <p class="phone">{{ user.phone }}</p>
-  </div>
-
-  <div class="edit-form ion-margin-bottom">
-    <ion-item class="glass-item">
-      <ion-label position="stacked" color="medium">First Name</ion-label>
-      <ion-input [(ngModel)]="user.first_name"></ion-input>
-    </ion-item>
-    <ion-item class="glass-item">
-      <ion-label position="stacked" color="medium">Last Name</ion-label>
-      <ion-input [(ngModel)]="user.last_name"></ion-input>
-    </ion-item>
-    <ion-item class="glass-item">
-      <ion-label position="stacked" color="medium">About</ion-label>
-      <ion-textarea [(ngModel)]="user.short_note" rows="2"></ion-textarea>
-    </ion-item>
-
-    <ion-button expand="block" shape="round" class="gradient-btn" (click)="saveProfile()">
-      Save Changes
-    </ion-button>
   </div>
 
   <!-- Settings List -->

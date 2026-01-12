@@ -1,8 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { NavController, ToastController } from '@ionic/angular';
+import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { ContactsService } from 'src/app/services/contacts.service';
 import { ChatService } from 'src/app/services/chat.service';
 import { LoggingService } from 'src/app/services/logging.service';
+import { ApiService } from 'src/app/services/api.service';
 
 @Component({
   selector: 'app-new-group',
@@ -14,13 +16,19 @@ export class NewGroupPage implements OnInit {
   contacts: any[] = [];
   selectedContacts: string[] = [];
   groupName: string = '';
+  groupIconUrl: SafeUrl | string | null = null;
+  rawIconUrl: string | null = null; // for upload
+  isUploading = false;
 
   constructor(
     private contactsService: ContactsService,
     private chatService: ChatService,
     private nav: NavController,
     private toast: ToastController,
-    private logger: LoggingService
+    private logger: LoggingService,
+    private api: ApiService,
+    private sanitizer: DomSanitizer,
+    private cdr: ChangeDetectorRef
   ) { }
 
   ngOnInit() {
@@ -50,8 +58,9 @@ export class NewGroupPage implements OnInit {
       return;
     }
 
+
     try {
-      await this.chatService.createGroup(this.groupName, this.selectedContacts);
+      await this.chatService.createGroup(this.groupName, this.selectedContacts, this.rawIconUrl || undefined);
       this.showToast('Group created!');
       this.nav.navigateBack('/tabs/chats');
     } catch (e: any) {
@@ -63,5 +72,38 @@ export class NewGroupPage implements OnInit {
   async showToast(msg: string) {
     const t = await this.toast.create({ message: msg, duration: 2000 });
     t.present();
+  }
+
+  triggerFile() {
+    document.getElementById('groupIconInput')?.click();
+  }
+
+  async onFileSelected(event: any) {
+    const file = event.target.files[0];
+    if (file) {
+      await this.uploadGroupIcon(file);
+    }
+  }
+
+  async uploadGroupIcon(file: File) {
+    this.isUploading = true;
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res: any = await this.api.post('upload.php', formData).toPromise();
+      if (res && res.url) {
+        this.rawIconUrl = res.url;
+        this.groupIconUrl = this.sanitizer.bypassSecurityTrustUrl(res.url); // Sanitize
+        // Force update if needed, though simple property change usually works 
+        // Adding specific log to verify url
+        this.logger.log("Icon Uploaded: " + res.url);
+        this.cdr.detectChanges();
+      }
+    } catch (e: any) {
+      this.logger.error("Group Icon Upload Failed", e);
+      this.showToast('Failed to upload icon');
+    } finally {
+      this.isUploading = false;
+    }
   }
 }

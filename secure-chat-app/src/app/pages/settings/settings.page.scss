@@ -1,0 +1,42 @@
+.profile-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
+    background: var(--ion-card-background, rgba(255, 255, 255, 0.05));
+    border-radius: 12px;
+
+    .small-avatar {
+        width: 60px;
+        height: 60px;
+        border: 2px solid var(--ion-color-secondary);
+    }
+
+    .profile-info {
+        flex: 1;
+
+        h2 {
+            margin: 0;
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        p {
+            margin: 4px 0 0;
+            color: var(--ion-color-medium);
+            font-size: 14px;
+        }
+    }
+}
+
+.logout-item {
+    margin-top: 20px;
+}
+
+.gradient-icon {
+    color: var(--ion-color-secondary);
+}
+
+.delete-item {
+    margin-top: 10px;
+}

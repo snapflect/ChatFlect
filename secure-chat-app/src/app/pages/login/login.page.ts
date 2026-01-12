@@ -131,8 +131,21 @@ export class LoginPage implements OnDestroy {
       const res: any = await this.auth.verifyOtp(this.phoneNumber, this.otp, this.email);
       this.showToast('Login Successful');
 
-      this.zone.run(() => {
-        const targetRoute = (res.is_new_user) ? '/profile' : '/tabs';
+      this.zone.run(async () => { // Async for profile check
+        let targetRoute = '/tabs';
+
+        // Check if New User OR Profile Incomplete
+        if (res.is_new_user) {
+          targetRoute = '/profile';
+        } else {
+          // Robustness: Check if an "Existing" user actually has a profile
+          // (Covering the case where they registered but didn't finish setup)
+          const isComplete = await this.auth.isProfileComplete();
+          if (!isComplete) {
+            targetRoute = '/profile';
+          }
+        }
+
         this.router.navigate([targetRoute]).then(nav => {
           if (!nav) this.showToast('Navigation Failed');
         });

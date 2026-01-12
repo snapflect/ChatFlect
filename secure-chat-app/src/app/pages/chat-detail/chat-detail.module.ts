@@ -9,6 +9,7 @@ import { ChatDetailPage } from './chat-detail.page';
 import { ImageModalPageModule } from '../image-modal/image-modal.module';
 import { FormatTextPipe } from 'src/app/pipes/format-text-pipe';
 import { StickerPickerComponent } from 'src/app/components/sticker-picker/sticker-picker.component';
+import { SharedModule } from 'src/app/shared/shared.module';
 
 @NgModule({
   imports: [
@@ -17,7 +18,8 @@ import { StickerPickerComponent } from 'src/app/components/sticker-picker/sticke
     IonicModule,
     ChatDetailPageRoutingModule,
     ImageModalPageModule,
-    FormatTextPipe
+    FormatTextPipe,
+    SharedModule
   ],
   declarations: [ChatDetailPage, StickerPickerComponent]
   // Wait, if FormatTextPipe IS standalone, I should import it. 

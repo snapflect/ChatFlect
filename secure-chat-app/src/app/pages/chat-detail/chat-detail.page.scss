@@ -1,19 +1,48 @@
+/* Relies on global ion-content styles now */
 ion-content.chat-content {
-    --background: var(--ion-background-color);
+    --padding-top: 10px;
 }
 
-.bg-transparent {
-    background: transparent !important;
+/* Header Avatar Ring (Matches Contacts) */
+.header-avatar {
+    border: 2px solid var(--ion-color-secondary);
+    padding: 2px;
+    box-sizing: content-box;
 }
 
+/* Date Separator */
+.date-separator {
+    display: flex;
+    justify-content: center;
+    margin: 16px 0;
+    position: sticky;
+    top: 10px;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.date-chip {
+    background: rgba(30, 30, 35, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: rgba(255, 255, 255, 0.7);
+    padding: 6px 14px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Message List */
 .msg-item {
     --background: transparent;
-    --padding-start: 10px;
-    --padding-end: 10px;
-    margin-bottom: 5px;
-    --min-height: auto;
+    --padding-start: 0;
+    --padding-end: 0;
+    margin-bottom: 8px;
     display: flex;
     flex-direction: column;
+    padding: 0 16px;
+    width: 100%;
 }
 
 .msg-me {
@@ -24,190 +53,93 @@ ion-content.chat-content {
     align-items: flex-start;
 }
 
-.glass-bubble {
-    margin-left: auto;
-    /* Light Gradient for "My" messages: Light Blue/Lavender */
-    background: linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%);
-    color: #000000;
-    /* Black text */
-    padding: 12px 16px;
-    border-radius: 18px 18px 0 18px;
-    max-width: 80%;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-    /* Softer shadow */
+/* Bubbles - Uses Global Vars */
+.bubble {
     position: relative;
-    font-weight: 500;
-}
-
-.glass-bubble-them {
-    margin-right: auto;
-    /* White Glass for "Their" messages */
-    background: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.4);
-    color: #000000;
-    /* Black text */
-    padding: 12px 16px;
-    border-radius: 18px 18px 18px 0;
+    padding: 10px 14px;
+    border-radius: 18px;
     max-width: 80%;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
-    font-weight: 500;
-}
-
-.msg-text {
-    margin: 0;
-    font-size: 1rem;
+    min-width: 80px;
+    font-size: 15px;
     line-height: 1.4;
-    white-space: pre-wrap;
-    color: #000000;
-    /* Ensure black text */
+    word-wrap: break-word;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
-/* Link Preview */
-.link-preview {
-    margin-top: 8px;
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 8px;
-    overflow: hidden;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
+.msg-me .bubble {
+    background: var(--chat-bubble-me-bg);
+    color: var(--chat-bubble-me-text);
+    border-bottom-right-radius: 4px;
 }
 
-.link-preview img {
-    width: 40px;
-    height: 40px;
-    object-fit: contain;
-    /* Favicon usually small */
-    padding: 5px;
-    background: white;
-    /* Ensure favicon visible */
+.msg-them .bubble {
+    background: var(--chat-bubble-them-bg);
+    color: var(--chat-bubble-them-text);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom-left-radius: 4px;
 }
 
-.link-info {
-    padding: 8px;
-    overflow: hidden;
-}
-
-.link-title {
-    font-size: 0.8rem;
-    font-weight: bold;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin: 0;
-    color: inherit;
-}
-
-.link-domain {
-    font-size: 0.7rem;
-    opacity: 0.7;
-    margin: 0;
-}
-
+/* Links */
 .chat-link {
-    color: #4facfe;
+    color: var(--ion-color-warning);
     text-decoration: underline;
 }
 
-.msg-image {
-    max-width: 240px;
-    /* Mini Tile effect */
-    max-height: 240px;
-    width: 100%;
-    object-fit: cover;
-    border-radius: 12px;
-    margin-bottom: 2px;
-    display: block;
-}
-
-.msg-caption {
-    font-size: 0.9rem;
-    margin: 4px 0 0 0;
-    opacity: 0.9;
+/* Footer / Time */
+.msg-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    margin-top: 4px;
+    float: right;
+    margin-left: 8px;
 }
 
 .timestamp {
-    font-size: 0.7em;
-    color: #e0e0e0;
-    display: block;
-    text-align: right;
-    margin-top: 4px;
-    opacity: 0.8;
+    font-size: 11px;
+    opacity: 0.7;
 }
 
-/* Reply Styles */
-.reply-context {
-    background: rgba(0, 0, 0, 0.1);
-    border-left: 4px solid var(--ion-color-tertiary);
-    padding: 5px 8px;
-    border-radius: 4px;
-    margin-bottom: 5px;
-    font-size: 0.85em;
-    opacity: 0.9;
-}
-
-.reply-preview {
-    background: rgba(40, 44, 52, 0.95);
-    border-left: 4px solid var(--ion-color-secondary);
-    padding: 10px;
-    margin: 10px;
-    border-radius: 8px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+.read-icon {
+    font-size: 14px;
     color: white;
-    font-size: 0.9rem;
-    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.3);
 }
 
-/* Footer & Input */
-ion-footer {
-    background: var(--ion-background-color);
+.sent-icon {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.5);
 }
 
-/* Footer & Input */
-ion-footer {
-    background: transparent;
-    border: none;
-}
-
-.input-toolbar {
-    --background: transparent;
-    padding: 0;
-}
-
-/* Chat Footer (Floating Pill) */
+/* Footer / Input */
 .chat-footer {
-    background: rgba(18, 18, 20, 0.85);
-    /* Dark Glass */
+    background: rgba(30, 30, 35, 0.85);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    padding: 8px 10px calc(8px + var(--ion-safe-area-bottom));
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
     display: flex;
     align-items: flex-end;
-    /* Align bottom for multiline input */
-    gap: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    gap: 10px;
+    width: 100%;
 }
 
 .input-container {
     flex: 1;
-    background: rgba(255, 255, 255, 0.08);
-    /* Light pill bg */
+    background: rgba(255, 255, 255, 0.05);
     border-radius: 24px;
-    padding: 4px 12px;
+    padding: 8px 16px;
     display: flex;
     align-items: center;
     min-height: 44px;
     border: 1px solid rgba(255, 255, 255, 0.05);
-    transition: all 0.2s ease;
+    transition: border-color 0.2s, background 0.2s;
 
     &:focus-within {
-        background: rgba(255, 255, 255, 0.12);
-        border-color: rgba(255, 255, 255, 0.2);
-        box-shadow: 0 0 10px rgba(127, 90, 240, 0.1);
+        border-color: var(--ion-color-primary);
+        background: rgba(255, 255, 255, 0.08);
     }
 }
 
@@ -215,61 +147,44 @@ ion-footer {
     width: 100%;
     border: none;
     background: transparent;
-    color: white;
-    padding: 8px 0;
     outline: none;
-    font-size: 15px;
-    resize: none;
-    max-height: 120px;
+    font-size: 16px;
+    color: white;
     font-family: inherit;
+    resize: none;
+    max-height: 100px;
+    padding: 4px 0;
+
+    &::placeholder {
+        color: rgba(255, 255, 255, 0.4);
+    }
 }
 
+/* Action Buttons */
 .action-btn {
     --padding-start: 8px;
     --padding-end: 8px;
-    --color: #a0a0a0;
+    --color: rgba(255, 255, 255, 0.6);
     margin: 0;
-    --background: transparent;
+    width: 36px;
+    height: 36px;
 
-    &:hover {
-        --color: white;
-    }
-}
-
-.send-btn {
-    --background: var(--ion-color-primary);
-    --border-radius: 50%;
-    width: 44px;
-    height: 44px;
-    --padding-start: 0;
-    --padding-end: 0;
-    --box-shadow: 0 4px 15px rgba(127, 90, 240, 0.4);
-    transition: transform 0.2s;
-
+    &:hover,
     &:active {
-        transform: scale(0.9);
-    }
-
-    ion-icon {
-        font-size: 20px;
-        margin-left: 3px;
-        /* Optical center */
+        --color: var(--ion-color-primary);
     }
 }
 
-/* Sticker Drawer */
-.sticker-drawer {
-    background: rgba(30, 30, 35, 0.95);
-    backdrop-filter: blur(20px);
-    border-top-left-radius: 20px;
-    border-top-right-radius: 20px;
-    padding: 15px;
-    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.sticker-img {
-    border-radius: 12px;
+.mic-btn,
+.send-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    margin-bottom: 2px;
     transition: transform 0.2s;
 
     &:active {
@@ -277,25 +192,62 @@ ion-footer {
     }
 }
 
-/* Reaction Badge */
-.reactions-display {
-    position: absolute;
-    bottom: -8px;
-    right: 12px;
-    background: #2a2a30;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    padding: 2px 6px;
-    font-size: 11px;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    z-index: 5;
-    display: flex;
-    align-items: center;
-    gap: 3px;
+.mic-btn {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.reaction-count {
-    font-size: 0.85em;
-    color: #ccc;
-    font-weight: 600;
+.send-btn {
+    background: linear-gradient(135deg, var(--ion-color-primary) 0%, var(--ion-color-secondary) 100%);
+    color: white;
+}
+
+/* Replied Message */
+.reply-context {
+    background: rgba(0, 0, 0, 0.2);
+    border-left: 4px solid var(--ion-color-primary);
+    padding: 8px 12px;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+}
+
+.reply-title {
+    font-weight: 700;
+    color: var(--ion-color-primary);
+    font-size: 12px;
+    margin-bottom: 2px;
+}
+
+.reply-text {
+    color: rgba(255, 255, 255, 0.7);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Images in Bubbles */
+.msg-image {
+    width: 100%;
+    border-radius: 12px;
+    margin-bottom: 4px;
+    display: block;
+    max-width: 300px;
+}
+
+/* Stickers */
+.sticker-img {
+    width: 140px;
+    height: 140px;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.2));
+}
+
+/* Selection */
+.selected-row {
+    background: rgba(127, 90, 240, 0.15) !important;
 }

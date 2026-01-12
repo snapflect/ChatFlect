@@ -1,7 +1,3 @@
-ion-content {
-    --background: var(--app-bg-gradient);
-}
-
 .chat-item {
     --padding-start: 16px;
     --padding-end: 16px;
@@ -9,9 +5,6 @@ ion-content {
     margin: 8px 16px;
     border-radius: 20px;
     --background: rgba(30, 30, 35, 0.6);
-    /* Slightly darker glass for list */
-
-    /* Animation */
     transition: transform 0.2s ease, background 0.2s;
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -26,13 +19,10 @@ ion-content {
     width: 55px;
     height: 55px;
     margin-right: 15px;
-    /* Removed redundant border to look cleaner, kept ring via class if needed */
 }
 
-/* Avatar Image Rounded Rect for Modern Look */
 .chat-avatar img {
     border-radius: 18px;
-    /* Squircle */
 }
 
 .online-indicator {
@@ -43,7 +33,6 @@ ion-content {
     height: 16px;
     background-color: var(--ion-color-success);
     border: 3px solid #1e1e23;
-    /* Match bg */
     border-radius: 50%;
 }
 
@@ -60,6 +49,23 @@ ion-content {
     font-size: 1.05rem;
     letter-spacing: -0.3px;
     color: white;
+}
+
+.chat-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.pin-icon {
+    font-size: 0.85rem;
+    color: var(--ion-color-primary);
+    opacity: 0.8;
+}
+
+.mute-icon {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.4);
 }
 
 .chat-time {
@@ -103,26 +109,41 @@ ion-content {
     background: var(--ion-color-secondary);
 }
 
-.bg-transparent {
-    background: transparent !important;
+/* Skeleton Loading */
+.skeleton-item {
+    --background: transparent;
+    pointer-events: none;
 }
 
-/* Empty State Polish */
-.empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 60vh;
-    text-align: center;
-    color: rgba(255, 255, 255, 0.4);
+.skeleton-avatar {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    --background: rgba(255, 255, 255, 0.1);
 }
 
-.empty-icon {
-    font-size: 5rem;
-    background: linear-gradient(135deg, var(--ion-color-primary), var(--ion-color-secondary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 20px;
-    opacity: 0.8;
+ion-skeleton-text {
+    --background: rgba(255, 255, 255, 0.08);
+    --background-rgb: 255, 255, 255;
+    border-radius: 4px;
+}
+
+.archived-row {
+    --background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    margin-bottom: 8px;
+
+    ion-icon {
+        color: var(--ion-color-primary);
+        font-size: 1.4rem;
+    }
+
+    ion-label {
+        font-weight: 500;
+        margin-left: 10px;
+    }
+
+    ion-note {
+        font-size: 0.9rem;
+    }
 }

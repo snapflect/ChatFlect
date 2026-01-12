@@ -7,6 +7,7 @@ import { IonicModule } from '@ionic/angular';
 import { GroupInfoPageRoutingModule } from './group-info-routing.module';
 
 import { GroupInfoPage } from './group-info.page';
+import { PickContactModalComponent } from 'src/app/components/pick-contact-modal/pick-contact-modal.component';
 
 @NgModule({
   imports: [
@@ -15,6 +16,6 @@ import { GroupInfoPage } from './group-info.page';
     IonicModule,
     GroupInfoPageRoutingModule
   ],
-  declarations: [GroupInfoPage]
+  declarations: [GroupInfoPage, PickContactModalComponent]
 })
-export class GroupInfoPageModule {}
+export class GroupInfoPageModule { }

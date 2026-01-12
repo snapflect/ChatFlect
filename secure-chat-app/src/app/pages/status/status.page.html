@@ -12,7 +12,7 @@
     <div slot="start" class="avatar-wrapper">
       <div [class.ring-container]="myStatus">
         <ion-avatar>
-          <img [src]="(myStatus?.updates[0]?.content_url) || 'assets/avatar-placeholder.png'" />
+          <img [src]="(myStatus?.updates[0]?.content_url) || myProfilePic || 'assets/avatar-placeholder.png'" />
         </ion-avatar>
       </div>
 

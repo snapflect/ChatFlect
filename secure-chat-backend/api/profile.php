@@ -77,9 +77,18 @@ if ($method === 'POST') {
             $isNewUser = false;
             // Update Key & Email
             // Note: `setup_auth_v2` adds email column. Ensure it exists.
-            $update = $conn->prepare("UPDATE users SET public_key = ?, email = ? WHERE id = ?");
-            $update->bind_param("ssi", $publicKey, $email, $user['id']);
-            $update->execute();
+            // Update Key ALWAYS (Critical)
+            $updateKey = $conn->prepare("UPDATE users SET public_key = ? WHERE id = ?");
+            $updateKey->bind_param("si", $publicKey, $user['id']);
+            $updateKey->execute();
+
+            // Update Email (Optional - might fail if column doesn't exist)
+            try {
+                $updateEmail = $conn->prepare("UPDATE users SET email = ? WHERE id = ?");
+                $updateEmail->bind_param("si", $email, $user['id']);
+                $updateEmail->execute();
+            } catch (Exception $e) { /* Ignore schema mismatch */
+            }
 
             if (empty($user['user_id'])) {
                 $publicUserId = bin2hex(random_bytes(16));
@@ -103,21 +112,60 @@ if ($method === 'POST') {
         // Update Profile
         $userId = $data->user_id;
 
-        // Sanitization
-        $firstName = htmlspecialchars(strip_tags($data->first_name ?? ''));
-        $lastName = htmlspecialchars(strip_tags($data->last_name ?? ''));
-        $note = htmlspecialchars(strip_tags($data->short_note ?? ''));
+        // Check existence first
+        $check = $conn->prepare("SELECT id FROM users WHERE user_id = ?");
+        $check->bind_param("s", $userId);
+        $check->execute();
+        if ($check->get_result()->num_rows === 0) {
+            http_response_code(404);
+            echo json_encode(["error" => "User ID not found in DB", "sent_id" => $userId]);
+            exit;
+        }
 
-        // Photo URL 
-        $photoUrl = filter_var($data->photo_url ?? '', FILTER_SANITIZE_URL);
+        // Build Dynamic Query (PATCH Style)
+        $fields = [];
+        $types = "";
+        $params = [];
 
-        // UPDATE users table directly (MySQLi)
-        // We use user_id (UUID string) as the selector, not the auto-inc ID
-        $stmt = $conn->prepare("UPDATE users SET first_name=?, last_name=?, short_note=?, photo_url=? WHERE user_id=?");
-        $stmt->bind_param("sssss", $firstName, $lastName, $note, $photoUrl, $userId);
+        if (isset($data->first_name)) {
+            $fields[] = "first_name=?";
+            $types .= "s";
+            $params[] = htmlspecialchars(strip_tags($data->first_name));
+        }
+        if (isset($data->last_name)) {
+            $fields[] = "last_name=?";
+            $types .= "s";
+            $params[] = htmlspecialchars(strip_tags($data->last_name));
+        }
+        if (isset($data->short_note)) {
+            $fields[] = "short_note=?";
+            $types .= "s";
+            $params[] = htmlspecialchars(strip_tags($data->short_note));
+        }
+        if (isset($data->photo_url)) {
+            $fields[] = "photo_url=?";
+            $types .= "s";
+            $params[] = filter_var($data->photo_url, FILTER_SANITIZE_URL);
+        }
+
+        if (empty($fields)) {
+            echo json_encode(["status" => "no_fields_to_update"]);
+            exit;
+        }
+
+        $sql = "UPDATE users SET " . implode(", ", $fields) . " WHERE user_id=?";
+        $types .= "s";
+        $params[] = $userId;
+
+        $stmt = $conn->prepare($sql);
+        $stmt->bind_param($types, ...$params);
         $stmt->execute();
 
-        echo json_encode(["status" => "profile_updated"]);
+        if ($stmt->affected_rows > 0) {
+            echo json_encode(["status" => "profile_updated", "affected" => $stmt->affected_rows]);
+        } else {
+            echo json_encode(["status" => "no_changes_made", "info" => "Values identical or failed"]);
+        }
     }
 } elseif ($method === 'GET') {
     // Get Profile

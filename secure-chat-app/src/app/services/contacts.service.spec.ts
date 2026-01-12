@@ -53,12 +53,60 @@ describe('ContactsService', () => {
         expect(result).toEqual(mockRes);
     });
 
+    it('should use local name fallback when server name is missing', async () => {
+        spyOn(Capacitor, 'isNativePlatform').and.returnValue(true);
+        spyOn(Contacts, 'requestPermissions').and.returnValue(Promise.resolve({ contacts: 'granted' } as any));
+
+        const mockLocal = {
+            contacts: [
+                {
+                    displayName: 'Local Friend',
+                    phones: [{ number: '1234567890' }]
+                }
+            ]
+        };
+        spyOn(Contacts, 'getContacts').and.returnValue(Promise.resolve(mockLocal as any));
+
+        // Mock Server Response (Empty Profile)
+        const mockServerRes = [{
+            user_id: 'u1',
+            phone_number: '1234567890',
+            first_name: null
+        }];
+        apiSpy.post.and.returnValue(of(mockServerRes));
+
+        const result = await service.getContacts() as any[];
+
+        expect(result.length).toBe(1);
+        expect(result[0].localName).toBe('Local Friend');
+    });
+
+    it('should merge photo_url from server', async () => {
+        spyOn(Capacitor, 'isNativePlatform').and.returnValue(true);
+        spyOn(Contacts, 'requestPermissions').and.returnValue(Promise.resolve({ contacts: 'granted' } as any));
+        spyOn(Contacts, 'getContacts').and.returnValue(Promise.resolve({ contacts: [] } as any));
+
+        const mockServerRes = [{
+            user_id: 'u2',
+            phone_number: '9999999999',
+            first_name: 'Server Name',
+            photo_url: 'http://pic.com/1.jpg'
+        }];
+        apiSpy.post.and.returnValue(of(mockServerRes));
+
+        const result = await service.getContacts() as any[];
+
+        expect(result.length).toBe(1);
+        expect(result[0].photo_url).toBe('http://pic.com/1.jpg');
+        expect(result[0].first_name).toBe('Server Name');
+    });
+
     it('should handle errors in getContacts gracefully', async () => {
         spyOn(Capacitor, 'isNativePlatform').and.returnValue(true);
         spyOn(Contacts, 'requestPermissions').and.returnValue(Promise.reject('Boom'));
 
-        const result = await service.getContacts();
-        expect(result.length).toBe(2); // Fallback demo contacts
+        const result = await service.getContacts() as any[];
+        expect(result.length).toBe(0); // Should return empty array on error
         expect(loggerSpy.error).toHaveBeenCalled();
     });
 });

@@ -13,6 +13,23 @@
 </ion-header>
 
 <ion-content class="ion-padding">
+
+  <!-- Group Icon Picker -->
+  <div class="centered-content ion-margin-bottom">
+    <div class="avatar-picker" (click)="triggerFile()">
+      <ion-avatar class="group-avatar">
+        <img [src]="groupIconUrl || 'assets/group-placeholder.png'" />
+      </ion-avatar>
+      <div class="camera-badge">
+        <ion-icon name="camera" color="light"></ion-icon>
+      </div>
+      <div *ngIf="isUploading" class="upload-overlay">
+        <ion-spinner name="crescent"></ion-spinner>
+      </div>
+    </div>
+    <input type="file" id="groupIconInput" (change)="onFileSelected($event)" hidden accept="image/*" />
+  </div>
+
   <ion-item class="glass-input">
     <ion-label position="stacked">Group Name</ion-label>
     <ion-input [(ngModel)]="groupName" placeholder="e.g. Project Team"></ion-input>

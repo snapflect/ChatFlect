@@ -2,6 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { StatusService } from 'src/app/services/status.service';
 import { ModalController, ToastController, AlertController } from '@ionic/angular';
 import { StatusViewerPage } from '../status-viewer/status-viewer.page';
+import { ProfileService } from 'src/app/services/profile.service';
 
 @Component({
   selector: 'app-status',
@@ -13,9 +14,11 @@ export class StatusPage implements OnInit {
   myStatus: any = null;
   recentUpdates: any[] = [];
   viewedUpdates: any[] = []; // Todo: Logic for viewed
+  myProfilePic: string | null = null;
 
   constructor(
     private statusService: StatusService,
+    private profileService: ProfileService,
     private modalCtrl: ModalController,
     private toast: ToastController,
     private alertCtrl: AlertController
@@ -49,6 +52,14 @@ export class StatusPage implements OnInit {
 
   ngOnInit() {
     this.loadStatus();
+    this.loadProfile();
+  }
+
+  async loadProfile() {
+    const p: any = await this.profileService.getProfile();
+    if (p) {
+      this.myProfilePic = p.photo_url;
+    }
   }
 
   loadStatus() {

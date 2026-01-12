@@ -1,0 +1,23 @@
+/* Reuse main chat styles for consistency */
+@import '../chats/chats.page.scss';
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 60vh;
+    color: rgba(255, 255, 255, 0.4);
+    text-align: center;
+    padding: 20px;
+
+    .empty-icon {
+        font-size: 4rem;
+        margin-bottom: 20px;
+        opacity: 0.5;
+    }
+
+    p {
+        font-size: 1.1rem;
+    }
+}

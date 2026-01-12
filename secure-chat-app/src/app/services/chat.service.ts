@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion, arrayRemove, collectionGroup } from 'firebase/firestore';
 import { environment } from 'src/environments/environment';
 import { Observable, BehaviorSubject, Subject } from 'rxjs';
 import { CryptoService } from './crypto.service';
@@ -66,20 +66,42 @@ export class ChatService {
                     const data = d.data();
                     if (data['deletedFor'] && data['deletedFor'].includes(myId)) continue;
 
-                    // Expiration Check
-                    if (data['expiresAt'] && Date.now() > data['expiresAt']) {
-                        continue; // Hidden (Distributed GC: Sender could delete here, but hiding is enough for MVP)
+
+                    // System Signal Handling (Session Healing)
+                    if (data['type'] === 'system_signal' && data['content'] === 'retry_session') {
+                        // If this signal is for ME (I am the target)
+                        const targetId = String(data['targetId']).trim();
+                        if (targetId === myId) {
+                            // The sender of this signal (data['senderId']) is having trouble reading MY messages.
+                            // I need to clear my session with them so I re-initiate next time.
+                            const signalSender = String(data['senderId']).trim();
+
+                            // Prevent infinite loops: Only clear if we actually have a session or haven't cleared recently?
+                            // Simple: Just clear.
+                            console.log(`[Auto-Heal] Received retry_session from ${signalSender}. Clearing session.`);
+                            this.crypto.clearSession(signalSender);
+
+                            // Optimization: We could acknowledge, but for now, just clearing is enough.
+                            // The next message I send will bootstrap.
+                        }
+                        continue; // Do not show signals in UI
                     }
 
-                    // Decrypt Logic (Inline for scope access) - Reusing existing logic
+                    // Expiration Check
+                    if (data['expiresAt'] && Date.now() > data['expiresAt']) {
+                        continue; // Hidden
+                    }
+
+                    // Decrypt Logic
                     let decrypted = "Wait...";
                     if (data['isDeleted']) {
                         decrypted = "🚫 This message was deleted";
                     } else if (privateKeyStr) {
-                        // ... (Exact same decryption logic as before) ...
+                        // ... (Decrypt logic) ...
                         const senderId = String(data['senderId']).trim();
                         const isMe = senderId === myId;
                         let cipherText = '';
+                        // ... (content extraction same as before) ...
                         if (isMe) {
                             cipherText = data['content_self'] || (typeof data['content'] === 'string' ? data['content'] : data['content'][myId]);
                         } else {
@@ -92,22 +114,35 @@ export class ChatService {
 
                         if (cipherText) {
                             try {
-                                // PHASE 8: Use Double Ratchet (Auto-fallbacks to legacy inside service)
                                 const plain = await this.crypto.decryptWithRatchet(cipherText, senderId, privateKeyStr);
 
-                                if (!plain.includes("🔒") && plain !== '') {
+                                // Check for specific error (Ratchet, Session, OR Legacy Fallback)
+                                const isDecryptionError =
+                                    plain === 'ERROR_RATCHET_DECRYPTION_FAILED' ||
+                                    plain === 'ERROR_NO_SESSION' ||
+                                    plain === '[Decryption Error]'; // Catch Legacy/Fallback errors too
+
+                                if (isDecryptionError) {
+                                    decrypted = "Waiting for this message...";
+
+                                    // Trigger Auto-Heal Request if not ME
+                                    if (!isMe) {
+                                        this.triggerSessionRetry(chatId, senderId);
+                                    }
+                                } else if (!plain.includes("🔒") && plain !== '') {
                                     decrypted = plain;
                                     try {
                                         const metadata = JSON.parse(decrypted);
                                         if (metadata && metadata.type === 'image') decrypted = metadata;
                                     } catch (e) { }
                                 } else {
-                                    decrypted = plain.includes("🔒") ? plain : "🔒 Decryption Failed";
+                                    decrypted = "🔒 Decryption Failed";
                                 }
                             } catch (e) { decrypted = "🔒 Error"; }
                         } else { decrypted = "🔒 Encrypted (Not for you)"; }
                     }
                     msgsRaw.push({ id: d.id, ...data, text: decrypted });
+
 
                     // Track newest message timestamp
                     const msgTimestamp = data['timestamp'] || 0;
@@ -149,15 +184,32 @@ export class ChatService {
         });
     }
 
+    getSharedMedia(chatId: string): Observable<any[]> {
+        // Reuse getMessages logic or implement specific media query
+        // For shared media gallery, we likely want ALL media, not just recent
+        // So a query is better than referencing a limited message list
+        const messagesRef = collection(this.db, 'chats', chatId, 'messages');
+        const q = query(messagesRef, orderBy('timestamp', 'desc')); // Get all messages? Beware size.
+        // Optimization: In production, adding 'where type in [image, video]' requires composite index
+
+        return new Observable(observer => {
+            return onSnapshot(q, (snapshot) => {
+                const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                observer.next(msgs);
+            });
+        });
+    }
+
     // Create Group (MySQL + Firestore)
-    async createGroup(name: string, userIds: string[]) {
+    async createGroup(name: string, userIds: string[], iconUrl?: string) {
         const myId = String(localStorage.getItem('user_id'));
         // 1. Create in MySQL (Master)
         const res: any = await this.api.post('groups.php', {
             action: 'create',
             name: name,
             created_by: myId,
-            members: userIds
+            members: userIds,
+            icon_url: iconUrl // Pass to backend if supported
         }).toPromise();
 
         if (res && res.status === 'success') {
@@ -169,6 +221,7 @@ export class ChatService {
                 participants: [...userIds, myId], // Ensure all members + creator
                 isGroup: true,
                 groupName: name,
+                groupIcon: iconUrl || null, // Store icon
                 groupOwner: myId,
                 createdAt: Date.now(),
                 lastMessage: 'Group Created',
@@ -208,7 +261,8 @@ export class ChatService {
                 if (pid === String(senderId).trim()) continue;
 
                 try {
-                    const res: any = await this.api.get(`keys.php?user_id=${pid}`).toPromise();
+                    // Cache-Bust the key fetch to ensure we get the latest key after a reinstall/reset
+                    const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
                     if (res && res.public_key) {
                         // PHASE 8: Use Double Ratchet
                         const cypher = await this.crypto.encryptWithRatchet(plainText, pid, res.public_key);
@@ -272,6 +326,38 @@ export class ChatService {
         } catch (e) {
             this.logger.error("Send Error", e);
         }
+    }
+
+    // --- Session Healing ---
+    private healThrottle = new Map<string, number>();
+
+    private async triggerSessionRetry(chatId: string, targetSenderId: string) {
+        const key = `${chatId}_${targetSenderId}`;
+        const lastSent = this.healThrottle.get(key) || 0;
+        const now = Date.now();
+
+        // Throttle: Only send 1 retry request every 10 seconds per user per chat
+        if (now - lastSent < 10000) {
+            return;
+        }
+
+        console.log(`[Auto-Heal] Sending retry_session signal to ${targetSenderId}`);
+        this.healThrottle.set(key, now);
+
+        // Send Signal Message
+        // This message is NOT encrypted (it's a system signal)
+        // Or it could be, but if we can't decrypt, we generally communicate via plaintext signal or separate channel.
+        // For MVP: Plaintext system message in Firestore.
+        const myId = String(localStorage.getItem('user_id'));
+
+        await addDoc(collection(this.db, 'chats', chatId, 'messages'), {
+            senderId: myId,
+            targetId: targetSenderId,
+            type: 'system_signal',
+            content: 'retry_session',
+            timestamp: now,
+            expiresAt: now + 60000 // Short lived
+        });
     }
 
     // Helper methods for mocking in tests
@@ -666,7 +752,10 @@ export class ChatService {
 
         return new Observable(observer => {
             const unsubscribe = onSnapshot(q, (snapshot) => {
-                const chats = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                const chats = snapshot.docs
+                    .map(d => ({ id: d.id, ...d.data() }))
+                    .filter((c: any) => !c[`deleted_${myId}`]); // Filter persistent deletes
+
                 // Client-side sort by lastTimestamp descending
                 chats.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
                 observer.next(chats);
@@ -679,7 +768,16 @@ export class ChatService {
         const myId = String(localStorage.getItem('user_id'));
         const chatRef = doc(this.db, 'chats', chatId);
         await updateDoc(chatRef, {
-            [`unread_${myId}`]: 0
+            [`unread_${myId}`]: 0,
+            [`last_read_${myId}`]: Date.now()
+        });
+    }
+
+    async deleteChat(chatId: string): Promise<void> {
+        const myId = String(localStorage.getItem('user_id'));
+        const chatDocRef = doc(this.db, 'chats', chatId);
+        await updateDoc(chatDocRef, {
+            [`deleted_${myId}`]: true
         });
     }
     async deleteMessage(chatId: string, messageId: string, forEveryone: boolean) {
@@ -720,6 +818,34 @@ export class ChatService {
         // For now, setting to null works if UI handles it.
         await updateDoc(msgRef, {
             [`reactions.${myId}`]: null
+        });
+    }
+
+    async toggleStarMessage(chatId: string, messageId: string, star: boolean) {
+        const myId = String(localStorage.getItem('user_id'));
+        const msgRef = doc(this.db, 'chats', chatId, 'messages', messageId);
+
+        await updateDoc(msgRef, {
+            starredBy: star ? arrayUnion(myId) : arrayRemove(myId)
+        });
+    }
+
+    getStarredMessages(): Observable<any[]> {
+        const myId = String(localStorage.getItem('user_id'));
+        const starredQuery = query(
+            collectionGroup(this.db, 'messages'),
+            where('starredBy', 'array-contains', myId)
+        );
+
+        return new Observable(observer => {
+            return onSnapshot(starredQuery, (snapshot) => {
+                const msgs = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    chatId: doc.ref.parent.parent?.id, // Get parent chatId from ref
+                    ...doc.data()
+                }));
+                observer.next(msgs);
+            }, (error) => observer.error(error));
         });
     }
 

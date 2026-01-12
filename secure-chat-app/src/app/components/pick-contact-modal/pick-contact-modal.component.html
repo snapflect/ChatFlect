@@ -1,0 +1,35 @@
+<ion-header>
+    <ion-toolbar>
+        <ion-buttons slot="start">
+            <ion-button (click)="dismiss()">Cancel</ion-button>
+        </ion-buttons>
+        <ion-title>Add Participants</ion-title>
+        <ion-buttons slot="end">
+            <ion-button (click)="addSelected()" [disabled]="selectedIds.length === 0" color="primary">
+                Add
+            </ion-button>
+        </ion-buttons>
+    </ion-toolbar>
+    <ion-toolbar>
+        <ion-searchbar (ionInput)="filterContacts($event)" placeholder="Search contacts"></ion-searchbar>
+    </ion-toolbar>
+</ion-header>
+
+<ion-content>
+    <ion-list>
+        <ion-item *ngFor="let c of filteredContacts" (click)="toggleSelection(c.user_id)" button detail="false">
+            <ion-avatar slot="start">
+                <img [src]="c.photo_url || 'assets/avatar-placeholder.png'" />
+            </ion-avatar>
+            <ion-label>
+                <h2>{{ c.first_name }} {{ c.last_name }}</h2>
+                <p>{{ c.phone_number }}</p>
+            </ion-label>
+            <ion-checkbox slot="end" [checked]="selectedIds.includes(c.user_id)"></ion-checkbox>
+        </ion-item>
+
+        <div *ngIf="filteredContacts.length === 0" class="ion-text-center ion-padding">
+            <p>No contacts available</p>
+        </div>
+    </ion-list>
+</ion-content>

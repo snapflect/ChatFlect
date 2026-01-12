@@ -20,7 +20,7 @@ describe('ChatService', () => {
 
   beforeEach(() => {
     mockGetDocData = { exists: () => true, data: () => ({ participants: [] }) };
-    cryptoSpy = jasmine.createSpyObj('CryptoService', ['decryptWithRatchet', 'encryptMessage', 'encryptWithRatchet', 'arrayBufferToBase64', 'encryptBlob', 'generateSessionKey', 'decryptBlob', 'importKey', 'base64ToArrayBuffer']);
+    cryptoSpy = jasmine.createSpyObj('CryptoService', ['decryptWithRatchet', 'encryptMessage', 'encryptWithRatchet', 'arrayBufferToBase64', 'encryptBlob', 'generateSessionKey', 'decryptBlob', 'importKey', 'base64ToArrayBuffer', 'clearSession']);
     apiSpy = jasmine.createSpyObj('ApiService', ['post', 'get', 'getBlob']);
     authSpy = jasmine.createSpyObj('AuthService', [], {
       blockedUsers$: new BehaviorSubject<string[]>([])
@@ -59,7 +59,12 @@ describe('ChatService', () => {
             writable: true
           });
         } catch (e2) {
-          console.warn(`Failed to mock ${fn}:`, e2);
+          // If we cannot redefine, checks if it is already a spy and reuse it
+          if (jasmine.isSpy(firestoreMock[fn])) {
+            firestoreMock[fn].and.callFake(implementation);
+          } else {
+            console.warn(`Failed to mock ${fn}:`, e2);
+          }
         }
       }
     });
@@ -115,4 +120,146 @@ describe('ChatService', () => {
     expect(apiSpy.get).toHaveBeenCalled(); // Public key fetch
     expect(cryptoSpy.encryptWithRatchet).toHaveBeenCalled(); // Message encryption
   });
+
+  // ... (Existing tests)
+
+  it('should mark chat as read and set last_read timestamp', async () => {
+    const chatId = 'c1';
+    await service.markAsRead(chatId);
+    expect(firestore.updateDoc).toHaveBeenCalled();
+    // Verify the update object contains last_read_my_id
+    const updateArgs = (firestore.updateDoc as jasmine.Spy).calls.mostRecent().args[1];
+    expect(updateArgs['unread_my_id']).toBe(0);
+    expect(updateArgs['last_read_my_id']).toBeDefined();
+  });
+
+  it('should get shared media', (done) => {
+    // Mock getMessages (since getSharedMedia reuses it or queries messages)
+    // Note: implementation of getSharedMedia currently calls collection(messages)
+    (firestore.getDocs as jasmine.Spy).and.returnValue(Promise.resolve({
+      docs: [
+        { data: () => ({ id: 'm1', text: { type: 'image', url: 'http://img' }, timestamp: 100 }) },
+        { data: () => ({ id: 'm2', text: { type: 'text', content: 'hi' }, timestamp: 200 }) }
+      ]
+    }));
+
+    service.getSharedMedia('c1').subscribe(media => {
+      expect(media.length).toBe(2); // It currently returns all messages, filtering happens in component usually, or if query is specific
+      // If logic changes to specific query, adjust test. 
+      // Current impl: const q = query(collection(this.db, 'chats', chatId, 'messages'), orderBy('timestamp', 'desc'));
+      done();
+    });
+  });
+
+  it('should toggle star message', async () => {
+    await service.toggleStarMessage('c1', 'm1', true);
+    expect(firestore.updateDoc).toHaveBeenCalled();
+    const updateArgs = (firestore.updateDoc as jasmine.Spy).calls.mostRecent().args[1];
+    // arrayUnion check would be ideal if we could inspect it
+    expect(updateArgs).toBeDefined();
+  });
+
+  it('should get starred messages', (done) => {
+    // Mock collectionGroup query result
+    (firestore.getDocs as jasmine.Spy).and.returnValue(Promise.resolve({
+      docs: [
+        { data: () => ({ id: 'm1', starredBy: ['my_id'] }) }
+      ]
+    }));
+
+    service.getStarredMessages().subscribe(msgs => {
+      expect(msgs.length).toBe(1);
+      done();
+    });
+  });
+
+  it('should trigger session retry when decryption fails with ERROR_RATCHET_DECRYPTION_FAILED', (done) => {
+    // 1. Ensure Spy
+    if (!jasmine.isSpy(firestore.onSnapshot)) {
+      spyOn(firestore as any, 'onSnapshot');
+    }
+
+    // Capture callback
+    let snapshotCallback: any;
+    (firestore.onSnapshot as jasmine.Spy).and.callFake((query, cb) => {
+      snapshotCallback = cb;
+      return () => { }; // unsubscribe
+    });
+
+    // 2. Subscribe
+    service.getMessages('chat_fail').subscribe();
+
+    // 3. Mock Crypto Failure
+    cryptoSpy.decryptWithRatchet.and.returnValue(Promise.resolve('ERROR_RATCHET_DECRYPTION_FAILED'));
+    localStorage.setItem('private_key', 'pk');
+
+    // 4. Trigger Callback with Failed Message
+    const mockSnapshot = {
+      docs: [
+        {
+          id: 'msg_fail',
+          data: () => ({
+            senderId: 'other_id',
+            content_self: '',
+            content: { 'my_id': 'encrypted_fail' },
+            timestamp: Date.now()
+          })
+        }
+      ]
+    };
+
+    // Need to wait for async processing inside callback
+    setTimeout(async () => {
+      await snapshotCallback(mockSnapshot);
+
+      // 5. Verify Retry Signal Sent (addDoc)
+      expect(firestore.addDoc).toHaveBeenCalled();
+      const addArgs = (firestore.addDoc as jasmine.Spy).calls.mostRecent().args[1];
+      expect(addArgs.type).toBe('system_signal');
+      expect(addArgs.content).toBe('retry_session');
+      expect(addArgs.targetId).toBe('other_id');
+      done();
+    }, 100);
+  });
+
+  it('should clear session when receiving retry_session signal', (done) => {
+    // 1. Ensure Spy
+    if (!jasmine.isSpy(firestore.onSnapshot)) {
+      spyOn(firestore as any, 'onSnapshot');
+    }
+
+    let snapshotCallback: any;
+    (firestore.onSnapshot as jasmine.Spy).and.callFake((query, cb) => {
+      snapshotCallback = cb;
+      return () => { };
+    });
+
+    service.getMessages('chat_signal').subscribe();
+
+    // 2. Trigger Signal Message
+    const mockSnapshot = {
+      docs: [
+        {
+          id: 'signal_msg',
+          data: () => ({
+            senderId: 'requester_id',
+            targetId: 'my_id',
+            type: 'system_signal',
+            content: 'retry_session',
+            timestamp: Date.now()
+          })
+        }
+      ]
+    };
+
+    // 3. Exec
+    setTimeout(async () => {
+      await snapshotCallback(mockSnapshot);
+
+      // 4. Verify Clear Session
+      expect(cryptoSpy.clearSession).toHaveBeenCalledWith('requester_id');
+      done();
+    }, 50);
+  });
+
 });

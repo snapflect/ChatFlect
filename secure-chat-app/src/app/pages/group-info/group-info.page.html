@@ -10,9 +10,16 @@
 <ion-content [fullscreen]="true">
   <!-- Group Header -->
   <div class="group-header">
-    <ion-avatar class="group-avatar-large">
-      <img [src]="group.icon_url || 'assets/group-placeholder.png'" />
-    </ion-avatar>
+    <div class="avatar-wrapper" [class.clickable]="iAmAdmin" (click)="triggerIconUpload()">
+      <ion-avatar class="group-avatar-large">
+        <img [src]="group.icon_url || 'assets/group-placeholder.png'" />
+      </ion-avatar>
+      <div class="edit-badge" *ngIf="iAmAdmin">
+        <ion-icon name="camera" color="light"></ion-icon>
+      </div>
+    </div>
+    <input type="file" id="groupIconInput" (change)="onFileSelected($event)" hidden accept="image/*" />
+
     <h1 class="gradient-text">{{ group.name }}</h1>
     <p class="member-count">Group · {{ members.length }} participants</p>
   </div>
@@ -30,7 +37,8 @@
         <img [src]="m.photo_url || 'assets/avatar-placeholder.png'" />
       </ion-avatar>
       <ion-label>
-        <h2>{{ m.user_id === myId ? 'You' : m.first_name + ' ' + m.last_name }}</h2>
+        <h2>{{ m.user_id === myId ? 'You' : (m.first_name ? m.first_name + ' ' + (m.last_name || '') : 'User ' +
+          m.user_id.substring(0,4)) }}</h2>
         <p>{{ m.phone_number }}</p>
       </ion-label>
       <ion-badge slot="end" *ngIf="m.role === 'admin'" color="success" class="admin-badge">Group Admin</ion-badge>

@@ -1,0 +1,52 @@
+<ion-header class="ion-no-border">
+    <ion-toolbar>
+        <ion-buttons slot="start">
+            <ion-button (click)="goBack()" color="medium">
+                <ion-icon name="arrow-back"></ion-icon>
+            </ion-button>
+        </ion-buttons>
+        <ion-title class="gradient-text">Starred Messages</ion-title>
+    </ion-toolbar>
+</ion-header>
+
+<ion-content>
+    <div class="starred-container ion-padding">
+
+        <div *ngIf="isLoading" class="ion-text-center ion-padding">
+            <ion-spinner name="crescent" color="primary"></ion-spinner>
+            <p>Loading your saved messages...</p>
+        </div>
+
+        <div *ngIf="!isLoading && starredMessages.length === 0" class="empty-state">
+            <div class="icon-circle">
+                <ion-icon name="star-outline"></ion-icon>
+            </div>
+            <h3>No Starred Messages</h3>
+            <p>Long-press any message and tap "Star" to save it here for later.</p>
+        </div>
+
+        <ion-list *ngIf="!isLoading && starredMessages.length > 0" lines="full" class="bg-transparent">
+            <ion-item-sliding *ngFor="let msg of starredMessages">
+                <ion-item (click)="goToChat(msg)" class="starred-item">
+                    <ion-avatar slot="start">
+                        <img [src]="getUserPhoto(msg.senderId)">
+                    </ion-avatar>
+                    <ion-label>
+                        <div class="starred-header">
+                            <span class="user-name">{{ getUserName(msg.senderId) }}</span>
+                            <span class="timestamp">{{ msg.timestamp?.seconds * 1000 | date:'short' }}</span>
+                        </div>
+                        <p class="preview-text">{{ getMsgContent(msg) }}</p>
+                    </ion-label>
+                    <ion-icon name="star" slot="end" color="warning" style="font-size: 14px;"></ion-icon>
+                </ion-item>
+
+                <ion-item-options side="end">
+                    <ion-item-option color="danger" (click)="unstar(msg)">
+                        <ion-icon name="star-outline" slot="icon-only"></ion-icon>
+                    </ion-item-option>
+                </ion-item-options>
+            </ion-item-sliding>
+        </ion-list>
+    </div>
+</ion-content>

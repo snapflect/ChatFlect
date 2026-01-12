@@ -1,219 +1,180 @@
 <ion-header class="ion-no-border">
-  <ion-toolbar>
+  <ion-toolbar *ngIf="!isSelectionMode" class="chat-header-toolbar">
     <ion-buttons slot="start">
-      <ion-button (click)="goBack()" color="medium">
-        <ion-icon name="arrow-back" style="font-size: 24px;"></ion-icon>
+      <ion-button (click)="goBack()" class="back-btn">
+        <ion-icon name="arrow-back" slot="icon-only"></ion-icon>
       </ion-button>
-    </ion-buttons>
-    <ion-title class="gradient-text" (click)="openGroupInfo()">
-      <div class="chat-title-row">
-        {{ chatName }}
-        <ion-icon *ngIf="isGroup" name="information-circle-outline"
-          style="font-size: 0.8em; margin-left: 5px;"></ion-icon>
-      </div>
 
-      <!-- SUBTITLE: PRESENCE / TYPING -->
+      <!-- Avatar in Header -->
+      <ion-avatar class="header-avatar" (click)="openContactInfo()">
+        <img [src]="chatPic || 'assets/user.png'" onerror="this.src='assets/user.png'">
+      </ion-avatar>
+    </ion-buttons>
+
+    <ion-title class="chat-title-group" (click)="openContactInfo()">
+      <div class="chat-name">{{ chatName }}</div>
       <div class="chat-subtitle" *ngIf="!isGroup">
-        <span *ngIf="typingUsers.length > 0" class="typing-text">typing...</span>
-        <ng-container *ngIf="typingUsers.length === 0 && otherUserPresence">
-          <span *ngIf="otherUserPresence.state === 'online'" class="online-text">● Online</span>
-          <span *ngIf="otherUserPresence.state !== 'online'" class="offline-text">Last seen {{
-            otherUserPresence.last_changed?.seconds * 1000 | date:'shortTime' }}</span>
-        </ng-container>
+        <span *ngIf="typingUsers.length > 0; else presenceDisplay" class="typing-text">typing...</span>
+        <ng-template #presenceDisplay>
+          <span *ngIf="otherUserPresence?.state === 'online'">Online</span>
+          <span *ngIf="otherUserPresence?.state !== 'online' && otherUserPresence?.last_changed">
+            last seen {{ otherUserPresence.last_changed.seconds * 1000 | date:'shortTime' }}
+          </span>
+        </ng-template>
       </div>
-      <div class="chat-subtitle" *ngIf="isGroup && typingUsers.length > 0">
-        <span class="typing-text">Someone is typing...</span>
+      <div class="chat-subtitle" *ngIf="isGroup">
+        <span *ngIf="typingUsers.length > 0" class="typing-text">{{ typingUsers.join(', ') }} typing...</span>
+        <span *ngIf="typingUsers.length === 0">{{ participants.length }} participants</span>
       </div>
     </ion-title>
+
     <ion-buttons slot="end">
       <ion-button (click)="startCall('video')">
-        <ion-icon name="videocam-outline"></ion-icon>
+        <ion-icon name="videocam"></ion-icon>
       </ion-button>
       <ion-button (click)="startCall('audio')">
-        <ion-icon name="call-outline"></ion-icon>
-      </ion-button>
-      <ion-button (click)="toggleSearch()">
-        <ion-icon name="search"></ion-icon>
+        <ion-icon name="call"></ion-icon>
       </ion-button>
       <ion-button (click)="presentChatOptions()">
         <ion-icon name="ellipsis-vertical"></ion-icon>
       </ion-button>
     </ion-buttons>
   </ion-toolbar>
-  <ion-toolbar *ngIf="isSearchActive">
-    <ion-searchbar (ionInput)="onSearch($event)" placeholder="Search in chat..." showCancelButton="always"
-      (ionCancel)="toggleSearch()"></ion-searchbar>
+
+  <!-- Selection Mode Toolbar -->
+  <ion-toolbar *ngIf="isSelectionMode" color="primary">
+    <ion-buttons slot="start">
+      <ion-button (click)="exitSelectionMode()">
+        <ion-icon name="arrow-back"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+    <ion-title>{{ selectedMessages.size }}</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="starSelectedMessages()">
+        <ion-icon name="star"></ion-icon>
+      </ion-button>
+      <ion-button (click)="deleteSelectedMessages()">
+        <ion-icon name="trash"></ion-icon>
+      </ion-button>
+      <ion-button (click)="forwardSelectedMessages()">
+        <ion-icon name="arrow-redo"></ion-icon>
+      </ion-button>
+    </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
-<ion-content [fullscreen]="true" class="chat-content">
-  <!-- (Existing List) -->
-  <ion-list lines="none" class="bg-transparent" style="padding-top: 130px; padding-bottom: 20px;">
-    <div *ngFor="let msg of filteredMessages" class="message-wrapper">
+<ion-content [fullscreen]="true" class="chat-content" (ionScroll)="onScroll($event)">
+  <ion-list lines="none" class="bg-transparent" style="padding-top: 10px; padding-bottom: 20px;">
 
-      <!-- Date Divider (Optional) -->
+    <div *ngFor="let msg of filteredMessages; let i = index" class="message-wrapper"
+      [class.selected-row]="isSelected(msg.id)">
+
+      <!-- Date Separator -->
+      <div *ngIf="shouldShowDateSeparator(i)" class="date-separator">
+        <span class="date-chip">{{ getDateLabel(msg.timestamp) }}</span>
+      </div>
 
       <div [class.msg-me]="isMyMsg(msg)" [class.msg-them]="!isMyMsg(msg)" class="msg-item">
 
-        <div class="bubble">
+        <div class="bubble" (click)="isSelectionMode ? toggleSelection(msg) : null" longPress
+          (longPress)="onMessageLongPress(msg)" [class.selected]="isSelected(msg.id)">
+
           <!-- Sender Name (Group) -->
-          <p *ngIf="isGroup && !isMyMsg(msg)" class="sender-name">{{ msg.senderName || 'User' }}</p>
+          <div *ngIf="isGroup && !isMyMsg(msg)" class="sender-name" [style.color]="getSenderColor(msg.senderId)">
+            {{ msg.senderName || 'User' }}
+          </div>
 
           <!-- Reply Context -->
-          <div *ngIf="msg.replyTo" class="reply-context">
-            <div class="reply-bar"></div>
-            <p class="reply-text">{{ msg.replyTo.text?.type ? 'Media' : (msg.replyTo.text | slice:0:30) }}...</p>
+          <div *ngIf="msg.replyTo" class="reply-context" (click)="scrollToMessage(msg.replyTo.id)">
+            <div class="reply-title">{{ msg.replyTo.senderName || 'User' }}</div>
+            <div class="reply-text">{{ msg.replyTo.text?.type ? '📷 Photo' : (msg.replyTo.text | slice:0:50) }}</div>
           </div>
 
-          <!-- Forwarded Label -->
-          <p *ngIf="msg.forwarded" class="forwarded-label"><ion-icon name="arrow-redo"></ion-icon> Forwarded</p>
+          <!-- Forwarded -->
+          <div *ngIf="msg.forwarded" class="forwarded-label">
+            <ion-icon name="arrow-redo" style="font-size: 10px;"></ion-icon> Forwarded
+          </div>
 
-          <div class="msg-content">
-            <img *ngIf="isImage(msg.text)" [src]="getImgUrl(msg.text)" (click)="openImage(getImgUrl(msg.text))">
-            <img *ngIf="isSticker(msg.text)" [src]="getStickerUrl(msg.text)" class="sticker-img">
+          <!-- Content: Image -->
+          <div *ngIf="isImage(msg.text)">
+            <img [src]="getImgUrl(msg.text)" class="msg-image" (click)="openImage(getImgUrl(msg.text))">
+            <div *ngIf="msg.text.caption" class="msg-caption">{{ msg.text.caption }}</div>
+          </div>
 
-            <!-- Text Content -->
-            <div
-              *ngIf="!isImage(msg.text) && !isSticker(msg.text) && (msg.text?.type !== 'audio' && msg.text?.type !== 'location' && msg.text?.type !== 'video' && msg.text?.type !== 'document')"
-              class="msg-text-display">
-              {{ getMsgContent(msg) }}
-            </div>
-
-            <!-- Video Player -->
-            <div *ngIf="getMsgType(msg.text) === 'video'" class="video-bubble" (click)="openVideo(msg.text)">
-              <div class="video-thumb-container">
-                <!-- TODO: Implement getThumbUrl or similar helper -->
-                <img [src]="getImgUrl(msg.text?.thumb) || 'assets/video_placeholder.png'" class="video-thumb">
-                <div class="play-overlay">
-                  <ion-icon name="play-circle"></ion-icon>
-                </div>
-              </div>
-              <div class="video-info">
-                <ion-icon name="videocam"></ion-icon> Video
-              </div>
-            </div>
-
-            <div *ngIf="msg.text?.type === 'audio'">
-              <audio controls [src]="msg.text.url"></audio>
+          <!-- Content: Video -->
+          <div *ngIf="getMsgType(msg.text) === 'video'" (click)="openVideo(msg.text)">
+            <div class="video-thumb-container">
+              <img [src]="getImgUrl(msg.text?.thumb) || 'assets/video_placeholder.png'" class="msg-image">
+              <div class="play-overlay"><ion-icon name="play-circle"></ion-icon></div>
             </div>
           </div>
 
-          <!-- Audio Player Custom -->
-          <div *ngIf="getMsgType(msg.text) === 'audio'" class="audio-player">
+          <!-- Content: Audio -->
+          <div *ngIf="getMsgType(msg.text) === 'audio'" class="audio-player-new">
             <ion-button fill="clear" (click)="toggleAudio(msg)">
-              <ion-icon [name]="msg.isPlaying ? 'pause' : 'play'"></ion-icon>
+              <ion-icon [name]="msg.isPlaying ? 'pause' : 'play'" slot="icon-only"></ion-icon>
             </ion-button>
-            <span class="audio-duration">{{ msg.text.duration || '?' }}s</span>
-            <div class="audio-wave">
-              <div class="bar" style="height: 10px"></div>
-              <div class="bar" style="height: 15px"></div>
-              <div class="bar" style="height: 12px"></div>
-              <div class="bar" style="height: 8px"></div>
-              <div class="bar" style="height: 14px"></div>
-            </div>
+            <!-- Waveform / Progress would go here -->
+            <span class="audio-duration">{{ msg.text.duration || '0:00' }}</span>
           </div>
 
-          <!-- Document Tile -->
-          <div *ngIf="getMsgType(msg.text) === 'document'" class="doc-tile glass-card" (click)="openDocument(msg.text)">
-            <div class="doc-icon-wrapper">
-              <ion-icon name="document-text" class="doc-icon"></ion-icon>
-            </div>
-            <div class="doc-info">
-              <span class="doc-name">{{ msg.text.name || 'Document' }}</span>
-              <span class="doc-meta">{{ (msg.text.size / 1024) | number:'1.0-1' }} KB • {{ msg.text.mime ?
-                (msg.text.mime | slice:0:15) : 'FILE' }}</span>
-            </div>
-            <ion-icon name="arrow-down-circle-outline" class="download-icon"></ion-icon>
-          </div>
+          <!-- Content: Text -->
+          <span *ngIf="getMsgType(msg.text) === 'text'" class="msg-text" [innerHTML]="linkify(msg.text)"></span>
 
-          <!-- Location -->
-          <div *ngIf="getMsgType(msg.text) === 'location'" class="location-bubble"
-            (click)="openLocation(msg.text.lat, msg.text.lng)">
-            <ion-icon name="location" color="danger"></ion-icon>
-            <span>Shared Location</span>
-          </div>
-
-          <!-- Link Preview -->
-          <div *ngIf="msg.linkMeta" class="link-preview" (click)="openLink(msg.linkMeta.url)">
-            <img *ngIf="msg.linkMeta.image" [src]="msg.linkMeta.image" />
-            <div class="link-info">
-              <b>{{ msg.linkMeta.domain }}</b>
-              <p>{{ msg.linkMeta.title }}</p>
-            </div>
-          </div>
-
-          <!-- Footer: Time + Read Status + Reactions -->
+          <!-- Metadata (Time + Status) -->
           <div class="msg-footer">
-            <span class="timestamp">{{ msg.timestamp?.seconds * 1000 | date:'shortTime' }}</span>
-            <ion-icon *ngIf="isMyMsg(msg)" [name]="msg.read ? 'checkmark-done-outline' : 'checkmark-outline'"
-              [color]="msg.read ? 'secondary' : 'medium'"></ion-icon>
-
-            <!-- Reactions Display -->
-            <div *ngIf="getReactionCount(msg) > 0" class="reactions-display">
-              <span *ngFor="let r of getTopReactions(msg)">{{ r }}</span>
-              <span *ngIf="getReactionCount(msg) > 1" class="reaction-count">{{ getReactionCount(msg) }}</span>
-            </div>
+            <span class="timestamp">{{ msg.timestamp?.seconds * 1000 || msg.timestamp | date:'shortTime' }}</span>
+            <ion-icon *ngIf="isMyMsg(msg)" [name]="isRead(msg) ? 'checkmark-done' : 'checkmark-done'"
+              [class.read-icon]="isRead(msg)" [class.sent-icon]="!isRead(msg)"></ion-icon>
           </div>
-        </div>
 
+        </div>
       </div>
     </div>
   </ion-list>
+
+  <!-- Scroll FAB -->
+  <ion-fab *ngIf="showScrollFab" vertical="bottom" horizontal="end" slot="fixed" class="scroll-fab">
+    <ion-fab-button size="small" (click)="scrollToBottom()">
+      <ion-icon name="chevron-down"></ion-icon>
+    </ion-fab-button>
+  </ion-fab>
 </ion-content>
 
+<!-- Footer -->
 <ion-footer class="ion-no-border">
-  <!-- Reply Preview -->
-  <div *ngIf="replyingTo" class="reply-preview glass-card">
-    <div class="reply-bar"></div>
-    <p>Replying to: {{ replyingTo.text | slice:0:30 }}...</p>
-    <ion-icon name="close" (click)="replyingTo = null"></ion-icon>
+  <div *ngIf="replyingTo" class="reply-preview">
+    <div class="reply-content">
+      <div class="reply-title">Replying to {{ replyingTo.senderName || 'User' }}</div>
+      <div class="reply-text">{{ replyingTo.text?.type ? 'Media' : replyingTo.text }}</div>
+    </div>
+    <ion-button fill="clear" (click)="replyingTo = null">
+      <ion-icon name="close" color="medium"></ion-icon>
+    </ion-button>
   </div>
 
-  <ion-toolbar class="input-toolbar">
-    <div class="input-container glass-card" *ngIf="!isRecording; else recordingUI">
-      <ion-button fill="clear" (click)="presentAttachmentMenu()" class="action-btn">
-        <ion-icon name="add" slot="icon-only"></ion-icon>
-      </ion-button>
+  <div class="chat-footer">
+    <ion-button fill="clear" class="action-btn" (click)="toggleStickerPicker()">
+      <ion-icon name="happy-outline" slot="icon-only"></ion-icon>
+    </ion-button>
 
-      <!-- Input Field -->
-      <textarea rows="1" placeholder="Type a message..." [(ngModel)]="newMessage" (ngModelChange)="onTyping()"
+    <div class="input-container">
+      <textarea rows="1" placeholder="Message" [(ngModel)]="newMessage" (ngModelChange)="onTyping()"
         class="chat-input"></textarea>
-
-      <!-- Sticker Toggle -->
-      <ion-button fill="clear" (click)="toggleStickerPicker()" class="action-btn">
-        <ion-icon name="happy-outline" slot="icon-only"></ion-icon>
+      <ion-button fill="clear" class="action-btn" (click)="presentAttachmentMenu()">
+        <ion-icon name="attach" slot="icon-only" style="transform: rotate(45deg);"></ion-icon>
       </ion-button>
-
-      <div *ngIf="!newMessage.trim()">
-        <ion-button fill="clear" class="action-btn">
-          <ion-icon name="camera-outline" slot="icon-only"></ion-icon>
-        </ion-button>
-        <ion-button fill="clear" (click)="recordAudio()" class="action-btn">
-          <ion-icon name="mic-outline" slot="icon-only"></ion-icon>
-        </ion-button>
-      </div>
-
-      <ion-button *ngIf="newMessage.trim()" fill="clear" (click)="sendMessage()" class="send-btn">
-        <ion-icon name="send" slot="icon-only"></ion-icon>
+      <ion-button *ngIf="!newMessage" fill="clear" class="action-btn" style="margin-left: -5px;">
+        <ion-icon name="camera" slot="icon-only"></ion-icon>
       </ion-button>
     </div>
 
-    <!-- Recording UI -->
-    <ng-template #recordingUI>
-      <div class="input-container glass-card recording-active">
-        <ion-button fill="clear" color="danger" (click)="stopRecording(false)">
-          <ion-icon name="trash" slot="icon-only"></ion-icon>
-        </ion-button>
-
-        <div class="record-timer">
-          <div class="rec-dot"></div>
-          <span>{{ recordDuration * 1000 | date:'mm:ss' }}</span>
-        </div>
-
-        <ion-button fill="clear" color="primary" (click)="stopRecording(true)">
-          <ion-icon name="send" slot="icon-only"></ion-icon>
-        </ion-button>
-      </div>
-    </ng-template>
-  </ion-toolbar>
+    <!-- Record or Send Button -->
+    <div class="mic-btn" *ngIf="!newMessage" (click)="recordAudio()">
+      <ion-icon name="mic"></ion-icon>
+    </div>
+    <div class="send-btn" *ngIf="newMessage" (click)="sendMessage()">
+      <ion-icon name="send"></ion-icon>
+    </div>
+  </div>
 </ion-footer>

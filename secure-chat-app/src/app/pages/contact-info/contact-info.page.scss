@@ -1,0 +1,182 @@
+/* Contact Info - Premium Glass Theme */
+
+.profile-header {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 30px 20px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    border-bottom: var(--glass-border);
+
+    .avatar-container {
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        overflow: hidden;
+        margin-bottom: 15px;
+        border: 3px solid var(--ion-color-secondary);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+
+        img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+    }
+
+    .profile-name {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--ion-text-color);
+    }
+
+    .profile-number {
+        margin: 5px 0 20px;
+        font-size: 16px;
+        color: var(--ion-color-step-500);
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 25px;
+        width: 100%;
+        justify-content: center;
+
+        .action-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+
+            span {
+                font-size: 12px;
+                color: var(--ion-color-primary);
+                font-weight: 500;
+            }
+
+            .icon-btn {
+                --color: var(--ion-color-primary);
+                --border-color: rgba(255, 255, 255, 0.1);
+                --border-width: 1px;
+                width: 45px;
+                height: 45px;
+                margin: 0;
+
+                ion-icon {
+                    font-size: 20px;
+                }
+            }
+        }
+    }
+}
+
+.section-spacer {
+    height: 10px;
+}
+
+.media-card {
+    margin: 0;
+    border-radius: 0;
+    background: var(--glass-bg);
+    border-bottom: var(--glass-border);
+
+    ion-item {
+        --background: transparent;
+        font-weight: 500;
+        font-size: 16px;
+        --padding-start: 16px;
+    }
+
+    .media-count {
+        font-size: 14px;
+        color: var(--ion-color-step-500);
+    }
+
+    .media-gallery {
+        padding: 10px 16px 16px;
+
+        .media-scroller {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            scrollbar-width: none;
+
+            &::-webkit-scrollbar {
+                display: none;
+            }
+
+            .media-thumb {
+                flex: 0 0 76px;
+                height: 76px;
+                border-radius: 8px;
+                overflow: hidden;
+                position: relative;
+                background: rgba(255, 255, 255, 0.05);
+
+                img {
+                    width: 100%;
+                    height: 100%;
+                    object-fit: cover;
+                }
+
+                .play-icon {
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    color: white;
+                    font-size: 24px;
+                    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+                }
+            }
+
+            .view-all-btn {
+                flex: 0 0 76px;
+                height: 76px;
+                border-radius: 8px;
+                background: rgba(255, 255, 255, 0.05);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: var(--ion-color-step-500);
+            }
+        }
+    }
+
+    .no-media {
+        padding: 20px;
+        text-align: center;
+        color: var(--ion-color-step-500);
+        font-size: 14px;
+    }
+}
+
+.options-list {
+    background: var(--glass-bg);
+    padding: 0;
+    border-bottom: var(--glass-border);
+
+    ion-item {
+        --background: transparent;
+        --padding-start: 16px;
+        font-size: 16px;
+    }
+}
+
+.destructive-list {
+    background: var(--glass-bg);
+    margin-top: 10px;
+    border-bottom: var(--glass-border);
+
+    ion-item {
+        --background: transparent;
+        font-weight: 500;
+    }
+}
+
+.footer-spacer {
+    height: 50px;
+}
