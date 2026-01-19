@@ -29,7 +29,7 @@
             <ion-item-sliding *ngFor="let msg of starredMessages">
                 <ion-item (click)="goToChat(msg)" class="starred-item">
                     <ion-avatar slot="start">
-                        <img [src]="getUserPhoto(msg.senderId)">
+                        <img [secureSrc]="getUserPhoto(msg.senderId)">
                     </ion-avatar>
                     <ion-label>
                         <div class="starred-header">

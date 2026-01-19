@@ -81,73 +81,97 @@ export class CryptoService {
 
     // --- Encryption Flow (Hybrid) --- //
 
-    // 1. Generate AES Session Key
+    // --- Core Primitives (Matching User Requirements) ---
+
+    // 1. Generate AES-256-GCM Key
     async generateSessionKey(): Promise<CryptoKey> {
         return window.crypto.subtle.generateKey(
-            {
-                name: "AES-GCM",
-                length: 256
-            },
+            { name: "AES-GCM", length: 256 },
             true,
             ["encrypt", "decrypt"]
         );
     }
 
-    // 2. Encrypt Message with Session Key
-    async encryptData(data: string, sessionKey: CryptoKey): Promise<{ iv: string, cipherText: string }> {
-        const iv = window.crypto.getRandomValues(new Uint8Array(12));
-        const encodedData = new TextEncoder().encode(data);
+    // 2. Encrypt AES Key for Recipient (RSA-OAEP)
+    // Requirement 3: RSA-OAEP.encrypt(base64(aesKey), recipientPublicKey)
+    async encryptAesKeyForRecipient(aesKey: CryptoKey, recipientPublicKeyStr: string): Promise<string> {
+        // Export AES Key to Raw -> Base64
+        const rawKey = await window.crypto.subtle.exportKey("raw", aesKey);
+        const keyBase64 = this.arrayBufferToBase64(rawKey);
 
-        const encrypted = await window.crypto.subtle.encrypt(
-            {
-                name: "AES-GCM",
-                iv: iv
-            },
-            sessionKey,
-            encodedData
+        // Import Recipient RSA Key
+        const pubKey = await this.importKey(recipientPublicKeyStr, 'public');
+
+        // Encrypt the BASE64 STRING
+        const encodedKeyStr = new TextEncoder().encode(keyBase64);
+        const encryptedBuffer = await window.crypto.subtle.encrypt(
+            { name: "RSA-OAEP" },
+            pubKey,
+            encodedKeyStr
         );
 
-        return {
-            iv: this.arrayBufferToBase64(iv.buffer),
-            cipherText: this.arrayBufferToBase64(encrypted)
-        };
+        return this.arrayBufferToBase64(encryptedBuffer);
     }
 
-    // 3. Encrypt Session Key with Recipient's Public RSA Key
-    async encryptSessionKey(sessionKey: CryptoKey, recipientPublicKey: CryptoKey): Promise<string> {
-        const exportedSessionKey = await window.crypto.subtle.exportKey("raw", sessionKey);
-        const encryptedKey = await window.crypto.subtle.encrypt(
-            {
-                name: "RSA-OAEP"
-            },
-            recipientPublicKey,
-            exportedSessionKey
-        );
-        return this.arrayBufferToBase64(encryptedKey);
-    }
-
-    // FULL SEND: Encrypt text for a recipient
-    async encryptMessage(text: string, recipientPublicKeyStr: string): Promise<string> {
+    // 3. Decrypt AES Key from Sender (RSA-OAEP)
+    // Requirement: RSA Decrypt -> Base64 String -> ArrayBuffer -> Import
+    async decryptAesKeyFromSender(encryptedKeyBase64: string, myPrivateKeyStr: string): Promise<CryptoKey> {
         try {
-            const recipientPubKey = await this.importKey(recipientPublicKeyStr, 'public');
-            const sessionKey = await this.generateSessionKey();
+            const privKey = await this.importKey(myPrivateKeyStr, 'private');
+            const encryptedBuffer = this.base64ToArrayBuffer(encryptedKeyBase64);
 
-            const { iv, cipherText } = await this.encryptData(text, sessionKey);
-            const encryptedSessionKey = await this.encryptSessionKey(sessionKey, recipientPubKey);
+            // Decrypt to get the Base64 String
+            const decryptedBuffer = await window.crypto.subtle.decrypt(
+                { name: "RSA-OAEP" },
+                privKey,
+                encryptedBuffer
+            );
 
-            // Package format: JSON
-            const packageObj = {
-                k: encryptedSessionKey, // Encrypted Session Key
-                i: iv,                 // IV for AES
-                d: cipherText          // Encrypted Data
-            };
+            const keyBase64 = new TextDecoder().decode(decryptedBuffer);
 
-            return JSON.stringify(packageObj);
+            // Convert Base64 String -> Raw Bytes
+            const keyRaw = this.base64ToArrayBuffer(keyBase64);
+
+            // Import Key
+            return window.crypto.subtle.importKey(
+                "raw",
+                keyRaw,
+                "AES-GCM",
+                true,
+                ["decrypt"]
+            );
         } catch (e) {
-            this.logger.error("Encryption Failed", e);
-            return "";
+            console.error("AES Key Decrypt Error:", e);
+            // Check if key valid
+            if (!myPrivateKeyStr) console.error("Missing Private Key");
+            throw new Error("Decryption Failed");
         }
     }
+
+    // 4. Encrypt Payload (AES-GCM)
+    async encryptPayload(text: string, key: CryptoKey, iv: Uint8Array): Promise<string> {
+        const encoded = new TextEncoder().encode(text);
+        const encrypted = await window.crypto.subtle.encrypt(
+            { name: "AES-GCM", iv: iv as any },
+            key,
+            encoded
+        );
+        return this.arrayBufferToBase64(encrypted);
+    }
+
+    // 5. Decrypt Payload (AES-GCM)
+    async decryptPayload(cipherTextBase64: string, key: CryptoKey, ivBase64: string): Promise<string> {
+        const cipherBuffer = this.base64ToArrayBuffer(cipherTextBase64);
+        const ivBuffer = this.base64ToArrayBuffer(ivBase64);
+
+        const decrypted = await window.crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: new Uint8Array(ivBuffer) as any },
+            key,
+            cipherBuffer
+        );
+        return new TextDecoder().decode(decrypted);
+    }
+
 
     // --- Decryption Flow --- //
 

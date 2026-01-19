@@ -1,0 +1,91 @@
+<ion-header class="ion-no-border">
+    <ion-toolbar color="dark">
+        <ion-buttons slot="start">
+            <ion-button (click)="closeModal()">
+                <ion-icon name="close" slot="icon-only"></ion-icon>
+            </ion-button>
+        </ion-buttons>
+        <ion-title>Draw</ion-title>
+        <ion-buttons slot="end">
+            <ion-button (click)="saveToDevice()">
+                <ion-icon name="download-outline" slot="icon-only"></ion-icon>
+            </ion-button>
+            <ion-button (click)="saveAndPost()" color="primary">
+                <ion-icon name="send" slot="start"></ion-icon>
+                Post
+            </ion-button>
+        </ion-buttons>
+    </ion-toolbar>
+</ion-header>
+
+<ion-content color="dark" [scrollY]="false">
+    <!-- Canvas Container -->
+    <div #canvasContainer class="canvas-container">
+        <canvas id="drawingCanvas"></canvas>
+    </div>
+
+    <!-- Color Picker Panel -->
+    <div class="color-panel" *ngIf="showColorPicker" (click)="$event.stopPropagation()">
+        <div class="color-grid">
+            <div *ngFor="let color of colors" class="color-item" [style.background-color]="color"
+                [class.selected]="selectedColor === color" (click)="selectColor(color)">
+            </div>
+        </div>
+    </div>
+
+    <!-- Brush Size Panel -->
+    <div class="brush-panel" *ngIf="showBrushSizer" (click)="$event.stopPropagation()">
+        <div *ngFor="let size of brushSizes" class="brush-item" [class.selected]="selectedBrushSize === size"
+            (click)="selectBrushSize(size)">
+            <div class="brush-dot" [style.width.px]="size" [style.height.px]="size"></div>
+            <span>{{ size }}px</span>
+        </div>
+    </div>
+
+    <!-- Emoji Picker Panel -->
+    <div class="emoji-panel" *ngIf="showEmojiPicker" (click)="$event.stopPropagation()">
+        <div class="emoji-grid">
+            <button *ngFor="let emoji of emojis" class="emoji-btn" (click)="addEmoji(emoji)">
+                {{ emoji }}
+            </button>
+        </div>
+    </div>
+
+    <!-- Text Input Panel -->
+    <div class="text-panel" *ngIf="showTextInput" (click)="$event.stopPropagation()">
+        <ion-input [(ngModel)]="textInput" placeholder="Enter text..." class="text-input" (keyup.enter)="addText()">
+        </ion-input>
+        <ion-button expand="block" (click)="addText()">Add Text</ion-button>
+    </div>
+
+    <!-- Bottom Toolbar -->
+    <div class="bottom-toolbar">
+        <!-- Undo / Clear -->
+        <div class="action-group">
+            <ion-button fill="clear" (click)="undo()">
+                <ion-icon name="arrow-undo-outline" slot="icon-only"></ion-icon>
+            </ion-button>
+            <ion-button fill="clear" (click)="deleteSelected()">
+                <ion-icon name="trash-outline" slot="icon-only"></ion-icon>
+            </ion-button>
+        </div>
+
+        <!-- Tools -->
+        <div class="tools-group">
+            <ion-button *ngFor="let tool of tools" fill="clear" [class.active]="selectedTool === tool.id"
+                (click)="selectTool(tool.id)">
+                <ion-icon [name]="tool.icon" slot="icon-only"></ion-icon>
+            </ion-button>
+        </div>
+
+        <!-- Settings -->
+        <div class="settings-group">
+            <ion-button fill="clear" (click)="toggleColorPicker()">
+                <div class="color-preview" [style.background-color]="selectedColor"></div>
+            </ion-button>
+            <ion-button fill="clear" (click)="toggleBrushSizer()">
+                <ion-icon name="resize-outline" slot="icon-only"></ion-icon>
+            </ion-button>
+        </div>
+    </div>
+</ion-content>

@@ -2,12 +2,30 @@
 require 'db.php';
 $data = json_decode(file_get_contents("php://input"), true);
 
-if (isset($data['action']) && $data['action'] === 'create') {
-    $name = $conn->real_escape_string($data['name']);
-    $creator = $conn->real_escape_string($data['created_by']);
-    $members = $data['members']; // Array
+/* ---------- URL NORMALIZATION HELPERS ---------- */
+function getBaseUrl(): string
+{
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    return $protocol . '://' . $_SERVER['HTTP_HOST'];
+}
 
-    // 0. Validate Limits
+function normalizePhotoUrl($photoUrl)
+{
+    if (empty($photoUrl))
+        return null;
+    if (str_starts_with($photoUrl, 'http'))
+        return $photoUrl;
+    // Return relative path pointing to the proxy
+    return 'serve.php?file=' . ltrim($photoUrl, '/');
+}
+
+// Create Group
+if (isset($data['action']) && $data['action'] === 'create') {
+    $name = $data['name'] ?? '';
+    $creator = $data['created_by'] ?? '';
+    $members = $data['members'] ?? []; // Array
+
+    // Validate Limits
     if (count($members) > 256) {
         echo json_encode(["error" => "Group limit exceeded (Max 256 members)"]);
         exit;
@@ -15,64 +33,88 @@ if (isset($data['action']) && $data['action'] === 'create') {
 
     $group_id = uniqid('group_');
 
-    // 1. Create Group
-    $sql1 = "INSERT INTO groups (id, name, created_by) VALUES ('$group_id', '$name', '$creator')";
-    $conn->query($sql1);
+    // Create Group
+    $stmt = $conn->prepare("INSERT INTO groups (id, name, created_by) VALUES (?, ?, ?)");
+    $stmt->bind_param("sss", $group_id, $name, $creator);
 
-    // 2. Add Creator
-    $conn->query("INSERT INTO group_members (group_id, user_id, role) VALUES ('$group_id', '$creator', 'admin')");
-
-    // 3. Add Members
-    foreach ($members as $m) {
-        $uid = $conn->real_escape_string($m);
-        $conn->query("INSERT INTO group_members (group_id, user_id, role) VALUES ('$group_id', '$uid', 'member')");
+    if (!$stmt->execute()) {
+        http_response_code(500);
+        echo json_encode(["error" => "Failed to create group"]);
+        exit;
     }
+    $stmt->close();
+
+    // Add Creator as Admin
+    $stmt = $conn->prepare("INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, 'admin')");
+    $stmt->bind_param("ss", $group_id, $creator);
+    $stmt->execute();
+    $stmt->close();
+
+    // Add Members
+    $stmt = $conn->prepare("INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, 'member')");
+    foreach ($members as $m) {
+        $stmt->bind_param("ss", $group_id, $m);
+        $stmt->execute();
+    }
+    $stmt->close();
 
     echo json_encode(["status" => "success", "group_id" => $group_id]);
     exit;
 }
 
+// Promote to Admin
 if (isset($data['action']) && $data['action'] === 'promote_admin') {
-    $groupId = $conn->real_escape_string($data['group_id']);
-    $userId = $conn->real_escape_string($data['user_id']);
+    $groupId = $data['group_id'] ?? '';
+    $userId = $data['user_id'] ?? '';
 
-    $sql = "UPDATE group_members SET role='admin' WHERE group_id='$groupId' AND user_id='$userId'";
-    if ($conn->query($sql)) {
+    $stmt = $conn->prepare("UPDATE group_members SET role='admin' WHERE group_id=? AND user_id=?");
+    $stmt->bind_param("ss", $groupId, $userId);
+
+    if ($stmt->execute()) {
         echo json_encode(["status" => "success"]);
     } else {
-        echo json_encode(["error" => $conn->error]);
+        echo json_encode(["error" => "Failed to promote user"]);
     }
+    $stmt->close();
     exit;
 }
 
+// Update Group Name
 if (isset($data['action']) && $data['action'] === 'update_group') {
-    $groupId = $conn->real_escape_string($data['group_id']);
-    $name = $conn->real_escape_string($data['name']);
+    $groupId = $data['group_id'] ?? '';
+    $name = $data['name'] ?? '';
 
-    $sql = "UPDATE groups SET name='$name' WHERE id='$groupId'";
-    if ($conn->query($sql)) {
+    $stmt = $conn->prepare("UPDATE groups SET name=? WHERE id=?");
+    $stmt->bind_param("ss", $name, $groupId);
+
+    if ($stmt->execute()) {
         echo json_encode(["status" => "success"]);
     } else {
-        echo json_encode(["error" => $conn->error]);
+        echo json_encode(["error" => "Failed to update group"]);
     }
+    $stmt->close();
     exit;
 }
 
+// Get Group Members
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['group_id'])) {
-    $groupId = $conn->real_escape_string($_GET['group_id']);
+    $groupId = $_GET['group_id'];
 
-    // Get Members
-    $sql = "SELECT u.user_id, u.first_name, u.last_name, u.photo_url, gm.role 
+    $stmt = $conn->prepare("SELECT u.user_id, u.first_name, u.last_name, u.photo_url, gm.role 
             FROM group_members gm 
             JOIN users u ON gm.user_id = u.user_id 
-            WHERE gm.group_id = '$groupId'";
+            WHERE gm.group_id = ?");
+    $stmt->bind_param("s", $groupId);
+    $stmt->execute();
+    $result = $stmt->get_result();
 
-    $result = $conn->query($sql);
     $members = [];
     while ($row = $result->fetch_assoc()) {
+        $row['photo_url'] = normalizePhotoUrl($row['photo_url']);
         $members[] = $row;
     }
     echo json_encode($members);
+    $stmt->close();
     exit;
 }
 ?>

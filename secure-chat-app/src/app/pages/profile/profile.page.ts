@@ -96,14 +96,8 @@ export class ProfilePage implements OnInit {
       // Let's just create a helper in ProfileService? Yes.
       const url = await this.profileService.uploadPhoto(formData);
       if (url) {
-        // Append Base URL if needed, or if upload.php returns relative
-        // db.php/upload.php returns "uploads/filename".
-        // We need full URL for the app to display it? 
-        // Ideally we store relative, and prepend in UI. 
-        // But current UI uses [src]="c.photo_url".
-        // Let's verify what `upload.php` returns. It returns "uploads/..."
-        // We need to prepend the API base.
-        this.profile.photo_url = 'https://chat.snapflect.com/' + url;
+        // upload.php now returns absolute URL - use directly
+        this.profile.photo_url = url;
         await this.toast.create({ message: 'Photo Uploaded!', duration: 1500 }).then(t => t.present());
       }
     } catch (e) {

@@ -94,11 +94,12 @@ export class SettingsPage implements OnInit {
       }
 
     } catch (e: any) {
-      if (e.message.includes('canceled')) {
+      if (e && e.message && e.message.includes('canceled')) {
         // User canceled
       } else {
         this.logger.error("Scan Failed", e);
-        window.alert("Scan Failed: " + e.message);
+        const msg = (e && e.message) ? e.message : 'Unknown Scan Error';
+        window.alert("Scan Failed: " + msg);
       }
     } finally {
       this.isLoading = false;

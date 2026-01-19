@@ -1,0 +1,47 @@
+<div class="gif-picker-container">
+    <!-- Header -->
+    <div class="picker-header">
+        <ion-searchbar [(ngModel)]="searchQuery" (ionInput)="onSearchInput()" placeholder="Search GIFs..."
+            [debounce]="0" mode="ios">
+        </ion-searchbar>
+        <ion-button fill="clear" (click)="closePanel()">
+            <ion-icon name="close" slot="icon-only"></ion-icon>
+        </ion-button>
+    </div>
+
+    <!-- Clear Search Button -->
+    <ion-button *ngIf="searchQuery" fill="clear" size="small" (click)="clearSearch()" class="clear-btn">
+        <ion-icon name="refresh-outline" slot="start"></ion-icon>
+        Show Trending
+    </ion-button>
+
+    <!-- Loading Spinner -->
+    <div class="loading-container" *ngIf="isLoading && gifs.length === 0">
+        <ion-spinner name="crescent"></ion-spinner>
+    </div>
+
+    <!-- GIF Grid -->
+    <div class="gif-grid" *ngIf="gifs.length > 0">
+        <div class="gif-item" *ngFor="let gif of gifs" (click)="selectGif(gif)">
+            <img [src]="gif.preview_url" [alt]="gif.title" loading="lazy" />
+        </div>
+    </div>
+
+    <!-- Empty State -->
+    <div class="empty-state" *ngIf="!isLoading && gifs.length === 0">
+        <ion-icon name="images-outline"></ion-icon>
+        <p>No GIFs found</p>
+    </div>
+
+    <!-- Load More Button -->
+    <ion-button *ngIf="hasMore && gifs.length > 0" fill="outline" expand="block" (click)="loadMore()"
+        [disabled]="isLoading" class="load-more-btn">
+        <ion-spinner *ngIf="isLoading" name="dots"></ion-spinner>
+        <span *ngIf="!isLoading">Load More</span>
+    </ion-button>
+
+    <!-- Attribution -->
+    <div class="attribution">
+        {{ getAttribution() }}
+    </div>
+</div>

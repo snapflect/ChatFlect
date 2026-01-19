@@ -19,7 +19,7 @@
     <!-- Profile Header -->
     <div class="profile-header">
         <div class="avatar-container">
-            <img [src]="user?.photo || 'assets/user-placeholder.png'" class="profile-avatar">
+            <img [secureSrc]="user?.photo" class="profile-avatar">
         </div>
         <h2 class="profile-name">{{ user?.username || 'User' }}</h2>
         <p class="profile-number">{{ user?.phoneNumber || '+1 555 000 0000' }}</p>
@@ -59,7 +59,7 @@
         <div class="media-gallery" *ngIf="sharedMedia.length > 0; else noMedia">
             <div class="media-scroller">
                 <div class="media-thumb" *ngFor="let m of sharedMedia | slice:0:10">
-                    <img [src]="getMediaThumbnail(m)" />
+                    <img [secureSrc]="getMediaThumbnail(m)" />
                     <div class="play-icon" *ngIf="m.type === 'video'">
                         <ion-icon name="play"></ion-icon>
                     </div>

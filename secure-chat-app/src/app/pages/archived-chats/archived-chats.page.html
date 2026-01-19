@@ -42,7 +42,7 @@
         <ion-item button [routerLink]="['/chat-detail', chat.id]" (longPress)="presentChatOptions(chat)"
           class="chat-item">
           <ion-avatar slot="start" class="chat-avatar">
-            <img [src]="chat.avatar || 'assets/placeholder_user.png'" />
+            <img [secureSrc]="chat.avatar" />
             <div *ngIf="!chat.isGroup && chat.otherUserId && isUserOnline(chat.otherUserId)" class="online-indicator">
             </div>
           </ion-avatar>

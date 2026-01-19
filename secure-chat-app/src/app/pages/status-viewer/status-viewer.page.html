@@ -10,98 +10,97 @@
 
   <!-- Header -->
   <div class="header-overlay">
-    <ion-back-button (click)="close()" icon="arrow-back"></ion-back-button>
-    <!-- Todo: Add Avatar/Name of current status user -->
+    <ion-button fill="clear" (click)="close()" class="back-btn">
+      <ion-icon name="arrow-back" color="light"></ion-icon>
+    </ion-button>
+    <div class="user-info" *ngIf="userName">
+      <ion-avatar class="small-avatar">
+        <img [secureSrc]="userAvatar" />
+      </ion-avatar>
+      <div class="user-details">
+        <span class="user-name">{{ userName }}</span>
+        <span class="status-time">{{ currentStatus.created_at | date:'shortTime' }}</span>
+      </div>
+    </div>
+    <ion-button fill="clear" (click)="showOptions()" class="options-btn">
+      <ion-icon name="ellipsis-vertical" color="light"></ion-icon>
+    </ion-button>
   </div>
 
-  <!-- Image Container -->
+  <!-- Media Container -->
   <div class="media-container" (touchstart)="pause()" (touchend)="resume()" (mousedown)="pause()" (mouseup)="resume()">
 
-    <img [src]="userStatuses[currentIndex]?.content_url" class="status-img" />
+    <!-- Loading Spinner -->
+    <div class="spinner-container" *ngIf="isLoading">
+      <ion-spinner name="crescent" color="light"></ion-spinner>
+    </div>
 
-    <div class="caption" *ngIf="userStatuses[currentIndex]?.caption">
-      {{ userStatuses[currentIndex]?.caption }}
+    <!-- TEXT STATUS -->
+    <div *ngIf="isTextStatus && !isLoading" class="text-status"
+      [style.background-color]="currentStatus.background_color || '#000000'"
+      [style.font-family]="currentStatus.font || 'sans-serif'">
+      <p class="text-content">{{ currentStatus.text_content }}</p>
+    </div>
+
+    <!-- IMAGE STATUS -->
+    <img *ngIf="isImageStatus && currentMediaUrl && !isLoading" [src]="currentMediaUrl" class="status-img" />
+
+    <!-- VIDEO STATUS -->
+    <video *ngIf="isVideoStatus && currentMediaUrl && !isLoading" #videoPlayer [src]="currentMediaUrl"
+      class="status-video" (loadedmetadata)="onVideoLoaded($event)" (ended)="onVideoEnded()" playsinline muted>
+    </video>
+
+    <!-- AUDIO STATUS -->
+    <div *ngIf="isAudioStatus && currentMediaUrl && !isLoading" class="audio-status">
+      <div class="audio-visual">
+        <ion-icon name="musical-notes" class="audio-icon"></ion-icon>
+        <div class="audio-waves">
+          <div class="wave" *ngFor="let w of [1,2,3,4,5]"></div>
+        </div>
+      </div>
+      <audio #audioPlayer [src]="currentMediaUrl" (loadedmetadata)="onAudioLoaded($event)" (ended)="onAudioEnded()">
+      </audio>
+    </div>
+
+    <!-- Caption -->
+    <div class="caption" *ngIf="currentStatus.caption">
+      {{ currentStatus.caption }}
     </div>
 
     <!-- Tap Zones -->
     <div class="tap-zone left" (click)="prev()"></div>
     <div class="tap-zone right" (click)="next()"></div>
   </div>
+
+  <!-- Bottom Actions Bar (only for others' statuses) -->
+  <div class="bottom-bar" *ngIf="!isOwnStatus" (click)="hideOverlays()">
+    <!-- Reaction Bar -->
+    <div class="reaction-bar" *ngIf="showReactionBar">
+      <button *ngFor="let r of reactions" class="reaction-btn" (click)="sendReaction(r); $event.stopPropagation()">
+        {{ r }}
+      </button>
+    </div>
+
+    <!-- Reply Input -->
+    <div class="reply-input-container" *ngIf="showReplyInput">
+      <ion-input [(ngModel)]="replyText" placeholder="Reply to status..." class="reply-input"
+        (keyup.enter)="sendReply()" (click)="$event.stopPropagation()">
+      </ion-input>
+      <ion-button fill="clear" (click)="sendReply(); $event.stopPropagation()">
+        <ion-icon name="send" color="light"></ion-icon>
+      </ion-button>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="action-buttons" *ngIf="!showReactionBar && !showReplyInput">
+      <ion-button fill="clear" (click)="toggleReactionBar(); $event.stopPropagation()">
+        <ion-icon name="happy-outline" color="light"></ion-icon>
+      </ion-button>
+      <ion-button fill="clear" (click)="toggleReplyInput(); $event.stopPropagation()">
+        <ion-icon name="chatbubble-outline" color="light"></ion-icon>
+      </ion-button>
+      <!-- Show my reaction if I reacted -->
+      <span class="my-reaction" *ngIf="myReaction">{{ myReaction }}</span>
+    </div>
+  </div>
 </ion-content>
-
-<style>
-  .progress-container {
-    position: absolute;
-    top: 10px;
-    left: 5px;
-    right: 5px;
-    display: flex;
-    gap: 5px;
-    z-index: 20;
-  }
-
-  .progress-bar-bg {
-    flex: 1;
-    height: 3px;
-    background: rgba(255, 255, 255, 0.3);
-    border-radius: 2px;
-    overflow: hidden;
-  }
-
-  .progress-bar-fill {
-    height: 100%;
-    background: white;
-  }
-
-  .header-overlay {
-    position: absolute;
-    top: 20px;
-    left: 0;
-    z-index: 20;
-    color: white;
-    padding: 10px;
-  }
-
-  .media-container {
-    height: 100%;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    background: black;
-  }
-
-  .status-img {
-    max-width: 100%;
-    max-height: 100%;
-  }
-
-  .caption {
-    position: absolute;
-    bottom: 50px;
-    width: 100%;
-    text-align: center;
-    color: white;
-    background: rgba(0, 0, 0, 0.5);
-    padding: 10px;
-    z-index: 10;
-  }
-
-  .tap-zone {
-    position: absolute;
-    top: 50px;
-    /* Below progress */
-    bottom: 0;
-    width: 50%;
-    z-index: 15;
-  }
-
-  .tap-zone.left {
-    left: 0;
-  }
-
-  .tap-zone.right {
-    right: 0;
-  }
-</style>

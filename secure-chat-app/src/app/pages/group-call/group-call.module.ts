@@ -7,14 +7,16 @@ import { IonicModule } from '@ionic/angular';
 import { GroupCallPageRoutingModule } from './group-call-routing.module';
 
 import { GroupCallPage } from './group-call.page';
+import { SharedModule } from 'src/app/shared/shared.module';
 
 @NgModule({
   imports: [
     CommonModule,
     FormsModule,
     IonicModule,
-    GroupCallPageRoutingModule
+    GroupCallPageRoutingModule,
+    SharedModule
   ],
   declarations: [GroupCallPage]
 })
-export class GroupCallPageModule {}
+export class GroupCallPageModule { }

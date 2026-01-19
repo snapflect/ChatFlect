@@ -5,26 +5,28 @@
         <ion-icon name="arrow-back" slot="icon-only"></ion-icon>
       </ion-button>
 
-      <!-- Avatar in Header -->
+      <!-- Avatar in Header: Use Unified SecureSrc -->
       <ion-avatar class="header-avatar" (click)="openContactInfo()">
-        <img [src]="chatPic || 'assets/user.png'" onerror="this.src='assets/user.png'">
+        <img [secureSrc]="chatPic || 'assets/user.png'" onerror="this.src='assets/user.png'">
       </ion-avatar>
     </ion-buttons>
 
     <ion-title class="chat-title-group" (click)="openContactInfo()">
-      <div class="chat-name">{{ chatName }}</div>
+      <div class="chat-name">{{ chatName || 'User' }}</div>
       <div class="chat-subtitle" *ngIf="!isGroup">
-        <span *ngIf="typingUsers.length > 0; else presenceDisplay" class="typing-text">typing...</span>
+        <span *ngIf="typingUsers && typingUsers.length > 0; else presenceDisplay" class="typing-text">typing...</span>
         <ng-template #presenceDisplay>
           <span *ngIf="otherUserPresence?.state === 'online'">Online</span>
           <span *ngIf="otherUserPresence?.state !== 'online' && otherUserPresence?.last_changed">
             last seen {{ otherUserPresence.last_changed.seconds * 1000 | date:'shortTime' }}
           </span>
+          <span *ngIf="!otherUserPresence">&nbsp;</span>
         </ng-template>
       </div>
       <div class="chat-subtitle" *ngIf="isGroup">
-        <span *ngIf="typingUsers.length > 0" class="typing-text">{{ typingUsers.join(', ') }} typing...</span>
-        <span *ngIf="typingUsers.length === 0">{{ participants.length }} participants</span>
+        <span *ngIf="typingUsers && typingUsers.length > 0" class="typing-text">{{ typingUsers.join(', ') }}
+          typing...</span>
+        <span *ngIf="(!typingUsers || typingUsers.length === 0)">{{ participants?.length || 0 }} participants</span>
       </div>
     </ion-title>
 
@@ -95,30 +97,34 @@
             <ion-icon name="arrow-redo" style="font-size: 10px;"></ion-icon> Forwarded
           </div>
 
-          <!-- Content: Image -->
-          <div *ngIf="isImage(msg.text)">
-            <img [src]="getImgUrl(msg.text)" class="msg-image" (click)="openImage(getImgUrl(msg.text))">
-            <div *ngIf="msg.text.caption" class="msg-caption">{{ msg.text.caption }}</div>
+          <!-- Unified Media Handling -->
+          <!-- We rely on msg.text being the Metadata Object if it's media -->
+
+          <!-- IMAGE -->
+          <div *ngIf="isMedia(msg.text) && (msg.text.type === 'image' || !msg.text.type)" class="media-content">
+            <img [secureSrc]="msg.text.url" [pymKey]="isMe ? (msg.text.ks || msg.text.k) : msg.text.k"
+              [pymIv]="msg.text.i" class="message-image" (click)="openImage(msg.text)"
+              (error)="$event.target.src = 'assets/placeholder_broken.png'" />
+            <p *ngIf="msg.text.caption">{{ msg.text.caption }}</p>
           </div>
 
-          <!-- Content: Video -->
-          <div *ngIf="getMsgType(msg.text) === 'video'" (click)="openVideo(msg.text)">
-            <div class="video-thumb-container">
-              <img [src]="getImgUrl(msg.text?.thumb) || 'assets/video_placeholder.png'" class="msg-image">
-              <div class="play-overlay"><ion-icon name="play-circle"></ion-icon></div>
-            </div>
+          <!-- VIDEO -->
+          <div *ngIf="getMsgType(msg.text) === 'video'" class="media-content">
+            <!-- Video Thumb or Player. SecureSrc sets src. -->
+            <video [secureSrc]="msg.text.url" [pymKey]="isMe ? (msg.text.ks || msg.text.k) : msg.text.k"
+              [pymIv]="msg.text.i" controls class="message-video"></video>
+            <p *ngIf="msg.text.caption">{{ msg.text.caption }}</p>
           </div>
 
-          <!-- Content: Audio -->
+          <!-- AUDIO -->
           <div *ngIf="getMsgType(msg.text) === 'audio'" class="audio-player-new">
-            <ion-button fill="clear" (click)="toggleAudio(msg)">
-              <ion-icon [name]="msg.isPlaying ? 'pause' : 'play'" slot="icon-only"></ion-icon>
-            </ion-button>
-            <!-- Waveform / Progress would go here -->
-            <span class="audio-duration">{{ msg.text.duration || '0:00' }}</span>
+            <!-- Use Audio Tag for now, or Custom Player with URL from Directive? 
+                  Directive sets src on the element. So <audio [secureSrc]> works. -->
+            <audio [secureSrc]="msg.text.url" [pymKey]="isMe ? (msg.text.ks || msg.text.k) : msg.text.k"
+              [pymIv]="msg.text.i" controls style="width: 200px; height: 40px;"></audio>
           </div>
 
-          <!-- Content: Text -->
+          <!-- TEXT -->
           <span *ngIf="getMsgType(msg.text) === 'text'" class="msg-text" [innerHTML]="linkify(msg.text)"></span>
 
           <!-- Metadata (Time + Status) -->

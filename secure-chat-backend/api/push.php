@@ -35,8 +35,28 @@ function getAccessToken($serviceAccountPath)
         'assertion' => $jwt
     ]));
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    $response = json_decode(curl_exec($ch), true);
+    // DEBUG: Disable SSL check temporarily if needed, but better to fix certs
+    // curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); 
+
+    $result = curl_exec($ch);
+
+    if ($result === false) {
+        $error = curl_error($ch);
+        curl_close($ch);
+        return ["error" => "cURL Error (Token): $error"];
+    }
+
+    $response = json_decode($result, true);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+
+    if (isset($response['error'])) {
+        return ["error" => "Google OAuth Error: " . ($response['error_description'] ?? $response['error'])];
+    }
+
+    if ($httpCode !== 200) {
+        return ["error" => "Google OAuth HTTP $httpCode: $result"];
+    }
 
     return $response['access_token'] ?? null;
 }
@@ -44,19 +64,32 @@ function getAccessToken($serviceAccountPath)
 $data = json_decode(file_get_contents("php://input"), true);
 
 if (isset($data['target_user_id']) && isset($data['title'])) {
-    $target_id = $conn->real_escape_string($data['target_user_id']);
+    $target_id = $data['target_user_id'];
 
-    // Get Token
-    $res = $conn->query("SELECT fcm_token FROM users WHERE user_id = '$target_id'");
-    if ($row = $res->fetch_assoc()) {
+    // Get Token using prepared statement
+    $stmt = $conn->prepare("SELECT fcm_token FROM users WHERE user_id = ?");
+    $stmt->bind_param("s", $target_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($row = $result->fetch_assoc()) {
         $to = $row['fcm_token'];
+        $stmt->close();
+
         if (!$to)
             exit;
 
         $accessToken = getAccessToken('service-account.json');
+
+        if (is_array($accessToken) && isset($accessToken['error'])) {
+            http_response_code(500);
+            echo json_encode($accessToken);
+            exit;
+        }
+
         if (!$accessToken) {
             http_response_code(500);
-            echo json_encode(["error" => "Service Account missing or invalid"]);
+            echo json_encode(["error" => "Unknown error generating access token"]);
             exit;
         }
 
@@ -120,6 +153,8 @@ if (isset($data['target_user_id']) && isset($data['title'])) {
         curl_close($ch);
 
         echo $result;
+    } else {
+        $stmt->close();
     }
 }
 ?>

@@ -13,15 +13,17 @@
       </ion-button>
     </ion-buttons>
   </ion-toolbar>
+
   <ion-toolbar>
-    <ion-searchbar (ionInput)="filterChats($event)" placeholder="Search chats" class="custom-searchbar"></ion-searchbar>
+    <ion-searchbar (ionInput)="filterChats($event)" placeholder="Search chats" class="custom-searchbar">
+    </ion-searchbar>
   </ion-toolbar>
 </ion-header>
 
 <ion-content [fullscreen]="true">
   <div class="ion-padding-top">
 
-    <!-- Skeleton Loading State (WhatsApp Parity) -->
+    <!-- Skeleton Loading State -->
     <ion-list *ngIf="isLoading" lines="none" class="bg-transparent">
       <ion-item *ngFor="let i of [1,2,3,4,5]" class="chat-item skeleton-item">
         <ion-avatar slot="start" class="chat-avatar">
@@ -39,30 +41,28 @@
       </ion-item>
     </ion-list>
 
-    <!-- Actual Chat List -->
+    <!-- Chat List -->
     <ion-list *ngIf="!isLoading" lines="none" class="bg-transparent">
 
-      <!-- Archived Chats entry (WhatsApp Parity) -->
       <ion-item *ngIf="archivedCount > 0" button routerLink="/archived-chats" class="archived-row">
         <ion-icon name="archive-outline" slot="start"></ion-icon>
         <ion-label>Archived</ion-label>
         <ion-note slot="end" color="primary">{{ archivedCount }}</ion-note>
       </ion-item>
 
-      <ion-item-sliding *ngFor="let chat of filteredChats" #slidingItem>
-        <!-- Swipe Left Options (WhatsApp Parity) -->
+      <ion-item-sliding *ngFor="let chat of filteredChats; trackBy: trackByChatId" #slidingItem>
+
         <ion-item-options side="start">
           <ion-item-option color="primary" (click)="pinChat(chat.id, slidingItem)">
             <ion-icon slot="icon-only" [name]="isPinned(chat.id) ? 'pin' : 'pin-outline'"></ion-icon>
           </ion-item-option>
         </ion-item-options>
 
-        <!-- Main Chat Item (WhatsApp Parity: long press for context menu) -->
         <ion-item button [routerLink]="['/chat-detail', chat.id]" (longPress)="presentChatOptions(chat)"
           class="chat-item">
+
           <ion-avatar slot="start" class="chat-avatar">
-            <img [src]="chat.avatar || 'assets/placeholder_user.png'" />
-            <!-- Online indicator (WhatsApp Parity) - only for 1:1 chats when user is online -->
+            <img [secureSrc]="chat.avatar" />
             <div *ngIf="!chat.isGroup && chat.otherUserId && isUserOnline(chat.otherUserId)" class="online-indicator">
             </div>
           </ion-avatar>
@@ -81,28 +81,33 @@
               <p [class.unread-msg]="getUnreadCount(chat) > 0" class="chat-preview">
                 {{ chat.lastMessage || 'Start conversation' }}
               </p>
-              <ion-badge color="secondary" *ngIf="getUnreadCount(chat) > 0" class="unread-badge">{{ getUnreadCount(chat)
-                }}</ion-badge>
+              <ion-badge color="secondary" *ngIf="getUnreadCount(chat) > 0" class="unread-badge">
+                {{ getUnreadCount(chat) }}
+              </ion-badge>
             </div>
           </ion-label>
         </ion-item>
 
-        <!-- Swipe Right Options (WhatsApp Parity) -->
         <ion-item-options side="end">
           <ion-item-option color="warning" (click)="muteChat(chat.id, slidingItem)">
-            <ion-icon slot="icon-only" [name]="isMuted(chat.id) ? 'notifications' : 'notifications-off'"></ion-icon>
+            <ion-icon slot="icon-only" [name]="isMuted(chat.id) ? 'notifications' : 'notifications-off'">
+            </ion-icon>
           </ion-item-option>
           <ion-item-option color="danger" (click)="archiveChat(chat.id, slidingItem)">
             <ion-icon slot="icon-only" name="archive"></ion-icon>
           </ion-item-option>
         </ion-item-options>
+
       </ion-item-sliding>
     </ion-list>
 
     <div *ngIf="chats.length === 0" class="empty-state">
       <ion-icon name="chatbubbles-outline" class="empty-icon"></ion-icon>
-      <p>No chats yet. <br> Start a vivid conversation!</p>
-      <ion-button routerLink="/tabs/contacts" class="vibrant-btn small-btn">Find Contacts</ion-button>
+      <p>No chats yet.<br>Start a vivid conversation!</p>
+      <ion-button routerLink="/tabs/contacts" class="vibrant-btn small-btn">
+        Find Contacts
+      </ion-button>
     </div>
+
   </div>
 </ion-content>

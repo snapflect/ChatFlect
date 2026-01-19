@@ -7,14 +7,16 @@ import { IonicModule } from '@ionic/angular';
 import { StatusPageRoutingModule } from './status-routing.module';
 
 import { StatusPage } from './status.page';
+import { SharedModule } from 'src/app/shared/shared.module';
 
 @NgModule({
   imports: [
     CommonModule,
     FormsModule,
     IonicModule,
-    StatusPageRoutingModule
+    StatusPageRoutingModule,
+    SharedModule
   ],
   declarations: [StatusPage]
 })
-export class StatusPageModule {}
+export class StatusPageModule { }

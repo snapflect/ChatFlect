@@ -1,66 +1,85 @@
 <?php
 // contacts.php - Sync Contacts
+// Fixes: P30, P31, P32, P33, P34
 require 'db.php';
 
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type");
-
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit;
-}
+// Headers handled by db.php
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
+    echo json_encode(["error" => "Method not allowed"]);
     exit;
 }
 
-// POST { phone_numbers: ["+123", "+456"] }
-$json = file_get_contents("php://input");
-$data = json_decode($json);
+/* ---------- BASE URL (CONSISTENT) ---------- */
+function getBaseUrl(): string
+{
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    return $protocol . '://' . $_SERVER['HTTP_HOST'];
+}
 
+/* ---------- INPUT ---------- */
+$data = json_decode(file_get_contents("php://input"));
 if (!isset($data->phone_numbers) || !is_array($data->phone_numbers)) {
     echo json_encode([]);
     exit;
 }
 
-$phones = $data->phone_numbers;
-// Sanitize
-$phones = array_map(function ($p) {
-    return preg_replace('/[^0-9+]/', '', $p);
-}, $phones);
+$phones = array_map(
+    fn($p) => substr(preg_replace('/[^0-9]/', '', $p), -10),
+    $data->phone_numbers
+);
 
-if (empty($phones)) {
+if (!$phones) {
     echo json_encode([]);
     exit;
 }
 
-// 1. Fetch ALL registered users (Lightweight for demo / <10k users)
-$result = $conn->query("SELECT user_id, phone_number, first_name, last_name, photo_url, public_key FROM users");
-$allUsers = [];
-while ($row = $result->fetch_assoc()) {
-    $allUsers[] = $row;
-}
+/* ---------- SAFE SQL COMPATIBILITY FIX ---------- */
+// Instead of REGEXP_REPLACE (MySQL 8.0+), use standard LIKE matching
+$whereClauses = [];
+$types = "";
+$params = [];
 
-$matches = [];
-
-// 2. Fuzzy Match in PHP (Match last 10 digits)
-// This solves the +91 vs 0 vs raw issue without complex SQL
-foreach ($allUsers as $user) {
-    $dbPhone = preg_replace('/[^0-9]/', '', $user['phone_number']);
-    $dbLast10 = substr($dbPhone, -10);
-
-    foreach ($phones as $contactPhone) {
-        $contactClean = preg_replace('/[^0-9]/', '', $contactPhone);
-        $contactLast10 = substr($contactClean, -10);
-
-        if ($dbLast10 === $contactLast10) {
-            $matches[] = $user;
-            break; // Found match for this user
-        }
+foreach ($phones as $p) {
+    // Sanitize to last 10 digits to match DB format regardless of country code
+    $clean = preg_replace('/[^0-9]/', '', $p);
+    if (strlen($clean) >= 10) {
+        $last10 = substr($clean, -10);
+        // Standard Match: Data is clean, and charset is now enforced in db.php
+        $whereClauses[] = "phone_number LIKE CONCAT('%', ?)";
+        $params[] = $last10;
+        $types .= "s";
     }
 }
 
+if (empty($whereClauses)) {
+    echo json_encode([]);
+    exit;
+}
+
+$sql = "SELECT user_id, phone_number, first_name, last_name, photo_url FROM users WHERE " . implode(" OR ", $whereClauses);
+
+$stmt = $conn->prepare($sql);
+$stmt->bind_param($types, ...$params);
+$stmt->execute();
+$result = $stmt->get_result();
+
+$baseUrl = getBaseUrl();
+$matches = [];
+
+while ($user = $result->fetch_assoc()) {
+
+    /* ---------- P31 FIX ---------- */
+    if (empty($user['photo_url'])) {
+        $user['photo_url'] = null;
+    }
+    /* ---------- STANDARD PROXY FIX ---------- */ elseif (strpos($user['photo_url'], 'http') !== 0) {
+        // Return relative path pointing to local proxy
+        $user['photo_url'] = 'serve.php?file=' . ltrim($user['photo_url'], '/');
+    }
+
+    $matches[] = $user;
+}
+
 echo json_encode($matches);
-?>

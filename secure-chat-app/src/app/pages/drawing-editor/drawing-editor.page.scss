@@ -1,0 +1,184 @@
+ion-content {
+    --background: #1a1a1a;
+}
+
+.canvas-container {
+    width: 100%;
+    height: calc(100% - 80px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+
+    canvas {
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+}
+
+// ==================== PANELS ====================
+
+.color-panel,
+.brush-panel,
+.emoji-panel,
+.text-panel {
+    position: absolute;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(40, 40, 40, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    padding: 15px;
+    z-index: 100;
+    animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateX(-50%) translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+    }
+}
+
+.color-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+}
+
+.color-item {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: transform 0.2s, border-color 0.2s;
+
+    &.selected {
+        border-color: white;
+        transform: scale(1.15);
+    }
+
+    &:active {
+        transform: scale(0.9);
+    }
+}
+
+.brush-panel {
+    display: flex;
+    gap: 15px;
+}
+
+.brush-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    padding: 10px;
+    border-radius: 10px;
+
+    &.selected {
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    span {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 12px;
+    }
+}
+
+.brush-dot {
+    background: white;
+    border-radius: 50%;
+}
+
+.emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 5px;
+    max-width: 320px;
+}
+
+.emoji-btn {
+    background: none;
+    border: none;
+    font-size: 28px;
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 8px;
+    transition: background 0.2s;
+
+    &:active {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}
+
+.text-panel {
+    width: 300px;
+
+    .text-input {
+        --background: rgba(255, 255, 255, 0.1);
+        --color: white;
+        --placeholder-color: rgba(255, 255, 255, 0.5);
+        margin-bottom: 10px;
+        border-radius: 8px;
+    }
+}
+
+// ==================== BOTTOM TOOLBAR ====================
+
+.bottom-toolbar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 80px;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 15px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.action-group,
+.tools-group,
+.settings-group {
+    display: flex;
+    gap: 5px;
+}
+
+.tools-group {
+    ion-button {
+        --color: rgba(255, 255, 255, 0.7);
+
+        &.active {
+            --color: var(--ion-color-primary);
+        }
+
+        ion-icon {
+            font-size: 22px;
+        }
+    }
+}
+
+.color-preview {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid white;
+}
+
+ion-button {
+    --color: white;
+
+    ion-icon {
+        font-size: 24px;
+    }
+}

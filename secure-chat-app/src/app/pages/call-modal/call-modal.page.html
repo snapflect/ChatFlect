@@ -15,7 +15,7 @@
         <!-- Audio UI (Avatar) - Hide if Video connected -->
         <div class="call-header ion-text-center" *ngIf="!isVideo || status !== 'connected'">
             <ion-avatar class="large-avatar">
-                <img [src]="callerPhoto" />
+                <img [secureSrc]="callerPhoto" />
             </ion-avatar>
             <h2>{{ callerName }}</h2>
             <p class="status-text animate-pulse">

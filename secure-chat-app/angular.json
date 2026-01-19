@@ -41,7 +41,9 @@
               "src/theme/variables.scss",
               "node_modules/leaflet/dist/leaflet.css"
             ],
-            "scripts": []
+            "scripts": [
+              "node_modules/fabric/dist/index.min.js"
+            ]
           },
           "configurations": {
             "production": {

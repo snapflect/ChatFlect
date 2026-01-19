@@ -5,29 +5,38 @@
     </ion-buttons>
     <ion-title>New Status</ion-title>
     <ion-buttons slot="end">
-      <ion-button (click)="postStatus()" [disabled]="!textContent && !selectedFile">
+      <ion-button (click)="postStatus()" [disabled]="!canPost()">
         Post
       </ion-button>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
 
-<ion-content [style.--background]="backgroundColor">
+<ion-content [style.--background]="mode === 'text' ? backgroundColor : 'var(--ion-background-color)'">
 
-  <!-- Type Selection -->
-  <div class="type-selector">
-    <ion-segment [(ngModel)]="type" (ionChange)="onTypeChange()">
+  <div class="mode-selector">
+    <ion-segment [(ngModel)]="mode" (ionChange)="onModeChange()">
       <ion-segment-button value="text">
+        <ion-icon name="text-outline"></ion-icon>
         <ion-label>Text</ion-label>
       </ion-segment-button>
-      <ion-segment-button value="image">
+      <ion-segment-button value="media">
+        <ion-icon name="image-outline"></ion-icon>
         <ion-label>Media</ion-label>
+      </ion-segment-button>
+      <ion-segment-button value="voice">
+        <ion-icon name="mic-outline"></ion-icon>
+        <ion-label>Voice</ion-label>
+      </ion-segment-button>
+      <ion-segment-button value="draw">
+        <ion-icon name="brush-outline"></ion-icon>
+        <ion-label>Draw</ion-label>
       </ion-segment-button>
     </ion-segment>
   </div>
 
   <!-- TEXT MODE -->
-  <div *ngIf="type === 'text'" class="text-container" [style.background-color]="backgroundColor">
+  <div *ngIf="mode === 'text'" class="text-container" [style.background-color]="backgroundColor">
     <textarea [(ngModel)]="textContent" placeholder="Type a status..." [style.font-family]="selectedFont"
       maxlength="300">
     </textarea>
@@ -36,19 +45,19 @@
       <!-- Color Picker -->
       <div class="color-picker">
         <div *ngFor="let color of colors" class="color-dot" [style.background-color]="color"
-          (click)="backgroundColor = color">
+          [class.selected]="backgroundColor === color" (click)="backgroundColor = color">
         </div>
       </div>
 
-      <!-- Font Picker (Simple toggle) -->
+      <!-- Font Picker -->
       <ion-button fill="clear" (click)="toggleFont()">
         <ion-icon name="text-outline"></ion-icon> Font
       </ion-button>
     </div>
   </div>
 
-  <!-- MEDIA MODE (Image/Video/Audio) -->
-  <div *ngIf="type !== 'text'" class="image-container">
+  <!-- MEDIA MODE (Image/Video/Audio File) -->
+  <div *ngIf="mode === 'media'" class="media-container">
     <div class="upload-box" (click)="fileInput.click()" *ngIf="!selectedFile">
       <ion-icon name="cloud-upload-outline"></ion-icon>
       <p>Tap to select Photo, Video or Audio</p>
@@ -56,14 +65,15 @@
 
     <!-- Previews -->
     <img *ngIf="type === 'image' && previewUrl" [src]="previewUrl" class="preview-img" />
-
     <video *ngIf="type === 'video' && previewUrl" [src]="previewUrl" controls class="preview-img"></video>
 
     <div *ngIf="type === 'audio' && selectedFile" class="audio-preview">
       <ion-icon name="musical-notes" size="large"></ion-icon>
       <p>{{ selectedFile.name }}</p>
+      <ion-button fill="clear" color="danger" (click)="selectedFile = null; previewUrl = null">
+        <ion-icon name="trash-outline"></ion-icon>
+      </ion-button>
     </div>
-
 
     <ion-input [(ngModel)]="caption" placeholder="Add a caption..." class="caption-input" *ngIf="selectedFile">
     </ion-input>
@@ -71,8 +81,95 @@
     <input #fileInput type="file" (change)="onFileSelected($event)" hidden accept="image/*,video/*,audio/*" />
   </div>
 
+  <!-- VOICE MODE -->
+  <div *ngIf="mode === 'voice'" class="voice-container">
+
+    <!-- Not Recording State -->
+    <div *ngIf="!recordingState.isRecording && !recordedAudioBlob" class="voice-start">
+      <div class="mic-button" (click)="startVoiceRecording()">
+        <ion-icon name="mic"></ion-icon>
+      </div>
+      <p>Tap to start recording</p>
+      <span class="duration-hint">Max {{ getMaxDuration() }} seconds</span>
+    </div>
+
+    <!-- Recording State -->
+    <div *ngIf="recordingState.isRecording" class="voice-recording">
+      <!-- Audio Visualizer -->
+      <div class="visualizer">
+        <div class="wave-bar" *ngFor="let i of [1,2,3,4,5,6,7,8,9]"
+          [style.height.%]="20 + (recordingState.audioLevel * 80)" [style.animation-delay]="(i * 50) + 'ms'">
+        </div>
+      </div>
+
+      <!-- Duration -->
+      <div class="recording-timer">
+        <span class="recording-dot" [class.paused]="recordingState.isPaused"></span>
+        <span class="duration">{{ formatDuration(recordingState.duration) }}</span>
+        <span class="max-duration">/ {{ formatDuration(getMaxDuration()) }}</span>
+      </div>
+
+      <!-- Recording Controls -->
+      <div class="recording-controls">
+        <ion-button fill="clear" color="danger" (click)="cancelVoiceRecording()">
+          <ion-icon name="close-circle" slot="icon-only"></ion-icon>
+        </ion-button>
+
+        <ion-button fill="clear" *ngIf="!recordingState.isPaused" (click)="pauseVoiceRecording()">
+          <ion-icon name="pause-circle" slot="icon-only"></ion-icon>
+        </ion-button>
+
+        <ion-button fill="clear" *ngIf="recordingState.isPaused" (click)="resumeVoiceRecording()">
+          <ion-icon name="play-circle" slot="icon-only"></ion-icon>
+        </ion-button>
+
+        <ion-button fill="clear" color="success" (click)="stopVoiceRecording()">
+          <ion-icon name="checkmark-circle" slot="icon-only"></ion-icon>
+        </ion-button>
+      </div>
+    </div>
+
+    <!-- Recorded State -->
+    <div *ngIf="recordedAudioBlob && !recordingState.isRecording" class="voice-recorded">
+      <div class="recorded-preview">
+        <ion-icon name="checkmark-done-circle" color="success"></ion-icon>
+        <span>Recording complete</span>
+        <span class="recorded-duration">{{ formatDuration(recordingState.duration) }}</span>
+      </div>
+
+      <div class="recorded-actions">
+        <ion-button fill="outline" color="danger" (click)="deleteRecordedAudio()">
+          <ion-icon name="trash-outline" slot="start"></ion-icon>
+          Delete
+        </ion-button>
+        <ion-button fill="outline" (click)="recordedAudioBlob = null; startVoiceRecording()">
+          <ion-icon name="refresh-outline" slot="start"></ion-icon>
+          Re-record
+        </ion-button>
+      </div>
+
+      <ion-input [(ngModel)]="caption" placeholder="Add a caption..." class="caption-input">
+      </ion-input>
+    </div>
+  </div>
+
+  <!-- DRAW MODE -->
+  <div *ngIf="mode === 'draw'" class="draw-container">
+    <div class="draw-intro">
+      <div class="draw-icon-circle" (click)="openDrawingEditor()">
+        <ion-icon name="brush"></ion-icon>
+      </div>
+      <h3>Create a Drawing</h3>
+      <p>Draw, add text, stickers, and emojis to create your status</p>
+      <ion-button expand="block" (click)="openDrawingEditor()">
+        <ion-icon name="create-outline" slot="start"></ion-icon>
+        Open Drawing Editor
+      </ion-button>
+    </div>
+  </div>
+
   <!-- PRIVACY SETTING -->
-  <ion-list class="privacy-list">
+  <ion-list class="privacy-list" *ngIf="mode !== 'draw'">
     <ion-item>
       <ion-label>Privacy</ion-label>
       <ion-select [(ngModel)]="privacy">

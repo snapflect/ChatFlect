@@ -16,7 +16,7 @@ export class NewGroupPage implements OnInit {
   contacts: any[] = [];
   selectedContacts: string[] = [];
   groupName: string = '';
-  groupIconUrl: SafeUrl | string | null = null;
+  groupIconUrl: string | null = null;
   rawIconUrl: string | null = null; // for upload
   isUploading = false;
 
@@ -36,7 +36,7 @@ export class NewGroupPage implements OnInit {
   }
 
   async loadContacts() {
-    this.contacts = (await this.contactsService.getContacts()) || [];
+    this.contacts = (await this.contactsService.getAllContacts()) || [];
   }
 
   toggleSelection(userId: string) {
@@ -65,7 +65,8 @@ export class NewGroupPage implements OnInit {
       this.nav.navigateBack('/tabs/chats');
     } catch (e: any) {
       this.logger.error("Create Group Error", e);
-      this.showToast('Failed to create group: ' + e.message);
+      const msg = (e && e.message) ? e.message : 'Unknown Error';
+      this.showToast('Failed to create group: ' + msg);
     }
   }
 
@@ -93,7 +94,7 @@ export class NewGroupPage implements OnInit {
       const res: any = await this.api.post('upload.php', formData).toPromise();
       if (res && res.url) {
         this.rawIconUrl = res.url;
-        this.groupIconUrl = this.sanitizer.bypassSecurityTrustUrl(res.url); // Sanitize
+        this.groupIconUrl = res.url; // Directive handles it
         // Force update if needed, though simple property change usually works 
         // Adding specific log to verify url
         this.logger.log("Icon Uploaded: " + res.url);

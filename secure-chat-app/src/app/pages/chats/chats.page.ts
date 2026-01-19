@@ -1,11 +1,17 @@
-import { Component, OnInit, OnDestroy, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { ChatService } from 'src/app/services/chat.service';
 import { ContactsService } from 'src/app/services/contacts.service';
 import { PresenceService } from 'src/app/services/presence.service';
 import { ChatSettingsService } from 'src/app/services/chat-settings.service';
 import { combineLatest, Subscription } from 'rxjs';
 import { take } from 'rxjs/operators';
-import { IonItemSliding, ToastController, ActionSheetController, AlertController, NavController } from '@ionic/angular';
+import {
+  IonItemSliding,
+  ToastController,
+  ActionSheetController,
+  AlertController,
+  NavController
+} from '@ionic/angular';
 
 @Component({
   selector: 'app-chats',
@@ -14,14 +20,25 @@ import { IonItemSliding, ToastController, ActionSheetController, AlertController
   standalone: false
 })
 export class ChatsPage implements OnInit, OnDestroy {
-  chats: any[] = [];
-  archivedCount: number = 0;
-  myId = localStorage.getItem('user_id');
 
-  // Online Status Tracking (WhatsApp Parity)
-  onlineUsers = new Map<string, boolean>(); // userId -> isOnline
+  chats: any[] = [];
+  filteredChats: any[] = [];
+  archivedCount = 0;
+  isLoading = true;
+
+  myId = localStorage.getItem('user_id');
+  searchTerm = '';
+
+  // Presence
+  onlineUsers = new Map<string, boolean>();
   private presenceSubscriptions: Subscription[] = [];
+  private subscribedPresenceUsers = new Set<string>();
+
+  // Chat stream
   private chatSubscription?: Subscription;
+
+  // Cache resolved user info
+  private resolvedUsers = new Map<string, { name: string; photo: string | null }>();
 
   constructor(
     private chatService: ChatService,
@@ -31,320 +48,266 @@ export class ChatsPage implements OnInit, OnDestroy {
     private toastCtrl: ToastController,
     private actionSheetCtrl: ActionSheetController,
     private alertCtrl: AlertController,
-    private nav: NavController
+    private nav: NavController,
+    private cdr: ChangeDetectorRef
   ) { }
 
-  // Loading state for skeleton (WhatsApp Parity)
-  isLoading: boolean = true;
+  /* ---------------- LIFECYCLE ---------------- */
 
-  ngOnInit() {
+  ngOnInit(): void {
     this.loadChats();
   }
 
-  ionViewWillEnter() {
+  ionViewWillEnter(): void {
     this.loadChats();
   }
 
-  ngOnDestroy() {
-    // Clean up subscriptions
-    this.presenceSubscriptions.forEach(sub => sub.unsubscribe());
-    if (this.chatSubscription) {
-      this.chatSubscription.unsubscribe();
-    }
+  ngOnDestroy(): void {
+    this.cleanupPresence();
+    this.chatSubscription?.unsubscribe();
   }
 
-  resolvedUsers = new Map<string, { name: string, photo: string }>();
-  // ...
+  /* ---------------- LOAD CHATS ---------------- */
 
-  loadChats() {
-    if (this.chatSubscription) {
-      this.chatSubscription.unsubscribe();
-    }
+  private cleanupPresence(): void {
+    this.presenceSubscriptions.forEach(s => s.unsubscribe());
+    this.presenceSubscriptions = [];
+    this.subscribedPresenceUsers.clear();
+    this.onlineUsers.clear();
+  }
+
+  private loadChats(): void {
+    this.chatSubscription?.unsubscribe();
+    this.cleanupPresence();
+    this.resolvedUsers.clear();
+
     this.isLoading = true;
-    // Ensure contacts are loaded first to map Names
-    this.contactService.getContacts().then(async () => {
-      // First, get initial chats to know what settings to load
-      this.chatService.getMyChats().pipe(take(1)).subscribe(async initialChats => {
+
+    this.contactService.getAllContacts().then(() => {
+      this.chatService.getMyChats().pipe(take(1)).subscribe(initialChats => {
         const chatIds = initialChats.map(c => c.id);
-        await this.chatSettings.loadMultipleSettings(chatIds);
 
-        // Now subscribe to the reactive stream for updates (archive/unarchive)
-        this.chatSubscription = combineLatest([
-          this.chatService.getMyChats(),
-          this.chatSettings.settings$
-        ]).subscribe(async ([allChats, settingsMap]) => {
-          this.chats = [...allChats];
+        this.chatSettings.loadMultipleSettings(chatIds).then(() => {
+          this.chatSubscription = combineLatest([
+            this.chatService.getMyChats(),
+            this.chatSettings.settings$
+          ]).subscribe(([allChats]) => {
 
-          // No more loadMultipleSettings here to avoid infinite loop!
-          // New chats added in real-time will have default settings until next page refresh
-          // or we could add a smarter check here if really needed.
+            this.chats = [...allChats];
 
-          // Resolve Names
-          for (const chat of this.chats) {
-            if (chat.isGroup) {
-              chat.name = chat.groupName || 'Unnamed Group';
-              chat.avatar = chat.groupIcon || 'assets/group-placeholder.png';
-            } else {
-              const otherId = chat.participants.find((p: any) => String(p) !== String(this.myId));
-              if (otherId) {
-                chat.otherUserId = otherId;
-                this.subscribeToPresence(otherId);
+            for (const chat of this.chats) {
 
-                // Resolver Logic
-                if (this.resolvedUsers.has(otherId)) {
-                  const cached = this.resolvedUsers.get(otherId);
-                  chat.name = cached?.name;
-                  chat.avatar = cached?.photo || chat.avatar;
-                } else {
-                  const contact = this.contactService.localContacts.find((c: any) => String(c.user_id) === String(otherId));
-                  if (contact) {
-                    chat.name = contact.first_name + ' ' + contact.last_name;
-                    chat.avatar = contact.photo_url;
-                    this.resolvedUsers.set(otherId, { name: chat.name, photo: chat.avatar });
-                  } else {
-                    chat.name = `User ${otherId.substr(0, 4)}`;
-                    this.chatService.getUserInfo(otherId).then(info => {
-                      chat.name = info.username;
-                      if (info.photo) chat.avatar = info.photo;
-                      this.resolvedUsers.set(otherId, { name: info.username, photo: info.photo });
-                    });
-                  }
-                }
+              if (chat.isGroup) {
+                chat.name = chat.groupName || 'Unnamed Group';
+                chat.avatar = chat.groupIcon || null;
+                continue;
               }
+
+              const otherId = chat.participants.find(
+                (p: any) => String(p) !== String(this.myId)
+              );
+
+              if (!otherId) continue;
+
+              chat.otherUserId = otherId;
+              this.subscribeToPresence(otherId);
+
+              const cached = this.resolvedUsers.get(otherId);
+              if (cached) {
+                chat.name = cached.name;
+                chat.avatar = cached.photo;
+                continue;
+              }
+
+              const contact = this.contactService.localContacts.find(
+                (c: any) => String(c.user_id) === String(otherId)
+              );
+
+              if (contact) {
+                chat.name = `${contact.first_name} ${contact.last_name}`;
+                chat.avatar = contact.photo_url ?? null;
+                this.resolvedUsers.set(otherId, {
+                  name: chat.name,
+                  photo: chat.avatar
+                });
+                continue;
+              }
+
+              // Fallback async
+              chat.name = `User ${otherId.substr(0, 4)}`;
+              chat.avatar = null;
+
+              this.chatService.getUserInfo(otherId).then(info => {
+                chat.name = info.username;
+                chat.avatar = info.photo ?? null;
+
+                this.resolvedUsers.set(otherId, {
+                  name: chat.name,
+                  photo: chat.avatar
+                });
+
+                this.cdr.detectChanges();
+              });
             }
-          }
 
-          // Filter out empty and archived chats
-          this.archivedCount = this.chats.filter(c => this.chatSettings.isArchived(c.id)).length;
+            this.archivedCount = this.chats.filter(c =>
+              this.chatSettings.isArchived(c.id)
+            ).length;
 
-          this.chats = this.chats.filter(c =>
-            c.lastMessage && c.lastMessage.trim() !== '' && !this.chatSettings.isArchived(c.id)
-          );
+            this.chats = this.chats.filter(c =>
+              c.lastMessage &&
+              c.lastMessage.trim() !== '' &&
+              !this.chatSettings.isArchived(c.id)
+            );
 
-          // Sort: Pinned first, then by timestamp
-          this.sortChats();
-          this.filteredChats = [...this.chats];
-          this.isLoading = false;
+            this.sortChats();
+            this.filteredChats = [...this.chats];
+            this.isLoading = false;
+          });
         });
       });
     });
   }
 
-  /**
-   * Sort chats: pinned first, then by timestamp descending (WhatsApp Parity)
-   */
-  private sortChats() {
+  /* ---------------- SORT ---------------- */
+
+  private sortChats(): void {
     this.chats.sort((a, b) => {
-      const aPinned = this.chatSettings.isPinned(a.id) ? 1 : 0;
-      const bPinned = this.chatSettings.isPinned(b.id) ? 1 : 0;
+      const pA = this.chatSettings.isPinned(a.id) ? 1 : 0;
+      const pB = this.chatSettings.isPinned(b.id) ? 1 : 0;
+      if (pA !== pB) return pB - pA;
 
-      if (aPinned !== bPinned) {
-        return bPinned - aPinned; // Pinned first
-      }
-
-      // Then by timestamp
-      const aTime = a.lastTimestamp?.seconds || 0;
-      const bTime = b.lastTimestamp?.seconds || 0;
-      return bTime - aTime; // Newest first
+      const tA = a.lastTimestamp?.seconds || 0;
+      const tB = b.lastTimestamp?.seconds || 0;
+      return tB - tA;
     });
   }
 
-  /**
-   * Subscribe to a user's online presence (WhatsApp Parity)
-   */
-  private subscribeToPresence(userId: string) {
-    if (this.onlineUsers.has(userId)) return; // Already subscribed
+  /* ---------------- PRESENCE ---------------- */
 
-    const sub = this.presenceService.getPresence(userId).subscribe(presence => {
-      this.onlineUsers.set(userId, presence?.state === 'online');
+  private subscribeToPresence(userId: string): void {
+    if (this.subscribedPresenceUsers.has(userId)) return;
+    this.subscribedPresenceUsers.add(userId);
+
+    const sub = this.presenceService.getPresence(userId).subscribe(p => {
+      this.onlineUsers.set(userId, p?.state === 'online');
     });
+
     this.presenceSubscriptions.push(sub);
   }
 
-  /**
-   * Check if a user is currently online
-   */
   isUserOnline(userId: string): boolean {
     return this.onlineUsers.get(userId) || false;
   }
 
-  // --- Swipe Action Handlers (WhatsApp Parity) ---
+  /* ---------------- TEMPLATE HELPERS ---------------- */
+
+  trackByChatId(_: number, chat: any): string {
+    return chat.id;
+  }
+
+  getUnreadCount(chat: any): number {
+    return chat[`unread_${this.myId}`] || 0;
+  }
+
+  filterChats(event: any): void {
+    const term = event.target.value?.toLowerCase() || '';
+    this.searchTerm = term;
+
+    if (!term) {
+      this.filteredChats = [...this.chats];
+      return;
+    }
+
+    this.filteredChats = this.chats.filter(c =>
+      c.name?.toLowerCase().includes(term)
+    );
+  }
+
+  /* ---------------- PIN / MUTE / ARCHIVE ---------------- */
+
+  isPinned(chatId: string): boolean {
+    return this.chatSettings.isPinned(chatId);
+  }
+
+  isMuted(chatId: string): boolean {
+    return this.chatSettings.isMuted(chatId);
+  }
 
   async pinChat(chatId: string, slidingItem: IonItemSliding) {
     await this.chatSettings.togglePin(chatId);
     await slidingItem.close();
-
-    const isPinned = this.chatSettings.isPinned(chatId);
-    this.showToast(isPinned ? 'Chat pinned' : 'Chat unpinned');
     this.sortChats();
     this.filteredChats = [...this.chats];
+    this.showToast(this.isPinned(chatId) ? 'Chat pinned' : 'Chat unpinned');
   }
 
   async muteChat(chatId: string, slidingItem: IonItemSliding) {
     await this.chatSettings.toggleMute(chatId);
     await slidingItem.close();
-
-    const isMuted = this.chatSettings.isMuted(chatId);
-    this.showToast(isMuted ? 'Notifications muted' : 'Notifications unmuted');
+    this.showToast(this.isMuted(chatId) ? 'Notifications muted' : 'Notifications unmuted');
   }
 
   async archiveChat(chatId: string, slidingItem: IonItemSliding) {
     await this.chatSettings.toggleArchive(chatId);
     await slidingItem.close();
 
-    // Remove from current list
     this.chats = this.chats.filter(c => c.id !== chatId);
     this.filteredChats = [...this.chats];
     this.showToast('Chat archived');
   }
 
-  /**
-   * Check if chat is pinned (for UI binding)
-   */
-  isPinned(chatId: string): boolean {
-    return this.chatSettings.isPinned(chatId);
+  /* ---------------- LONG PRESS MENU ---------------- */
+
+  async presentChatOptions(chat: any) {
+    const sheet = await this.actionSheetCtrl.create({
+      header: chat.name,
+      buttons: [
+        {
+          text: this.isPinned(chat.id) ? 'Unpin' : 'Pin',
+          icon: 'pin',
+          handler: () => this.chatSettings.togglePin(chat.id)
+        },
+        {
+          text: this.isMuted(chat.id) ? 'Unmute' : 'Mute',
+          icon: 'notifications',
+          handler: () => this.chatSettings.toggleMute(chat.id)
+        },
+        {
+          text: 'Archive',
+          icon: 'archive',
+          handler: () => this.chatSettings.toggleArchive(chat.id)
+        },
+        { text: 'Cancel', role: 'cancel' }
+      ]
+    });
+    sheet.present();
   }
 
-  /**
-   * Check if chat is muted (for UI binding)  
-   */
-  isMuted(chatId: string): boolean {
-    return this.chatSettings.isMuted(chatId);
-  }
+  /* ---------------- UI ---------------- */
 
   private async showToast(message: string) {
     const toast = await this.toastCtrl.create({ message, duration: 1500 });
     toast.present();
   }
 
-  // --- Long Press Menu (WhatsApp Parity) ---
-
-  async presentChatOptions(chat: any) {
-    const isPinned = this.chatSettings.isPinned(chat.id);
-    const isMuted = this.chatSettings.isMuted(chat.id);
-
-    const buttons = [
-      {
-        text: isPinned ? 'Unpin' : 'Pin',
-        icon: isPinned ? 'pin' : 'pin-outline',
-        handler: () => this.pinChatFromMenu(chat.id)
-      },
-      {
-        text: isMuted ? 'Unmute' : 'Mute',
-        icon: isMuted ? 'notifications' : 'notifications-off-outline',
-        handler: () => this.muteChatFromMenu(chat.id)
-      },
-      {
-        text: 'Archive',
-        icon: 'archive-outline',
-        handler: () => this.archiveChatFromMenu(chat.id)
-      },
-      {
-        text: 'Delete Chat',
-        role: 'destructive',
-        icon: 'trash-outline',
-        handler: () => this.deleteChatConfirm(chat)
-      },
-      {
-        text: 'Cancel',
-        role: 'cancel',
-        icon: 'close'
-      }
-    ];
-
-    const actionSheet = await this.actionSheetCtrl.create({
-      header: chat.name,
-      buttons: buttons
-    });
-
-    await actionSheet.present();
-  }
-
-  private async pinChatFromMenu(chatId: string) {
-    await this.chatSettings.togglePin(chatId);
-    const isPinned = this.chatSettings.isPinned(chatId);
-    this.showToast(isPinned ? 'Chat pinned' : 'Chat unpinned');
-    this.sortChats();
-    this.filteredChats = [...this.chats];
-  }
-
-  private async muteChatFromMenu(chatId: string) {
-    await this.chatSettings.toggleMute(chatId);
-    const isMuted = this.chatSettings.isMuted(chatId);
-    this.showToast(isMuted ? 'Notifications muted' : 'Notifications unmuted');
-  }
-
-  private async archiveChatFromMenu(chatId: string) {
-    await this.chatSettings.toggleArchive(chatId);
-    this.chats = this.chats.filter(c => c.id !== chatId);
-    this.filteredChats = [...this.chats];
-    this.showToast('Chat archived');
-  }
-
-  private async deleteChatConfirm(chat: any) {
-    const alert = await this.alertCtrl.create({
-      header: 'Delete Chat?',
-      message: `Delete chat with ${chat.name}? This cannot be undone.`,
-      buttons: [
-        { text: 'Cancel', role: 'cancel' },
-        {
-          text: 'Delete',
-          role: 'destructive',
-          handler: () => {
-            this.chatService.deleteChat(chat.id).then(() => {
-              this.chats = this.chats.filter(c => c.id !== chat.id);
-              this.filteredChats = [...this.chats];
-              this.showToast('Chat deleted');
-            });
-          }
-        }
-      ]
-    });
-    await alert.present();
-  }
-
-  filteredChats: any[] = [];
-  searchTerm: string = '';
-
-  filterChats(event: any) {
-    const term = event.target.value;
-    this.searchTerm = term;
-    if (!term || term.trim() === '') {
-      this.filteredChats = [...this.chats];
-      return;
-    }
-
-    this.filteredChats = this.chats.filter(c => {
-      return c.name.toLowerCase().includes(term.toLowerCase());
-      // Optional: Search last message?
-      // || c.lastMessage.toLowerCase().includes(term.toLowerCase())
-    });
-  }
-
-  getUnreadCount(chat: any) {
-    return chat[`unread_${this.myId}`] || 0;
-  }
   async presentMoreOptions() {
-    const actionSheet = await this.actionSheetCtrl.create({
+    const sheet = await this.actionSheetCtrl.create({
       header: 'More Options',
       buttons: [
         {
           text: 'Starred Messages',
           icon: 'star',
-          handler: () => {
-            this.nav.navigateForward('/starred-messages');
-          }
+          handler: () => this.nav.navigateForward('/starred-messages')
         },
         {
           text: 'Settings',
           icon: 'settings-outline',
-          handler: () => {
-            this.nav.navigateForward('/settings');
-          }
+          handler: () => this.nav.navigateForward('/settings')
         },
         { text: 'Cancel', role: 'cancel', icon: 'close' }
       ]
     });
-    await actionSheet.present();
+    sheet.present();
   }
 }

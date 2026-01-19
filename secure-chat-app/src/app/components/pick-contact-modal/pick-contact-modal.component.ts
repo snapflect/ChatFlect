@@ -26,7 +26,7 @@ export class PickContactModalComponent implements OnInit {
     }
 
     async loadContacts() {
-        const all = (await this.contactsService.getContacts()) || [];
+        const all = (await this.contactsService.getAllContacts()) || [];
         // Filter out already in group
         this.contacts = all.filter((c: any) => !this.excludeIds.includes(String(c.user_id)));
         this.filteredContacts = [...this.contacts];

@@ -20,6 +20,8 @@ import { LoggingService } from 'src/app/services/logging.service';
 
 export class ContactsPage implements OnInit {
   contacts: any[] = [];
+  groupedContacts: { letter: string, contacts: any[] }[] = [];
+  searchQuery: string = '';
 
   constructor(
     private contactsService: ContactsService,
@@ -34,25 +36,65 @@ export class ContactsPage implements OnInit {
     this.loadContacts();
   }
 
-  async loadContacts() {
+  async loadContacts(event?: any) {
     this.logger.log("Loading contacts...");
 
     // 1. Load Cached
     const cached = localStorage.getItem('contacts_cache');
     if (cached) {
       this.contacts = JSON.parse(cached);
+      this.updateGroupedContacts();
     }
 
     // 2. Sync Native in Background
     try {
-      const fresh = await this.contactsService.getAllContacts(); // Triggers plugin + Firestore
-      if (fresh && fresh.length > 0) {
+      const fresh = await this.contactsService.getAllContacts();
+      if (fresh) {
         this.contacts = fresh;
         localStorage.setItem('contacts_cache', JSON.stringify(fresh));
+        this.updateGroupedContacts();
       }
     } catch (e) {
       this.logger.error("Sync failed", e);
+    } finally {
+      if (event) event.target.complete();
     }
+  }
+
+  updateGroupedContacts() {
+    let filtered = this.contacts;
+
+    // Search Filter
+    if (this.searchQuery && this.searchQuery.trim() !== '') {
+      const q = this.searchQuery.toLowerCase();
+      filtered = filtered.filter(c =>
+        (c.displayName && c.displayName.toLowerCase().includes(q)) ||
+        (c.phone_number && c.phone_number.includes(q)) ||
+        (c.short_note && c.short_note.toLowerCase().includes(q))
+      );
+    }
+
+    // Sort Alphabetically
+    filtered.sort((a, b) => (a.displayName || '').localeCompare((b.displayName || ''), undefined, { sensitivity: 'base' }));
+
+    // Group by First Letter
+    const groups: { [key: string]: any[] } = {};
+    filtered.forEach(c => {
+      const letter = (c.displayName || '#').charAt(0).toUpperCase();
+      const key = /[A-Z]/.test(letter) ? letter : '#';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(c);
+    });
+
+    this.groupedContacts = Object.keys(groups).sort().map(letter => ({
+      letter,
+      contacts: groups[letter]
+    }));
+  }
+
+  onSearchChange(event: any) {
+    this.searchQuery = event.detail.value;
+    this.updateGroupedContacts();
   }
 
   async addContact() {
@@ -151,7 +193,8 @@ export class ContactsPage implements OnInit {
       this.router.navigate(['/chat-detail', chatId]);
     } catch (e: any) {
       this.logger.error("Chat Init Error", e);
-      const t = await this.toast.create({ message: 'Chat Error: ' + e.message, duration: 2000 });
+      const msg = (e && e.message) ? e.message : 'Detailed error unavailable';
+      const t = await this.toast.create({ message: 'Chat Error: ' + msg, duration: 2000 });
       t.present();
     }
   }

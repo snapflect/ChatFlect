@@ -5,157 +5,164 @@ import { Contacts } from '@capacitor-community/contacts';
 import { LoggingService } from './logging.service';
 import { getFirestore, doc, setDoc, getDocs, collection } from 'firebase/firestore';
 
-@Injectable({
-    providedIn: 'root'
-})
+@Injectable({ providedIn: 'root' })
 export class ContactsService {
+
     localContacts: any[] = [];
     private db: any;
 
-    constructor(private api: ApiService, private logger: LoggingService) {
+    constructor(
+        private api: ApiService,
+        private logger: LoggingService
+    ) {
         try {
             this.db = getFirestore();
-        } catch (e) {
-            this.logger.error("Firestore Init Error", e);
-        }
+        } catch { }
     }
 
-    async getContacts(): Promise<any[]> {
-        if (!Capacitor.isNativePlatform()) {
-            const mockDeviceContacts = ['111111', '222222', '333333'];
-            return this.api.post('contacts.php', { phone_numbers: mockDeviceContacts }).toPromise() as Promise<any[]>;
-        }
+    /* ================================
+       PUBLIC API
+    ================================= */
+
+    async getAllContacts(): Promise<any[]> {
+        const myId = localStorage.getItem('user_id');
+
+        const devicePhones = await this.getDevicePhones();
+        const serverUsers = await this.syncPhone(devicePhones);
+
+        // Exclude self
+        const filtered = serverUsers.filter(u => u.user_id !== myId);
+
+        // Normalize display name
+        const normalized = filtered.map(u => ({
+            ...u,
+            displayName:
+                u.first_name ||
+                u.last_name ||
+                u.phone_number ||
+                'Unknown'
+        }));
+
+        // Sort alphabetically
+        normalized.sort((a, b) =>
+            a.displayName.localeCompare(b.displayName)
+        );
+
+        this.localContacts = normalized;
+        return normalized;
+    }
+
+    /* ================================
+       DEVICE CONTACTS
+    ================================= */
+
+    private async getDevicePhones(): Promise<string[]> {
+        if (!Capacitor.isNativePlatform()) return [];
 
         try {
-            const permission = await Contacts.requestPermissions();
-            if (permission.contacts !== 'granted') return [];
+            console.log('[ContactsDebug] Requesting Permissions...');
+            const perm = await Contacts.requestPermissions();
+            console.log('[ContactsDebug] Permission Result:', JSON.stringify(perm));
 
-            const result = await Contacts.getContacts({
-                projection: {
-                    name: true,
-                    phones: true
-                }
+            if (perm.contacts !== 'granted') {
+                console.warn('[ContactsDebug] Permission denied or not granted.');
+                return [];
+            }
+
+            const res = await Contacts.getContacts({
+                projection: { phones: true }
+            });
+            console.log('[ContactsDebug] Raw Contacts Count:', res.contacts.length);
+
+            const phones: string[] = [];
+
+            res.contacts.forEach((c: any) => {
+                c.phones?.forEach((p: any) => {
+                    const raw = p.number;
+                    const clean = raw?.replace(/[^0-9]/g, '');
+                    console.log('[ContactsDebug] Raw:', raw, 'Clean:', clean);
+                    if (clean && clean.length >= 10) {
+                        const final = clean.slice(-10);
+                        console.log('[ContactsDebug] Normalized:', final);
+                        phones.push(final);
+                    }
+                });
             });
 
-            const rawContacts = result.contacts;
-            const phoneToNameMap = new Map<string, string>();
-            const phoneNumbers: string[] = [];
-
-            type ContactPhone = { number?: string };
-            type ContactPayload = { phones?: ContactPhone[]; displayName?: string; name?: any };
-
-            (rawContacts as any[]).forEach(c => { // Type cast flexible
-                const name = c.displayName || (c.name ? (c.name.display || c.name.given) : 'Unknown');
-
-                if (c.phones && c.phones.length > 0) {
-                    c.phones.forEach((p: any) => {
-                        let num = p.number?.replace(/[^0-9+]/g, '');
-                        // Handle standard formats
-                        if (num) {
-                            if (num.length >= 10) {
-                                phoneNumbers.push(num);
-                                phoneToNameMap.set(num, name);
-                                phoneToNameMap.set(num.slice(-10), name);
-                            }
-                        }
-                    });
-                }
-            });
-
-            const uniquePhones = [...new Set(phoneNumbers)];
-            const serverUsers: any[] = await this.syncPhone(uniquePhones);
-
-            // Merge Local Name
-            return serverUsers.map(u => {
-                // Try to find local name
-                const pClean = u.phone_number.replace(/[^0-9]/g, '');
-                const last10 = pClean.slice(-10);
-
-                const localName = phoneToNameMap.get(last10) || phoneToNameMap.get(u.phone_number);
-                return {
-                    ...u,
-                    localName: localName // Attach for fallback
-                };
-            });
-
+            return [...new Set(phones)];
         } catch (e) {
-            this.logger.error("Contact Sync Error", e);
+            this.logger.error("Device contacts error", e);
             return [];
         }
     }
 
-    async syncPhone(phones: string[]) {
-        const res: any = await this.api.post('contacts.php', { phone_numbers: phones }).toPromise();
-        return res;
+    /* ================================
+       BACKEND SYNC (TS-SAFE)
+    ================================= */
+
+    async syncPhone(phones: string[]): Promise<any[]> {
+        if (!phones || phones.length === 0) return [];
+
+        const batchSize = 50;
+        const batches = [];
+
+        for (let i = 0; i < phones.length; i += batchSize) {
+            batches.push(phones.slice(i, i + batchSize));
+        }
+
+        console.log(`[ContactsDebug] Syncing ${phones.length} contacts in ${batches.length} batches...`);
+
+        let mergedResults: any[] = [];
+
+        for (const batch of batches) {
+            try {
+                const res = await this.api
+                    .post('contacts.php', { phone_numbers: batch })
+                    .toPromise();
+
+                if (Array.isArray(res)) {
+                    console.log(`[ContactsDebug] Batch returned ${res.length} matches.`);
+                    mergedResults = [...mergedResults, ...res];
+                }
+            } catch (e) {
+                this.logger.error('[ContactsDebug] Batch sync failed', e);
+            }
+        }
+
+        // Deduplicate merged results by user_id
+        const unique = mergedResults.filter((v, i, a) => a.findIndex(t => t.user_id === v.user_id) === i);
+        console.log(`[ContactsDebug] Total Unique Matches: ${unique.length}`);
+
+        return unique;
     }
+
+    /* ================================
+       MANUAL CONTACTS
+    ================================= */
 
     async saveManualContact(contact: any) {
         const myId = localStorage.getItem('user_id');
         if (!myId || !this.db) return;
+
         try {
-            await setDoc(doc(this.db, 'users', myId, 'contacts', contact.user_id), contact);
+            await setDoc(
+                doc(this.db, 'users', myId, 'contacts', contact.user_id),
+                contact
+            );
         } catch (e) {
-            this.logger.error("Failed to save contact", e);
+            this.logger.error("Save manual contact failed", e);
         }
     }
 
     async getSavedContacts(): Promise<any[]> {
         const myId = localStorage.getItem('user_id');
         if (!myId || !this.db) return [];
+
         try {
             const snap = await getDocs(collection(this.db, 'users', myId, 'contacts'));
             return snap.docs.map(d => d.data());
-        } catch (e) { return []; }
-    }
-
-    async getAllContacts(): Promise<any[]> {
-        const native = await this.getContacts() || [];
-        const saved = await this.getSavedContacts() || [];
-
-        const map = new Map();
-
-        // 1. Add Saved (Base)
-        (saved as any[]).forEach(c => map.set(c.user_id, c));
-
-        // 2. Merge Native (Fresh Server Data)
-        // If native exists, update profile fields but KEEP displayName if set in saved
-        (native as any[]).forEach((n: any) => {
-            if (map.has(n.user_id)) {
-
-                let pUrl = n.photo_url;
-                if (pUrl && !pUrl.startsWith('http')) {
-                    pUrl = 'https://chat.snapflect.com/' + pUrl;
-                }
-
-                const existing = map.get(n.user_id);
-                map.set(n.user_id, {
-                    ...existing, // Keep nickname/local fields
-                    first_name: n.first_name || n.localName, // Update Fresh Profile or Fallback
-                    last_name: n.last_name,
-                    photo_url: pUrl,
-                    public_key: n.public_key,
-                    short_note: n.short_note || existing.short_note
-                });
-            } else {
-                let pUrl = n.photo_url;
-                if (pUrl && !pUrl.startsWith('http')) {
-                    pUrl = 'https://chat.snapflect.com/' + pUrl;
-                }
-
-                map.set(n.user_id, {
-                    ...n,
-                    photo_url: pUrl,
-                    first_name: n.first_name || n.localName // Fallback to local name
-                });
-            }
-        });
-
-        const merged = Array.from(map.values());
-        this.logger.log("[Contacts] Merged Count:", merged.length);
-        if (merged.length > 0) {
-            this.logger.log("[Contacts] Sample:", merged[0]);
+        } catch {
+            return [];
         }
-        this.localContacts = merged; // Update public property for ChatsPage
-        return merged;
     }
 }

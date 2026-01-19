@@ -2,31 +2,35 @@ import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testin
 import { ChatsPage } from './chats.page';
 import { IonicModule, NavController, ToastController, ActionSheetController, AlertController } from '@ionic/angular';
 import { ChatService } from 'src/app/services/chat.service';
-import { AuthService } from 'src/app/services/auth.service';
 import { ContactsService } from 'src/app/services/contacts.service';
 import { PresenceService } from 'src/app/services/presence.service';
 import { ChatSettingsService } from 'src/app/services/chat-settings.service';
+import { SecureMediaService } from 'src/app/services/secure-media.service'; // Import Service
+import { SharedModule } from 'src/app/shared/shared.module'; // Import SharedModule
 import { of } from 'rxjs';
 import { RouterTestingModule } from '@angular/router/testing';
+import { ChangeDetectorRef } from '@angular/core';
 
 describe('ChatsPage', () => {
   let component: ChatsPage;
   let fixture: ComponentFixture<ChatsPage>;
   let chatServiceSpy: jasmine.SpyObj<ChatService>;
-  let authSpy: jasmine.SpyObj<AuthService>;
   let presenceSpy: jasmine.SpyObj<PresenceService>;
   let chatSettingsSpy: jasmine.SpyObj<ChatSettingsService>;
+  let secureMediaSpy: jasmine.SpyObj<SecureMediaService>; // Mock Spy
 
   beforeEach(async () => {
-    chatServiceSpy = jasmine.createSpyObj('ChatService', ['getMyChats', 'getChats']);
+    chatServiceSpy = jasmine.createSpyObj('ChatService', ['getMyChats', 'getUserInfo']);
     const contactsSpy = jasmine.createSpyObj('ContactsService', ['getContacts'], {
       localContacts: []
     });
     contactsSpy.getContacts.and.returnValue(Promise.resolve([]));
 
-    authSpy = jasmine.createSpyObj('AuthService', [], {
-      currentUserId: of('my_id')
-    });
+    // Mock getUserInfo for async fallback
+    chatServiceSpy.getUserInfo.and.returnValue(Promise.resolve({
+      username: 'Test User',
+      photo: 'http://example.com/photo.png'
+    }));
 
     // Mock PresenceService (WhatsApp Parity)
     presenceSpy = jasmine.createSpyObj('PresenceService', ['getPresence', 'setTyping']);
@@ -47,6 +51,10 @@ describe('ChatsPage', () => {
     chatSettingsSpy.toggleMute.and.returnValue(Promise.resolve());
     chatSettingsSpy.toggleArchive.and.returnValue(Promise.resolve());
 
+    // Mock SecureMediaService
+    secureMediaSpy = jasmine.createSpyObj('SecureMediaService', ['getMedia', 'revokeObjectUrl']);
+    secureMediaSpy.getMedia.and.callFake((url) => of(url)); // Pass-through for tests
+
     // Mock ToastController
     const toastSpy = jasmine.createSpyObj('ToastController', ['create']);
     toastSpy.create.and.returnValue(Promise.resolve({ present: () => Promise.resolve() }));
@@ -61,13 +69,13 @@ describe('ChatsPage', () => {
 
     await TestBed.configureTestingModule({
       declarations: [ChatsPage],
-      imports: [IonicModule.forRoot(), RouterTestingModule],
+      imports: [IonicModule.forRoot(), RouterTestingModule, SharedModule], // Add SharedModule
       providers: [
         { provide: ChatService, useValue: chatServiceSpy },
-        { provide: AuthService, useValue: authSpy },
         { provide: ContactsService, useValue: contactsSpy },
         { provide: PresenceService, useValue: presenceSpy },
         { provide: ChatSettingsService, useValue: chatSettingsSpy },
+        { provide: SecureMediaService, useValue: secureMediaSpy }, // Provide Mock
         { provide: ToastController, useValue: toastSpy },
         { provide: ActionSheetController, useValue: actionSheetSpy },
         { provide: AlertController, useValue: alertSpy },
@@ -75,8 +83,6 @@ describe('ChatsPage', () => {
       ]
     }).compileComponents();
 
-
-    chatServiceSpy.getChats.and.returnValue(of([]));
 
     fixture = TestBed.createComponent(ChatsPage);
     component = fixture.componentInstance;
@@ -146,4 +152,53 @@ describe('ChatsPage', () => {
     expect(component.chats[0].avatar).toBe('http://example.com/icon.png');
     expect(component.chats[0].name).toBe('My Group');
   }));
+
+  // --- Filter Chats Tests ---
+
+  describe('filterChats', () => {
+    it('should filter chats by name', () => {
+      component.chats = [
+        { id: '1', name: 'Alice', lastMessage: 'Hi' },
+        { id: '2', name: 'Bob', lastMessage: 'Hello' },
+        { id: '3', name: 'Charlie', lastMessage: 'Hey' }
+      ];
+      component.filteredChats = [...component.chats];
+
+      component.filterChats({ target: { value: 'ali' } });
+
+      expect(component.filteredChats.length).toBe(1);
+      expect(component.filteredChats[0].name).toBe('Alice');
+    });
+
+    it('should reset to all chats when search is empty', () => {
+      component.chats = [
+        { id: '1', name: 'Alice', lastMessage: 'Hi' },
+        { id: '2', name: 'Bob', lastMessage: 'Hello' }
+      ];
+      component.filteredChats = [component.chats[0]];
+
+      component.filterChats({ target: { value: '' } });
+
+      expect(component.filteredChats.length).toBe(2);
+    });
+  });
+
+  // --- Archive Chat Tests ---
+
+  describe('archiveChat', () => {
+    it('should remove chat from list after archiving', async () => {
+      component.chats = [
+        { id: 'chat1', name: 'Alice', lastMessage: 'Hi' },
+        { id: 'chat2', name: 'Bob', lastMessage: 'Hello' }
+      ];
+      component.filteredChats = [...component.chats];
+
+      const mockSlidingItem = { close: jasmine.createSpy('close').and.returnValue(Promise.resolve()) };
+      await component.archiveChat('chat1', mockSlidingItem as any);
+
+      expect(chatSettingsSpy.toggleArchive).toHaveBeenCalledWith('chat1');
+      expect(component.chats.length).toBe(1);
+      expect(component.chats[0].id).toBe('chat2');
+    });
+  });
 });

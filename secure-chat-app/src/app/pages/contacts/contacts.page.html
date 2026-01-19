@@ -5,17 +5,26 @@
     </ion-buttons>
     <ion-title class="gradient-text">Contacts</ion-title>
     <ion-buttons slot="end">
+      <!-- Hidden because of Refresher, but kept for accessibility -->
       <ion-button (click)="loadContacts()" class="icon-btn">
-        <ion-icon name="refresh" color="secondary"></ion-icon>
+        <ion-icon name="sync" color="secondary"></ion-icon>
       </ion-button>
     </ion-buttons>
+  </ion-toolbar>
+  <ion-toolbar>
+    <ion-searchbar (ionInput)="onSearchChange($event)" placeholder="Search contacts..." animated="true"
+      showCancelButton="focus"></ion-searchbar>
   </ion-toolbar>
 </ion-header>
 
 <ion-content [fullscreen]="true">
+  <ion-refresher slot="fixed" (ionRefresh)="loadContacts($event)">
+    <ion-refresher-content></ion-refresher-content>
+  </ion-refresher>
+
   <div class="ion-padding-top">
-    <ion-list lines="none" class="bg-transparent">
-      <!-- New Contact Action -->
+    <!-- Actions -->
+    <ion-list lines="none" class="bg-transparent actions-list">
       <ion-item button (click)="addContact()" class="contact-item">
         <ion-avatar slot="start" class="contact-avatar add-avatar">
           <ion-icon name="person-add" color="light"></ion-icon>
@@ -25,7 +34,6 @@
         </ion-label>
       </ion-item>
 
-      <!-- Invite Friend Action -->
       <ion-item button (click)="inviteFriend()" class="contact-item">
         <ion-avatar slot="start" class="contact-avatar invite-avatar">
           <ion-icon name="share-social" color="light"></ion-icon>
@@ -34,21 +42,29 @@
           <h2 class="contact-name">Invite Friends</h2>
         </ion-label>
       </ion-item>
+    </ion-list>
 
-      <ion-item *ngFor="let c of contacts" button (click)="startChat(c)" class="contact-item">
+    <!-- Empty State -->
+    <div *ngIf="groupedContacts.length === 0" class="empty-state ion-text-center ion-padding">
+      <p class="text-muted">No contacts found.</p>
+    </div>
+
+    <!-- Grouped Contacts -->
+    <ion-item-group *ngFor="let group of groupedContacts">
+      <ion-item-divider sticky class="group-header">
+        <ion-label>{{ group.letter }}</ion-label>
+      </ion-item-divider>
+
+      <ion-item *ngFor="let c of group.contacts" button (click)="startChat(c)" class="contact-item">
         <ion-avatar slot="start" class="contact-avatar">
-          <img [src]="c.photo_url || c.avatar || 'https://gravatar.com/avatar?d=mp'" />
+          <img [secureSrc]="c.photo_url" />
         </ion-avatar>
         <ion-label>
-          <h2 class="contact-name">{{ c.displayName || c.username || c.first_name || 'Unknown' }} {{ (!c.displayName &&
-            !c.username) ? (c.last_name || '') : '' }}</h2>
+          <h2 class="contact-name">{{ c.displayName }}</h2>
           <p class="contact-number">{{ c.short_note || c.phone_number }}</p>
         </ion-label>
-        <ion-button slot="end" fill="clear" color="primary">
-          <ion-icon name="chatbubble-ellipses-outline" slot="icon-only"></ion-icon>
-        </ion-button>
       </ion-item>
-    </ion-list>
+    </ion-item-group>
   </div>
 </ion-content>
 
@@ -63,5 +79,17 @@
 
   .invite-avatar {
     background: var(--ion-color-tertiary);
+  }
+
+  .group-header {
+    --background: transparent;
+    --color: var(--ion-color-medium);
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-top: 10px;
+  }
+
+  .actions-list {
+    margin-bottom: 0px;
   }
 </style>

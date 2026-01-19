@@ -116,9 +116,9 @@ export class LoginPage implements OnDestroy {
       error: (err) => {
         this.logger.error("Login Error", err);
         let msg = 'Error sending OTP';
-        if (err.error && err.error.error) {
+        if (err && err.error && err.error.error) {
           msg = err.error.error;
-        } else if (err.message) {
+        } else if (err && err.message) {
           msg = err.message;
         }
         this.showToast(msg);
@@ -151,7 +151,8 @@ export class LoginPage implements OnDestroy {
         });
       });
     } catch (e: any) {
-      this.showToast(e.message || 'Invalid OTP or Error');
+      const msg = (e && e.message) ? e.message : 'Invalid OTP or Error';
+      this.showToast(msg);
     }
   }
 

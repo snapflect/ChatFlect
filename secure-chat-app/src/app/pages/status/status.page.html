@@ -1,18 +1,16 @@
 <ion-header class="ion-no-border">
   <ion-toolbar>
     <ion-title class="gradient-text">Status</ion-title>
-    <!-- Removed header inputs to use FABs -->
   </ion-toolbar>
 </ion-header>
 
 <ion-content class="ion-padding-top">
   <!-- My Status -->
-  <!-- My Status -->
-  <ion-item lines="none" class="bg-transparent status-item" (click)="myStatus ? viewStatus(myStatus) : null">
+  <ion-item lines="none" class="bg-transparent status-item" (click)="myStatus ? viewStatus(myStatus, true) : null">
     <div slot="start" class="avatar-wrapper">
-      <div [class.ring-container]="myStatus">
+      <div [class.ring-container]="myStatus" [class.ring-active]="myStatus">
         <ion-avatar>
-          <img [src]="(myStatus?.updates[0]?.content_url) || myProfilePic || 'assets/avatar-placeholder.png'" />
+          <img [secureSrc]="getFirstMediaUrl(myStatus) || myProfilePic" />
         </ion-avatar>
       </div>
 
@@ -21,48 +19,97 @@
         <ion-icon name="add-circle"></ion-icon>
       </div>
 
-      <!-- Input only triggers if no status, or maybe separate add button? -->
-      <!-- Let's keep input always available on a separate button or make tapping the '+ icon' the upload trigger 
-           For Stories, usually you tap your own status to View, and there is a separate Camera button to Add.
-           We'll separate View vs Add roughly. -->
-
-      <!-- Actually, standard pattern: 
-           If has status -> Tap to View. 
-           How to Add more? Usually a small camera FAB or top header button.
-           We have top header buttons. -->
-
-      <input type="file" (change)="uploadStatus($event)" class="slat-input" *ngIf="!myStatus" />
+      <input type="file" (change)="uploadStatus($event)" class="slat-input" *ngIf="!myStatus"
+        accept="image/*,video/*,audio/*" />
     </div>
     <ion-label>
       <h2>My Status</h2>
       <p *ngIf="!myStatus">Tap to add to my status</p>
       <p *ngIf="myStatus">{{ myStatus.updates.length }} active update{{ myStatus.updates.length > 1 ? 's' : '' }}</p>
 
-      <div class="view-count-badge" *ngIf="myStatus?.view_count > 0" (click)="showViewers($event, myStatus)">
+      <div class="view-count-badge" *ngIf="myStatus && myStatus.view_count && myStatus.view_count > 0"
+        (click)="showViewers($event, myStatus)">
         <ion-icon name="eye"></ion-icon> {{ myStatus.view_count }}
       </div>
     </ion-label>
   </ion-item>
 
-  <h5 class="section-title">Recent updates</h5>
+  <!-- Recent Updates Section -->
+  <div *ngIf="recentUpdates.length > 0">
+    <h5 class="section-title">Recent updates</h5>
+    <ion-list class="bg-transparent">
+      <ion-item *ngFor="let s of recentUpdates" (click)="viewStatus(s)" lines="none" class="status-item">
+        <div slot="start" class="ring-container ring-active">
+          <ion-avatar class="status-ring">
+            <img [secureSrc]="s.avatar" />
+          </ion-avatar>
+          <!-- Segment indicator for multiple updates -->
+          <div class="segment-indicator" *ngIf="s.updates.length > 1">
+            {{ getViewedSegments(s).viewed }}/{{ getViewedSegments(s).total }}
+          </div>
+        </div>
+        <ion-label>
+          <h2>{{ s.name }}</h2>
+          <p>{{ getLastStatusTime(s) | date:'shortTime' }}</p>
+        </ion-label>
+        <ion-button fill="clear" slot="end" (click)="showStatusOptions($event, s)">
+          <ion-icon name="ellipsis-vertical" color="medium"></ion-icon>
+        </ion-button>
+      </ion-item>
+    </ion-list>
+  </div>
 
-  <ion-list class="bg-transparent">
-    <ion-item *ngFor="let s of recentUpdates" (click)="viewStatus(s)" lines="none" class="status-item">
-      <div slot="start" class="ring-container">
-        <ion-avatar class="status-ring">
-          <img [src]="s.avatar || 'assets/avatar-placeholder.png'" />
-        </ion-avatar>
-      </div>
-      <ion-label>
-        <h2>{{ s.name }}</h2>
-        <p>{{ s.updates[s.updates.length-1].created_at | date:'shortTime' }}</p>
-      </ion-label>
-    </ion-item>
-  </ion-list>
+  <!-- Viewed Updates Section -->
+  <div *ngIf="viewedUpdates.length > 0">
+    <h5 class="section-title">Viewed updates</h5>
+    <ion-list class="bg-transparent">
+      <ion-item *ngFor="let s of viewedUpdates" (click)="viewStatus(s)" lines="none" class="status-item viewed">
+        <div slot="start" class="ring-container ring-viewed">
+          <ion-avatar class="status-ring">
+            <img [secureSrc]="s.avatar" />
+          </ion-avatar>
+        </div>
+        <ion-label>
+          <h2>{{ s.name }}</h2>
+          <p>{{ getLastStatusTime(s) | date:'shortTime' }}</p>
+        </ion-label>
+        <ion-button fill="clear" slot="end" (click)="showStatusOptions($event, s)">
+          <ion-icon name="ellipsis-vertical" color="medium"></ion-icon>
+        </ion-button>
+      </ion-item>
+    </ion-list>
+  </div>
+
+  <!-- Muted Updates Section -->
+  <div *ngIf="mutedUpdates.length > 0">
+    <h5 class="section-title">Muted updates</h5>
+    <ion-list class="bg-transparent">
+      <ion-item *ngFor="let s of mutedUpdates" (click)="viewStatus(s)" lines="none" class="status-item muted">
+        <div slot="start" class="ring-container ring-muted">
+          <ion-avatar class="status-ring">
+            <img [secureSrc]="s.avatar" />
+          </ion-avatar>
+        </div>
+        <ion-label>
+          <h2>{{ s.name }}</h2>
+          <p>{{ getLastStatusTime(s) | date:'shortTime' }}</p>
+        </ion-label>
+        <ion-button fill="clear" slot="end" (click)="showStatusOptions($event, s)">
+          <ion-icon name="ellipsis-vertical" color="medium"></ion-icon>
+        </ion-button>
+      </ion-item>
+    </ion-list>
+  </div>
+
+  <!-- Empty State -->
+  <div *ngIf="recentUpdates.length === 0 && viewedUpdates.length === 0 && mutedUpdates.length === 0"
+    class="empty-state">
+    <ion-icon name="albums-outline"></ion-icon>
+    <p>No status updates to show</p>
+  </div>
 
   <!-- FABs for WhatsApp-like UI -->
   <ion-fab vertical="bottom" horizontal="end" slot="fixed" class="fab-padding">
-
     <!-- Text Status (Pencil) -->
     <ion-fab-button color="light" size="small" routerLink="/status-creator" class="mini-fab">
       <ion-icon name="pencil"></ion-icon>
@@ -71,111 +118,7 @@
     <!-- Camera Status -->
     <ion-fab-button color="secondary">
       <ion-icon name="camera"></ion-icon>
-      <!-- Overlay Input -->
-      <input type="file" (change)="uploadStatus($event)" class="fab-input" accept="image/*,video/*" />
+      <input type="file" (change)="uploadStatus($event)" class="fab-input" accept="image/*,video/*,audio/*" />
     </ion-fab-button>
   </ion-fab>
 </ion-content>
-
-<style>
-  .section-title {
-    padding-left: 20px;
-    font-size: 0.9em;
-    color: #888;
-    margin-top: 10px;
-    margin-bottom: 5px;
-  }
-
-  .avatar-wrapper {
-    position: relative;
-    width: 50px;
-    height: 50px;
-    margin-right: 15px;
-  }
-
-  .slat-input {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    z-index: 10;
-  }
-
-  .add-icon {
-    position: absolute;
-    bottom: -2px;
-    right: -2px;
-    font-size: 20px;
-    color: var(--ion-color-secondary);
-    background: black;
-    border-radius: 50%;
-    width: 20px;
-    height: 20px;
-  }
-
-  .ring-container {
-    padding: 2px;
-    border: 2px solid var(--ion-color-tertiary);
-    /* Active Ring */
-    border-radius: 50%;
-    margin-right: 10px;
-  }
-
-  .fab-padding {
-    margin-bottom: 20px;
-    margin-right: 15px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 15px;
-    /* Spacing between pencil and camera */
-  }
-
-  .mini-fab {
-    margin-bottom: 10px;
-  }
-
-  .fab-input {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    z-index: 10;
-  }
-
-  .view-count-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.85rem;
-    color: var(--ion-color-medium);
-    margin-top: 5px;
-    padding: 2px 8px;
-    background: rgba(var(--ion-color-light-rgb), 0.5);
-    border-radius: 12px;
-
-    ion-icon {
-      font-size: 14px;
-    }
-  }
-
-  .view-count-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.85rem;
-    color: var(--ion-color-medium);
-    margin-top: 5px;
-    padding: 2px 8px;
-    background: rgba(var(--ion-color-light-rgb), 0.5);
-    border-radius: 12px;
-
-    ion-icon {
-      font-size: 14px;
-    }
-  }
-</style>

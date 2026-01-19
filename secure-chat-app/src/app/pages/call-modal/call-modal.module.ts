@@ -4,12 +4,14 @@ import { FormsModule } from '@angular/forms';
 import { IonicModule } from '@ionic/angular';
 
 import { CallModalPage } from './call-modal.page';
+import { SharedModule } from 'src/app/shared/shared.module';
 
 @NgModule({
     imports: [
         CommonModule,
         FormsModule,
-        IonicModule
+        IonicModule,
+        SharedModule
     ],
     declarations: [CallModalPage],
     exports: [CallModalPage] // Export so it can be used if imported elsewhere

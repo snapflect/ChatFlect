@@ -55,7 +55,7 @@ export class ArchivedChatsPage implements OnInit, OnDestroy {
     }
     this.isLoading = true;
     return new Promise(async (resolve) => {
-      await this.contactService.getContacts();
+      await this.contactService.getAllContacts();
 
       // First, get initial chats to know what settings to load
       this.chatService.getMyChats().pipe(take(1)).subscribe(async (initialChats: any[]) => {

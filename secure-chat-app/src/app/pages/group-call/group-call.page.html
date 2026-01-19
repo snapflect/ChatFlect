@@ -4,7 +4,7 @@
   <div *ngIf="(callService.callStatus | async) === 'incoming'" class="overlay-container incoming">
     <div class="ion-text-center">
       <ion-avatar class="caller-avatar">
-        <img [src]="callerPhoto" />
+        <img [secureSrc]="callerPhoto" />
       </ion-avatar>
       <h2>{{ callerName }}</h2>
       <p class="status-subtitle">
@@ -30,7 +30,7 @@
   <div *ngIf="(callService.callStatus | async) === 'calling'" class="calling-overlay">
     <div class="ion-text-center">
       <ion-avatar class="caller-avatar">
-        <img [src]="callerPhoto" />
+        <img [secureSrc]="callerPhoto" />
       </ion-avatar>
       <h2>{{ callerName }}</h2>
       <p class="status-subtitle">Calling...</p>
@@ -53,7 +53,7 @@
     class="overlay-container feedback">
     <div class="ion-text-center">
       <ion-avatar class="caller-avatar">
-        <img [src]="callerPhoto" />
+        <img [secureSrc]="callerPhoto" />
       </ion-avatar>
       <h2>{{ callerName }}</h2>
       <h3 class="feedback-text">{{ (callService.callStatus | async) === 'declined' ? 'Call Declined' : 'User is Busy' }}
@@ -85,7 +85,7 @@
     <div class="ion-text-center">
       <div class="avatar-ripple animate-pulse">
         <ion-avatar class="large-avatar">
-          <img [src]="callerPhoto" />
+          <img [secureSrc]="callerPhoto" />
         </ion-avatar>
       </div>
       <h2>{{ callerName }}</h2>

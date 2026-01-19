@@ -45,10 +45,11 @@ export class AppComponent implements OnInit {
     this.presence.setPresence('online');
 
     // Push Notification Messages (deep link on tap)
-    this.pushService.messageSubject.subscribe(notification => {
-      if (notification && notification.data && notification.data.chatId) {
+    // Push Notification Messages (deep link on tap)
+    this.pushService.tapSubject.subscribe(chatId => {
+      if (chatId) {
         // Deep link when user taps notification
-        this.router.navigateByUrl(`/chat-detail/${notification.data.chatId}`);
+        this.router.navigateByUrl(`/chat-detail/${chatId}`);
       }
     });
 

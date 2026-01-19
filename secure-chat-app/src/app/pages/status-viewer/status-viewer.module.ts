@@ -7,14 +7,16 @@ import { IonicModule } from '@ionic/angular';
 import { StatusViewerPageRoutingModule } from './status-viewer-routing.module';
 
 import { StatusViewerPage } from './status-viewer.page';
+import { SharedModule } from 'src/app/shared/shared.module';
 
 @NgModule({
   imports: [
     CommonModule,
     FormsModule,
     IonicModule,
-    StatusViewerPageRoutingModule
+    StatusViewerPageRoutingModule,
+    SharedModule
   ],
   declarations: [StatusViewerPage]
 })
-export class StatusViewerPageModule {}
+export class StatusViewerPageModule { }

@@ -110,16 +110,20 @@ export class AuthService {
                 }, 2000);
 
                 return response;
+                return response;
             }
-            throw new Error(response.message || 'API Error: Registration Failed');
+            const errorMsg = (response && response.message) ? response.message : 'API Error: Registration Failed';
+            throw new Error(errorMsg);
         } catch (e: any) {
             this.logger.error("Auth Error", e);
-            throw new Error(e.message || 'Verification Failed');
+            throw new Error((e && e.message) ? e.message : 'Verification Failed');
         }
     }
 
     logout() {
         localStorage.removeItem('user_id');
+        localStorage.removeItem('private_key');
+        localStorage.removeItem('public_key');
         this.userIdSource.next(null);
     }
 

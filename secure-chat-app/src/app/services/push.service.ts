@@ -17,7 +17,8 @@ export class PushService {
     // For now, we will try without or user must replace this.
     private readonly VAPID_KEY = ''; // Placeholder: Enter "Web Push Certificate" Key here if needed.
 
-    public messageSubject = new BehaviorSubject<any>(null);
+    public messageSubject = new BehaviorSubject<any>(null); // Foreground Receipt
+    public tapSubject = new BehaviorSubject<string | null>(null); // User Tap Action
 
     constructor(
         private api: ApiService,
@@ -64,10 +65,15 @@ export class PushService {
         });
         PushNotifications.addListener('pushNotificationReceived', (notification: any) => {
             this.logger.log('Native Push Received:', notification);
+            // Just emit for logging/toasts. DO NOT NAVIGATE.
             this.messageSubject.next(notification);
         });
         PushNotifications.addListener('pushNotificationActionPerformed', (notification: any) => {
             this.logger.log('Native Push Action:', notification);
+            const data = notification.notification.data;
+            if (data && data.chatId) {
+                this.tapSubject.next(data.chatId);
+            }
         });
     }
 
@@ -132,8 +138,7 @@ export class PushService {
         }
 
         try {
-            await this.api.post('register.php', {
-                action: 'update_token',
+            await this.api.post('profile.php', {
                 user_id: userId,
                 fcm_token: token
             }).toPromise();

@@ -19,7 +19,7 @@
     <ion-list>
         <ion-item *ngFor="let c of filteredContacts" (click)="toggleSelection(c.user_id)" button detail="false">
             <ion-avatar slot="start">
-                <img [src]="c.photo_url || 'assets/avatar-placeholder.png'" />
+                <img [secureSrc]="c.photo_url" />
             </ion-avatar>
             <ion-label>
                 <h2>{{ c.first_name }} {{ c.last_name }}</h2>
