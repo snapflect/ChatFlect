@@ -14,11 +14,11 @@ export class SoundService {
     private isRingtonePlaying = false;
     private isRingbackPlaying = false;
 
-    // Sound file URLs
-    private readonly RINGTONE_URL = 'assets/sounds/ringtone.mp3';
-    private readonly RINGBACK_URL = 'assets/sounds/ringback.mp3'; // Caller-side ringing
-    private readonly MESSAGE_URL = 'assets/sounds/message.mp3';
-    private readonly CALL_END_URL = 'assets/sounds/call_end.mp3';
+    // Sound file URLs (Root-relative for Capacitor)
+    private readonly RINGTONE_URL = '/assets/sounds/ringtone.mp3';
+    private readonly RINGBACK_URL = '/assets/sounds/ringback.mp3'; // Caller-side ringing
+    private readonly MESSAGE_URL = '/assets/sounds/message.mp3';
+    private readonly CALL_END_URL = '/assets/sounds/call_end.mp3';
 
     constructor(private logger: LoggingService) {
         this.initAudio();

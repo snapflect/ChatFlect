@@ -18,6 +18,11 @@ export class LiveMapPage implements OnInit, OnDestroy {
   markers: Map<string, L.Marker> = new Map();
   myId = localStorage.getItem('user_id');
 
+  // Sharing status
+  isSharing = false;
+  remainingTime = '';
+  private statusInterval: any = null;
+
   constructor(
     private route: ActivatedRoute,
     private locService: LocationService,
@@ -26,7 +31,20 @@ export class LiveMapPage implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.chatId = this.route.snapshot.paramMap.get('chatId');
-    // If not in param map, check query params?
+    this.updateSharingStatus();
+    this.statusInterval = setInterval(() => this.updateSharingStatus(), 5000);
+  }
+
+  updateSharingStatus() {
+    this.isSharing = this.locService.isSharing();
+    const remaining = this.locService.getRemainingTime();
+    if (remaining > 0) {
+      const mins = Math.floor(remaining / 60000);
+      const secs = Math.floor((remaining % 60000) / 1000);
+      this.remainingTime = `${mins}m ${secs}s remaining`;
+    } else {
+      this.remainingTime = '';
+    }
   }
 
   ionViewDidEnter() {
@@ -118,6 +136,7 @@ export class LiveMapPage implements OnInit, OnDestroy {
 
   ngOnDestroy() {
     if (this.subscription) this.subscription.unsubscribe();
+    if (this.statusInterval) clearInterval(this.statusInterval);
     if (this.map) {
       this.map.remove();
     }

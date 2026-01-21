@@ -113,6 +113,23 @@ export class SecureMediaService implements OnDestroy {
     }
 
     private async decryptMedia(blobEnc: Blob, keyEncBase64: string, ivBase64: string): Promise<Blob> {
+        // Check for Raw Key (No RSA Decryption needed) - Fix for "atob" error
+        if (keyEncBase64.startsWith('RAW:')) {
+            const rawKeyBase64 = keyEncBase64.substring(4);
+            const rawKey = this.crypto.base64ToArrayBuffer(rawKeyBase64);
+
+            const aesKey = await crypto.subtle.importKey(
+                'raw',
+                rawKey,
+                { name: 'AES-GCM' },
+                true,
+                ['decrypt']
+            );
+
+            const iv = new Uint8Array(this.crypto.base64ToArrayBuffer(ivBase64));
+            return this.crypto.decryptBlob(blobEnc, aesKey, iv);
+        }
+
         const priv = localStorage.getItem('private_key');
         if (!priv) throw new Error('No private key');
 

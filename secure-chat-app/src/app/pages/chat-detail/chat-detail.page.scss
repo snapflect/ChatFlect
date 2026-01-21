@@ -251,3 +251,189 @@ ion-content.chat-content {
 .selected-row {
     background: rgba(127, 90, 240, 0.15) !important;
 }
+/* Contact Message */
+.contact-content {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    overflow: hidden;
+    min-width: 250px;
+    margin-bottom: 4px;
+}
+
+.contact-card-inner {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    gap: 12px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.contact-msg-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    overflow: hidden;
+}
+
+.contact-info {
+    flex: 1;
+    overflow: hidden;
+}
+
+.contact-name {
+    font-weight: 600;
+    font-size: 15px;
+    color: white;
+    margin-bottom: 2px;
+}
+
+.contact-phones {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.contact-actions {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.contact-action-btn {
+    width: 100%;
+    padding: 12px;
+    text-align: center;
+    color: var(--ion-color-primary);
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+
+    &:active {
+        background: rgba(255, 255, 255, 0.05);
+    }
+}
+
+/* Location Message */
+.location-content {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    overflow: hidden;
+    min-width: 200px;
+    cursor: pointer;
+    margin-bottom: 4px;
+}
+
+.location-map-preview {
+    width: 100%;
+    height: 120px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.static-map-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.location-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.1);
+    color: var(--ion-color-primary);
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.location-label ion-icon {
+    font-size: 18px;
+}
+
+/* Audio Player Enhanced */
+.audio-player-wrapper {
+    min-width: 200px;
+}
+
+.audio-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.native-audio {
+    width: 180px;
+    height: 40px;
+}
+
+.speed-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ion-color-primary);
+    cursor: pointer;
+
+    &:active {
+        background: rgba(255, 255, 255, 0.2);
+    }
+}
+
+/* Recording Overlay */
+.recording-overlay {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 80px;
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+}
+
+.recording-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    color: white;
+    transition: all 0.2s;
+}
+
+.recording-content.cancelled {
+    opacity: 0.5;
+}
+
+.recording-mic-icon {
+    font-size: 28px;
+    animation: blink 0.5s infinite;
+}
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.recording-time {
+    font-size: 18px;
+    font-weight: 600;
+    min-width: 40px;
+}
+
+.swipe-hint, .cancel-hint {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.cancel-hint {
+    color: #ffcccc;
+}

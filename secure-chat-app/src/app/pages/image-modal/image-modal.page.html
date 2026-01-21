@@ -15,7 +15,11 @@
 </ion-header>
 
 <ion-content color="black" class="ion-text-center">
-    <div class="img-container">
-        <img [secureSrc]="imageUrl" style="max-width: 100%; max-height: 100vh; object-fit: contain;" />
-    </div>
+    <swiper-container zoom="true" class="zoom-swiper">
+        <swiper-slide>
+            <div class="swiper-zoom-container">
+                <img [secureSrc]="imageUrl" [pymKey]="key" [pymIv]="iv" />
+            </div>
+        </swiper-slide>
+    </swiper-container>
 </ion-content>

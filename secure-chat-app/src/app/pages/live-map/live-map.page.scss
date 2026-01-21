@@ -1,0 +1,20 @@
+/* Live Map Status Bar */
+.status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: rgba(var(--ion-color-success-rgb), 0.15);
+    border-bottom: 1px solid rgba(var(--ion-color-success-rgb), 0.3);
+    height: 50px;
+}
+
+.remaining-time {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ion-color-success);
+}
+
+#mapId {
+    width: 100%;
+}

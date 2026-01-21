@@ -117,11 +117,45 @@
           </div>
 
           <!-- AUDIO -->
-          <div *ngIf="getMsgType(msg.text) === 'audio'" class="audio-player-new">
-            <!-- Use Audio Tag for now, or Custom Player with URL from Directive? 
-                  Directive sets src on the element. So <audio [secureSrc]> works. -->
-            <audio [secureSrc]="msg.text.url" [pymKey]="isMe ? (msg.text.ks || msg.text.k) : msg.text.k"
-              [pymIv]="msg.text.i" controls style="width: 200px; height: 40px;"></audio>
+          <div *ngIf="getMsgType(msg.text) === 'audio'" class="audio-player-wrapper">
+            <div class="audio-row">
+              <audio #audioElem [secureSrc]="msg.text.url" [pymKey]="isMe ? (msg.text.ks || msg.text.k) : msg.text.k"
+                [pymIv]="msg.text.i" controls class="native-audio"></audio>
+              <div class="speed-btn" (click)="toggleAudioSpeed(audioElem)">
+                {{ audioElem.playbackRate || 1 }}x
+              </div>
+            </div>
+          </div>
+
+
+          <!-- CONTACT -->
+          <div *ngIf="getMsgType(msg.text) === 'contact'" class="contact-content">
+            <div class="contact-card-inner">
+              <ion-avatar class="contact-msg-avatar">
+                <img [secureSrc]="msg.text.photo" onerror="this.src='assets/user.png'" />
+              </ion-avatar>
+              <div class="contact-info">
+                <div class="contact-name">{{ msg.text.name }}</div>
+                <div class="contact-phones" *ngFor="let p of msg.text.phones">{{ p }}</div>
+              </div>
+            </div>
+            <div class="contact-actions">
+              <div class="contact-action-btn" (click)="saveContact(msg.text)">Save</div>
+              <div class="contact-action-btn primary" (click)="startChatWithContact(msg.text)">Message</div>
+            </div>
+          </div>
+
+          <!-- LOCATION -->
+          <div *ngIf="getMsgType(msg.text) === 'location'" class="location-content" (click)="openLocation(msg.text)">
+            <div class="location-map-preview">
+              <!-- Static Map Image from OpenStreetMap -->
+              <img [src]="getStaticMapUrl(msg.text.lat, msg.text.lng)" class="static-map-img"
+                onerror="this.style.display='none'" />
+            </div>
+            <div class="location-label">
+              <ion-icon name="location-outline"></ion-icon>
+              <span>{{ msg.text.label || 'Shared Location' }}</span>
+            </div>
           </div>
 
           <!-- TEXT -->
@@ -174,9 +208,24 @@
         <ion-icon name="camera" slot="icon-only"></ion-icon>
       </ion-button>
     </div>
+    <!-- Recording Overlay -->
+    <div class="recording-overlay" *ngIf="isRecording" (touchmove)="onRecordingMove($event)"
+      (mousemove)="onRecordingMove($event)" (touchend)="endRecordingTouch()" (mouseup)="endRecordingTouch()">
+      <div class="recording-content" [class.cancelled]="recordCancelled">
+        <ion-icon name="mic" class="recording-mic-icon"></ion-icon>
+        <span class="recording-time">{{ recordDuration | number:'1.0-0' }}s</span>
+        <span class="swipe-hint" *ngIf="!recordCancelled">
+          <ion-icon name="chevron-back"></ion-icon> Slide to cancel
+        </span>
+        <span class="cancel-hint" *ngIf="recordCancelled">
+          <ion-icon name="close-circle"></ion-icon> Release to cancel
+        </span>
+      </div>
+    </div>
 
     <!-- Record or Send Button -->
-    <div class="mic-btn" *ngIf="!newMessage" (click)="recordAudio()">
+    <div class="mic-btn" *ngIf="!newMessage && !isRecording" (touchstart)="startRecordingTouch($event)"
+      (mousedown)="startRecordingTouch($event)">
       <ion-icon name="mic"></ion-icon>
     </div>
     <div class="send-btn" *ngIf="newMessage" (click)="sendMessage()">

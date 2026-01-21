@@ -20,6 +20,14 @@ const config: CapacitorConfig = {
     },
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"]
+    },
+    BackgroundRunner: {
+      label: 'com.chatflect.location.runner',
+      src: 'assets/background/location-runner.js',
+      event: 'updateLocation',
+      repeat: true,
+      interval: 15,
+      autoStart: false
     }
   }
 };

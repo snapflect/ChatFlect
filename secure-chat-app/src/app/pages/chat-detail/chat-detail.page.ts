@@ -5,7 +5,7 @@ import { AuthService } from 'src/app/services/auth.service';
 import { CryptoService } from 'src/app/services/crypto.service';
 import { ApiService } from 'src/app/services/api.service';
 import { DomSanitizer } from '@angular/platform-browser';
-import { NavController, ModalController, IonContent, ActionSheetController, ToastController, AlertController } from '@ionic/angular';
+import { ActionSheetController, AlertController, IonContent, ModalController, NavController, Platform, ToastController } from '@ionic/angular';
 import { ImageModalPage } from '../image-modal/image-modal.page';
 import { ImagePreviewModalPage } from '../image-preview-modal/image-preview-modal.page';
 import { RecordingService } from 'src/app/services/recording.service';
@@ -19,6 +19,7 @@ import { LoggingService } from 'src/app/services/logging.service';
 import { PresenceService } from 'src/app/services/presence.service';
 import { LocationService } from 'src/app/services/location.service';
 import { SoundService } from 'src/app/services/sound.service';
+import { ContactPickerModalPage } from '../contact-picker-modal/contact-picker-modal.page';
 
 // ... 
 
@@ -558,10 +559,16 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     ];
 
     if (isMe) {
-      buttons.push({
-        text: 'Delete for everyone',
-        handler: () => this.chatService.deleteMessage(this.chatId!, msg.id, true)
-      });
+      // Only allow delete-for-everyone within 1 hour of sending
+      const msgTimestamp = msg.timestamp?.seconds ? msg.timestamp.seconds * 1000 : msg.timestamp;
+      const oneHourAgo = Date.now() - (60 * 60 * 1000);
+
+      if (msgTimestamp && msgTimestamp > oneHourAgo) {
+        buttons.push({
+          text: 'Delete for everyone',
+          handler: () => this.chatService.deleteMessage(this.chatId!, msg.id, true)
+        });
+      }
     }
 
     buttons.push({ text: 'Cancel', role: 'cancel' });
@@ -621,7 +628,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
         { text: 'Audio', icon: 'musical-notes', handler: () => { this.pickAudio(); } },
         { text: 'Location (Static)', icon: 'location', handler: () => { this.shareLocation(); } },
         { text: 'Live Location', icon: 'navigate', handler: () => { this.shareLiveLocation(); } },
-        { text: 'Contact', icon: 'person', handler: () => { this.logger.log('Share Contact'); } },
+        { text: 'Contact', icon: 'person', handler: () => { this.pickContact(); } },
         { text: 'Cancel', icon: 'close', role: 'cancel' }
       ]
     });
@@ -654,9 +661,8 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     const load = await this.toastCtrl.create({ message: 'Processing Video...', duration: 2000 });
     load.present();
 
-    // Generate Thumbnail
-    const thumb = await this.generateVideoThumbnail(file);
-    const duration = 10; // TODO: Get actual duration
+    // Generate Thumbnail and get Duration
+    const { thumb, duration } = await this.generateVideoThumbnail(file);
 
     await this.chatService.sendVideoMessageClean(
       this.chatId,
@@ -669,24 +675,28 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     this.scrollToBottom();
   }
 
-  generateVideoThumbnail(file: File): Promise<Blob | null> {
+  generateVideoThumbnail(file: File): Promise<{ thumb: Blob | null, duration: number }> {
     return new Promise((resolve) => {
       const video = document.createElement('video');
       video.src = URL.createObjectURL(file);
       video.currentTime = 1; // Capture at 1s
 
-      video.onloadeddata = () => {
-        // Wait slightly for seek
-        setTimeout(() => {
+      video.onloadedmetadata = () => {
+        const duration = Math.round(video.duration) || 10;
+        // Wait for seek to complete
+        video.onseeked = () => {
           const canvas = document.createElement('canvas');
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-          canvas.toBlob(blob => resolve(blob), 'image/jpeg', 0.7);
-        }, 500);
+          canvas.toBlob(blob => {
+            URL.revokeObjectURL(video.src); // Cleanup
+            resolve({ thumb: blob, duration });
+          }, 'image/jpeg', 0.7);
+        };
       };
-      video.onerror = () => resolve(null);
+      video.onerror = () => resolve({ thumb: null, duration: 10 });
     });
   }
 
@@ -709,7 +719,23 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
   async shareLiveLocation() {
     if (!this.chatId) return;
-    await this.locationService.startSharing(this.chatId);
+
+    // Show duration picker
+    const sheet = await this.actionSheetCtrl.create({
+      header: 'Share Live Location For',
+      buttons: [
+        { text: '15 Minutes', handler: () => { this.startLiveShare(15); } },
+        { text: '1 Hour', handler: () => { this.startLiveShare(60); } },
+        { text: '8 Hours', handler: () => { this.startLiveShare(480); } },
+        { text: 'Cancel', role: 'cancel' }
+      ]
+    });
+    await sheet.present();
+  }
+
+  private async startLiveShare(durationMinutes: number) {
+    if (!this.chatId) return;
+    await this.locationService.startSharing(this.chatId, durationMinutes);
     this.viewLiveMap();
   }
 
@@ -740,6 +766,58 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   isRecording = false;
   recordDuration = 0;
   private recordInterval: any;
+
+  // Swipe-to-cancel tracking
+  recordStartX = 0;
+  recordCancelled = false;
+  swipeOffset = 0;
+
+  async startRecordingTouch(event: TouchEvent | MouseEvent) {
+    // Capture start position
+    if (event instanceof TouchEvent) {
+      this.recordStartX = event.touches[0].clientX;
+    } else {
+      this.recordStartX = event.clientX;
+    }
+    this.recordCancelled = false;
+    this.swipeOffset = 0;
+
+    await this.recordAudio();
+  }
+
+  onRecordingMove(event: TouchEvent | MouseEvent) {
+    if (!this.isRecording) return;
+
+    let currentX: number;
+    if (event instanceof TouchEvent) {
+      currentX = event.touches[0].clientX;
+    } else {
+      currentX = event.clientX;
+    }
+
+    this.swipeOffset = this.recordStartX - currentX;
+
+    // If swiped left more than 100px, cancel
+    if (this.swipeOffset > 100) {
+      this.recordCancelled = true;
+    } else {
+      this.recordCancelled = false;
+    }
+  }
+
+  async endRecordingTouch() {
+    if (!this.isRecording) return;
+
+    if (this.recordCancelled) {
+      // Cancel - don't send
+      await this.stopRecording(false);
+    } else {
+      // Send recording
+      await this.stopRecording(true);
+    }
+    this.swipeOffset = 0;
+    this.recordCancelled = false;
+  }
 
   async recordAudio() {
     // 1. Permission Check
@@ -849,6 +927,23 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
 
 
+  async pickContact() {
+    if (!this.chatId) return;
+    const modal = await this.modalController.create({
+      component: ContactPickerModalPage
+    });
+
+    modal.onDidDismiss().then(async (result) => {
+      if (result.data && result.data.contact) {
+        await this.chatService.sendContactMessage(this.chatId!, result.data.contact, this.currentUserId);
+        this.scrollToBottom();
+      }
+    });
+
+    await modal.present();
+  }
+
+
   async shareLocation() {
     try {
       const hasPerm = await Geolocation.checkPermissions();
@@ -859,11 +954,18 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
       const position = await Geolocation.getCurrentPosition();
       if (position && position.coords) {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        // Reverse geocode to get address label
+        const label = await this.reverseGeocode(lat, lng);
+
         await this.chatService.sendLocationMessage(
           this.chatId!,
-          position.coords.latitude,
-          position.coords.longitude,
-          this.currentUserId
+          lat,
+          lng,
+          this.currentUserId,
+          label
         );
         this.scrollToBottom();
       }
@@ -872,15 +974,54 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     }
   }
 
+  async reverseGeocode(lat: number, lng: number): Promise<string> {
+    try {
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`;
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'ChatFlect/1.0' }
+      });
+      const data = await response.json();
+      if (data.display_name) {
+        // Extract shorter version (city, country)
+        const address = data.address || {};
+        const parts = [address.city || address.town || address.village, address.country].filter(Boolean);
+        return parts.join(', ') || data.display_name.split(',').slice(0, 2).join(',');
+      }
+    } catch (e) {
+      this.logger.error("Geocode failed", e);
+    }
+    return 'Shared Location';
+  }
+
   viewLiveMap() {
     if (this.chatId) {
       this.nav.navigateForward(['/live-map', { chatId: this.chatId }]);
     }
   }
 
-  openLocation(lat: number, lng: number) {
+  async openImage(mediaData: any) {
+    const modal = await this.modalController.create({
+      component: ImageModalPage,
+      componentProps: {
+        imageUrl: mediaData.url,
+        key: mediaData.k,
+        iv: mediaData.i
+      }
+    });
+    await modal.present();
+  }
+
+  openLocation(locData: any) {
+    const lat = locData?.lat || 0;
+    const lng = locData?.lng || 0;
     const url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
     window.open(url, '_blank');
+  }
+
+  getStaticMapUrl(lat: number, lng: number): string {
+    // Using OpenStreetMap Static Map API (free, no key required)
+    // Alternative: Use Leaflet's tile server directly via a canvas approach, but this is simpler
+    return `https://static-maps.yandex.ru/1.x/?lang=en&ll=${lng},${lat}&z=15&l=map&size=300,200&pt=${lng},${lat},pm2rdl`;
   }
 
   // --- Helpers ---
@@ -1045,6 +1186,22 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     }
   }
 
+  toggleAudioSpeed(audio: any) {
+    if (!audio) return;
+    let rate = audio.playbackRate || 1;
+    if (rate === 1) rate = 1.5;
+    else if (rate === 1.5) rate = 2;
+    else rate = 1;
+
+    audio.playbackRate = rate;
+    // Force change detection if needed, but DOM updates usually behave.
+    // To update the text binding {{ audio.playbackRate }}, we might need to trigger CD.
+    // The template binding to a DOM property might not update automatically on change unless we force it or use a variable.
+    // However, if we click, the event cycle runs.
+
+    // Better: Helper Text function?
+  }
+
   stopAudio() {
     if (this.currentAudio) {
       this.currentAudio.pause();
@@ -1061,22 +1218,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     return '';
   }
 
-  async openImage(imgData: any) {
-    this.logger.log("Opening image with data:", imgData);
 
-    // Extract actual URL string if it's a SafeResourceUrlImpl
-    let actualUrl = imgData;
-    if (typeof imgData === 'object' && imgData.changingThisBreaksApplicationSecurity) {
-      actualUrl = imgData.changingThisBreaksApplicationSecurity;
-    }
-
-    await this.modalController.create({
-      component: ImageModalPage,
-      componentProps: {
-        imageUrl: actualUrl // Pass raw string (blob:...)
-      }
-    }).then(modal => modal.present());
-  }
 
   isMyMsg(msg: any): boolean {
     return String(msg.senderId).trim() === String(this.currentUserId).trim();
@@ -1292,6 +1434,38 @@ export class ChatDetailPage implements OnInit, OnDestroy {
         }
       });
     }
+  }
+
+  async saveContact(contactData: any) {
+    // Use Capacitor Contacts plugin to save to device
+    try {
+      // For now, show a toast with vCard-like data for manual save
+      // Full native save requires @capacitor-community/contacts with write permission
+      const name = contactData.name || 'Unknown';
+      const phone = (contactData.phones && contactData.phones[0]) || '';
+
+      // Create a tel: link for quick dialing / saving
+      const saveUrl = `tel:${phone}`;
+      window.open(saveUrl, '_system');
+
+      this.showToast(`Opening ${name} (${phone})`);
+    } catch (e) {
+      this.logger.error("Save contact failed", e);
+      this.showToast("Unable to save contact");
+    }
+  }
+
+  async startChatWithContact(contactData: any) {
+    const phone = (contactData.phones && contactData.phones[0]) || '';
+    const name = contactData.name || 'Unknown';
+    if (!phone) {
+      this.showToast("No phone number available");
+      return;
+    }
+
+    // For MVP: Show toast indicating the phone number
+    // Full implementation would search users collection for phone match
+    this.showToast(`Start chat with ${name}: ${phone} - Feature coming soon`);
   }
 
   isRead(msg: any): boolean {

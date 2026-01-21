@@ -2,6 +2,8 @@
 // serve.php - P26 FIX: Serve media files without auth headers
 // This endpoint allows <img> tags to load images directly without Authorization headers
 
+
+ini_set('display_errors', 0); // Ensure no text errors corrupt binary output
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Range, Authorization, X-User-ID");
@@ -107,4 +109,3 @@ if (isset($_SERVER['HTTP_RANGE'])) {
 
 // Output the file
 readfile($fullPath);
-?>

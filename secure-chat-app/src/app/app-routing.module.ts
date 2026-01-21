@@ -103,7 +103,11 @@ const routes: Routes = [
     path: 'starred-messages',
     loadChildren: () => import('./pages/starred-messages/starred-messages.module').then(m => m.StarredMessagesPageModule),
     canActivate: [AuthGuard]
+  },  {
+    path: 'contact-picker-modal',
+    loadChildren: () => import('./pages/contact-picker-modal/contact-picker-modal.module').then( m => m.ContactPickerModalPageModule)
   },
+
 ];
 
 @NgModule({

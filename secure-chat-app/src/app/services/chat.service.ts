@@ -352,6 +352,15 @@ export class ChatService {
                                 // 2. Decrypt Content (Text or Media)
                                 if (data['type'] === 'text') {
                                     decrypted = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                                } else if (data['type'] === 'contact' || data['type'] === 'location') {
+                                    // Decrypt Payload -> JSON Object
+                                    const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                                    try {
+                                        decrypted = JSON.parse(jsonStr);
+                                        // Ensure type is set on object if needed, or rely on msg.type
+                                    } catch (e) {
+                                        decrypted = jsonStr; // Fallback
+                                    }
                                 } else {
                                     // Media: We have the Session Key. We can decrypt the BLOB later.
                                     // The 'ciphertext' field is empty caption.
@@ -359,11 +368,15 @@ export class ChatService {
                                     // Or the UI calls a service method to decrypt the blob?
                                     // For now, allow viewing.
                                     const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
+                                    // Convert ArrayBuffer to Base64 String for SecureSrcDirective
+                                    // Prefix with "RAW:" so SecureMediaService knows to skip RSA decryption
+                                    const rawKeyBase64 = "RAW:" + this.crypto.arrayBufferToBase64(rawKey);
+
                                     // Construct Media Object for UI (using msg.text which maps to this)
                                     decrypted = {
                                         type: data['type'],
                                         url: data['file_url'],
-                                        k: rawKey,
+                                        k: rawKeyBase64,
                                         i: data['iv'],
                                         caption: data['caption'] || '',
                                         mime: data['mime'] || '',
@@ -453,15 +466,14 @@ export class ChatService {
         return d.exists() ? ((d.data() as any)['autoDeleteTimer'] || 0) : 0;
     }
 
-    async sendLocationMessage(chatId: string, lat: number, lng: number, senderId: string) {
+    async sendLocationMessage(chatId: string, lat: number, lng: number, senderId: string, label: string = '') {
         try {
-            // E2EE Location: Encrypt lat/lng in ciphertext? Or just metadata?
-            // Let's encrypt a JSON string of lat/lng in ciphertext
+            // E2EE Location: Encrypt lat/lng and label in ciphertext
             const sessionKey = await this.crypto.generateSessionKey();
             const iv = window.crypto.getRandomValues(new Uint8Array(12));
             const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
 
-            const content = JSON.stringify({ lat, lng });
+            const content = JSON.stringify({ lat, lng, label });
             const cipherText = await this.crypto.encryptPayload(content, sessionKey, iv);
 
             await this.distributeSecurePayload(chatId, senderId, 'location', cipherText, ivBase64, sessionKey, {});
@@ -480,6 +492,30 @@ export class ChatService {
             await this.distributeSecurePayload(chatId, senderId, 'sticker', '', ivBase64, sessionKey, metadata);
         } catch (e) {
             this.logger.error("Sticker Send Failed", e);
+        }
+    }
+
+    async sendContactMessage(chatId: string, contactData: any, senderId: string) {
+        try {
+            const sessionKey = await this.crypto.generateSessionKey();
+            const iv = window.crypto.getRandomValues(new Uint8Array(12));
+            const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
+
+            // Construct Contact Payload
+            // We strip unnecessary fields to save size/privacy if needed?
+            // Or just send what we have: displayName, phone_number, photo_url
+            const payload = {
+                name: contactData.displayName || 'Unknown',
+                phones: contactData.phone_number ? [contactData.phone_number] : [],
+                photo: contactData.photo_url || ''
+            };
+
+            const content = JSON.stringify(payload);
+            const cipherText = await this.crypto.encryptPayload(content, sessionKey, iv);
+
+            await this.distributeSecurePayload(chatId, senderId, 'contact', cipherText, ivBase64, sessionKey, {});
+        } catch (e) {
+            this.logger.error("Contact Send Failed", e);
         }
     }
 

@@ -2,6 +2,9 @@ import { Component, Input, OnInit } from '@angular/core';
 import { ModalController, ToastController } from '@ionic/angular';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { LoggingService } from 'src/app/services/logging.service';
+import { register } from 'swiper/element/bundle';
+
+register();
 
 @Component({
     selector: 'app-image-modal',
@@ -11,6 +14,8 @@ import { LoggingService } from 'src/app/services/logging.service';
 })
 export class ImageModalPage implements OnInit {
     @Input() imageUrl: string = '';
+    @Input() key: string = '';
+    @Input() iv: string = '';
 
     constructor(
         private modalController: ModalController,
@@ -18,7 +23,9 @@ export class ImageModalPage implements OnInit {
         private logger: LoggingService
     ) { }
 
-    ngOnInit() { }
+    ngOnInit() {
+        // Swiper registered globally above, or we can call it here.
+    }
 
     close() {
         this.modalController.dismiss();
