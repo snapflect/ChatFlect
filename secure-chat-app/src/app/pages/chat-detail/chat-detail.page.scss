@@ -251,6 +251,7 @@ ion-content.chat-content {
 .selected-row {
     background: rgba(127, 90, 240, 0.15) !important;
 }
+
 /* Contact Message */
 .contact-content {
     background: rgba(0, 0, 0, 0.2);
@@ -394,8 +395,15 @@ ion-content.chat-content {
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.8; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.8;
+    }
 }
 
 .recording-content {
@@ -416,8 +424,15 @@ ion-content.chat-content {
 }
 
 @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.3;
+    }
 }
 
 .recording-time {
@@ -426,7 +441,8 @@ ion-content.chat-content {
     min-width: 40px;
 }
 
-.swipe-hint, .cancel-hint {
+.swipe-hint,
+.cancel-hint {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -436,4 +452,107 @@ ion-content.chat-content {
 
 .cancel-hint {
     color: #ffcccc;
+}
+
+/* Document Message */
+.document-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    cursor: pointer;
+    min-width: 200px;
+
+    .document-icon {
+        font-size: 32px;
+        color: var(--ion-color-primary);
+    }
+
+    .document-info {
+        flex: 1;
+        overflow: hidden;
+
+        .document-name {
+            font-weight: 500;
+            word-break: break-word;
+            font-size: 14px;
+        }
+
+        .document-size {
+            font-size: 12px;
+            opacity: 0.7;
+        }
+    }
+
+    .download-icon {
+        font-size: 24px;
+        opacity: 0.7;
+    }
+}
+
+/* Live Location Message */
+.live-location-content {
+    cursor: pointer;
+
+    .live-location-preview {
+        position: relative;
+        border-radius: 8px;
+        overflow: hidden;
+
+        .static-map-img {
+            width: 200px;
+            height: 120px;
+            object-fit: cover;
+        }
+
+        .live-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            background: #ff4444;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+
+            ion-icon {
+                font-size: 12px;
+                animation: live-pulse 1s infinite;
+            }
+        }
+    }
+
+    .live-location-info {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 8px;
+        font-size: 14px;
+
+        .live-remaining {
+            color: #4caf50;
+        }
+
+        .live-expired {
+            color: #888;
+        }
+    }
+}
+
+@keyframes live-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
 }

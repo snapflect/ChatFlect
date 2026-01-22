@@ -10,6 +10,7 @@ import { ImageModalPage } from '../image-modal/image-modal.page';
 import { ImagePreviewModalPage } from '../image-preview-modal/image-preview-modal.page';
 import { RecordingService } from 'src/app/services/recording.service';
 import { Geolocation } from '@capacitor/geolocation';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 import { CallService } from 'src/app/services/call.service';
 import { ForwardModalPage } from '../forward-modal/forward-modal.page';
 import { PopoverController } from '@ionic/angular';
@@ -20,6 +21,7 @@ import { PresenceService } from 'src/app/services/presence.service';
 import { LocationService } from 'src/app/services/location.service';
 import { SoundService } from 'src/app/services/sound.service';
 import { ContactPickerModalPage } from '../contact-picker-modal/contact-picker-modal.page';
+import { SecureMediaService } from 'src/app/services/secure-media.service';
 
 // ... 
 
@@ -79,7 +81,8 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     private logger: LoggingService,
     private presence: PresenceService,
     private locationService: LocationService,
-    private soundService: SoundService
+    private soundService: SoundService,
+    private secureMedia: SecureMediaService
   ) {
     this.auth.currentUserId.subscribe(id => this.currentUserId = String(id));
   }
@@ -715,29 +718,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     input.click();
   }
 
-  // ... (Live Location, etc)
-
-  async shareLiveLocation() {
-    if (!this.chatId) return;
-
-    // Show duration picker
-    const sheet = await this.actionSheetCtrl.create({
-      header: 'Share Live Location For',
-      buttons: [
-        { text: '15 Minutes', handler: () => { this.startLiveShare(15); } },
-        { text: '1 Hour', handler: () => { this.startLiveShare(60); } },
-        { text: '8 Hours', handler: () => { this.startLiveShare(480); } },
-        { text: 'Cancel', role: 'cancel' }
-      ]
-    });
-    await sheet.present();
-  }
-
-  private async startLiveShare(durationMinutes: number) {
-    if (!this.chatId) return;
-    await this.locationService.startSharing(this.chatId, durationMinutes);
-    this.viewLiveMap();
-  }
+  // ... (Live Location methods moved to line ~1067)
 
   showStickerPicker = false;
 
@@ -901,15 +882,52 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   async openDocument(docData: any) {
-    if (docData.url) {
-      // For now, open directly. SecureMediaService usage for documents (decrypt & download) 
-      // would be a future enhancement. 
-      // If it's encrypted, we might need a way to trigger download via SecureMediaService.
-      // But user asked for robust handling.
-      // Let's assume for now documents are public or we just open the URL.
-      // Ideally: this.mediaService.getBlob(url).subscribe(blob => saveAs(blob))
-      window.open(docData.url, '_blank');
+    if (!docData.url) {
+      this.showToast('Document URL not available');
+      return;
     }
+
+    this.showToast('Downloading document...');
+
+    // Use SecureMediaService to decrypt the document
+    this.secureMedia.getMedia(docData.url, docData.k, docData.i).subscribe(
+      async (blobUrl: string) => {
+        try {
+          // Fetch the blob from the object URL
+          const response = await fetch(blobUrl);
+          const blob = await response.blob();
+
+          // Convert blob to base64 for Filesystem
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            try {
+              const base64Data = (reader.result as string).split(',')[1];
+              const fileName = docData.name || `document_${Date.now()}`;
+
+              // Write to Downloads directory using Capacitor Filesystem
+              await Filesystem.writeFile({
+                path: fileName,
+                data: base64Data,
+                directory: Directory.Documents
+              });
+
+              this.showToast(`Saved: ${fileName}`);
+            } catch (writeErr) {
+              this.logger.error('File write failed', writeErr);
+              this.showToast('Failed to save document');
+            }
+          };
+          reader.readAsDataURL(blob);
+        } catch (e) {
+          this.logger.error('Document download failed', e);
+          this.showToast('Failed to download document');
+        }
+      },
+      (error) => {
+        this.logger.error('Document decryption failed', error);
+        this.showToast('Failed to decrypt document');
+      }
+    );
   }
 
   // retryDecrypt removed - directives handle retries now
@@ -1024,6 +1042,64 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     return `https://static-maps.yandex.ru/1.x/?lang=en&ll=${lng},${lat}&z=15&l=map&size=300,200&pt=${lng},${lat},pm2rdl`;
   }
 
+  // --- Live Location Methods ---
+
+  async shareLiveLocation() {
+    const actionSheet = await this.actionSheetCtrl.create({
+      header: 'Share Live Location',
+      buttons: [
+        { text: '15 minutes', handler: () => this.startLiveShare(15) },
+        { text: '1 hour', handler: () => this.startLiveShare(60) },
+        { text: '8 hours', handler: () => this.startLiveShare(480) },
+        { text: 'Cancel', role: 'cancel' }
+      ]
+    });
+    await actionSheet.present();
+  }
+
+  private async startLiveShare(durationMinutes: number) {
+    if (!this.chatId) return;
+    try {
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true });
+      // 1. Start location tracking
+      await this.locationService.startSharing(this.chatId, durationMinutes);
+      // 2. Send message to chat
+      await this.chatService.sendLiveLocationMessage(
+        this.chatId,
+        pos.coords.latitude,
+        pos.coords.longitude,
+        this.currentUserId,
+        durationMinutes
+      );
+      this.showToast('Live location started');
+      // 3. Open live map view
+      this.nav.navigateForward(['/live-map', { chatId: this.chatId }]);
+    } catch (e) {
+      this.logger.error('Live location failed', e);
+      this.showToast('Failed to share location');
+    }
+  }
+
+  getLiveRemaining(locData: any): number {
+    if (!locData?.expiresAt) return 0;
+    return Math.max(0, locData.expiresAt - Date.now());
+  }
+
+  formatLiveRemaining(locData: any): string {
+    const ms = this.getLiveRemaining(locData);
+    if (ms <= 0) return 'Expired';
+    const mins = Math.floor(ms / 60000);
+    if (mins < 60) return `${mins}m remaining`;
+    const hrs = Math.floor(mins / 60);
+    return `${hrs}h ${mins % 60}m remaining`;
+  }
+
+  openLiveMap() {
+    if (this.chatId) {
+      this.nav.navigateForward(['/live-map', { chatId: this.chatId }]);
+    }
+  }
+
   // --- Helpers ---
 
   async uploadImage(event: any) {
@@ -1057,6 +1133,13 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
       await modal.present();
     }
+  }
+
+  formatAudioDuration(seconds: number): string {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   }
 
   async compressImage(file: File): Promise<Blob> {
@@ -1110,6 +1193,25 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     }
     return 'text';
   }
+
+  getDocIcon(mime: string): string {
+    if (!mime) return 'document-outline';
+    if (mime.includes('pdf')) return 'document-text-outline';
+    if (mime.includes('word') || mime.includes('doc')) return 'document-outline';
+    if (mime.includes('excel') || mime.includes('sheet')) return 'grid-outline';
+    if (mime.includes('zip') || mime.includes('rar') || mime.includes('archive')) return 'archive-outline';
+    if (mime.includes('image')) return 'image-outline';
+    return 'document-outline';
+  }
+
+  formatFileSize(bytes: number): string {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+
 
   getMsgContent(msg: any): string {
     if (typeof msg.text === 'string') {

@@ -1,4 +1,6 @@
 import { Component, ElementRef, Input, OnChanges, OnDestroy, SimpleChanges, ViewChild } from '@angular/core';
+import { SecureMediaService } from 'src/app/services/secure-media.service';
+import { Subscription } from 'rxjs';
 
 @Component({
     selector: 'app-audio-waveform',
@@ -70,6 +72,9 @@ export class AudioWaveformComponent implements OnChanges, OnDestroy {
     private audioContext: AudioContext | null = null;
     private analyser: AnalyserNode | null = null;
     private animationId: number | null = null;
+    private sub: Subscription | null = null;
+
+    constructor(private secureMedia: SecureMediaService) { }
 
     isPlaying = false;
     currentTime = 0;
@@ -83,24 +88,42 @@ export class AudioWaveformComponent implements OnChanges, OnDestroy {
     }
 
     setupAudio() {
-        if (this.audio) {
-            this.audio.pause();
+        if (this.sub) {
+            this.sub.unsubscribe();
+            this.sub = null;
         }
 
-        this.audio = new Audio(this.audioUrl);
-        this.audio.addEventListener('loadedmetadata', () => {
-            this.duration = this.audio!.duration;
-            this.drawStaticWaveform();
-        });
-        this.audio.addEventListener('timeupdate', () => {
-            this.currentTime = this.audio!.currentTime;
-            this.progressPercent = (this.currentTime / this.duration) * 100;
-        });
-        this.audio.addEventListener('ended', () => {
-            this.isPlaying = false;
-            this.progressPercent = 0;
-            this.currentTime = 0;
-        });
+        // Use SecureMediaService to decrypt/resolve URL
+        this.sub = this.secureMedia.getMedia(this.audioUrl, this.audioKey, this.audioIv).subscribe(
+            (blobUrl) => {
+                if (this.audio) {
+                    this.audio.pause();
+                    this.audio = null;
+                }
+
+                this.audio = new Audio(blobUrl);
+                this.audio.addEventListener('loadedmetadata', () => {
+                    if (isFinite(this.audio!.duration)) {
+                        this.duration = this.audio!.duration;
+                    }
+                    this.drawStaticWaveform();
+                });
+                this.audio.addEventListener('timeupdate', () => {
+                    this.currentTime = this.audio!.currentTime;
+                    if (this.duration > 0) {
+                        this.progressPercent = (this.currentTime / this.duration) * 100;
+                    }
+                });
+                this.audio.addEventListener('ended', () => {
+                    this.isPlaying = false;
+                    this.progressPercent = 0;
+                    this.currentTime = 0;
+                });
+            },
+            (err) => {
+                console.error("Audio Load Failed", err);
+            }
+        );
     }
 
     drawStaticWaveform() {
@@ -146,6 +169,7 @@ export class AudioWaveformComponent implements OnChanges, OnDestroy {
     }
 
     ngOnDestroy() {
+        if (this.sub) this.sub.unsubscribe();
         if (this.audio) {
             this.audio.pause();
             this.audio = null;

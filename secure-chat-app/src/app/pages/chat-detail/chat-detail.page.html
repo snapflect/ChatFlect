@@ -119,14 +119,25 @@
           <!-- AUDIO -->
           <div *ngIf="getMsgType(msg.text) === 'audio'" class="audio-player-wrapper">
             <div class="audio-row">
-              <audio #audioElem [secureSrc]="msg.text.url" [pymKey]="isMe ? (msg.text.ks || msg.text.k) : msg.text.k"
-                [pymIv]="msg.text.i" controls class="native-audio"></audio>
-              <div class="speed-btn" (click)="toggleAudioSpeed(audioElem)">
-                {{ audioElem.playbackRate || 1 }}x
-              </div>
+              <app-audio-waveform [audioUrl]="msg.text._blobUrl || msg.text.url"
+                [audioKey]="isMyMsg(msg) ? (msg.text.ks || msg.text.k) : msg.text.k" [audioIv]="msg.text.i">
+              </app-audio-waveform>
+              <div class="audio-duration" *ngIf="msg.text.d">{{ formatAudioDuration(msg.text.d) }}</div>
             </div>
           </div>
 
+
+          <!-- DOCUMENT -->
+          <div *ngIf="getMsgType(msg.text) === 'document'" class="document-content" (click)="openDocument(msg.text)">
+            <div class="document-icon">
+              <ion-icon [name]="getDocIcon(msg.text.mime)"></ion-icon>
+            </div>
+            <div class="document-info">
+              <div class="document-name">{{ msg.text.name || 'Document' }}</div>
+              <div class="document-size">{{ formatFileSize(msg.text.size) }}</div>
+            </div>
+            <ion-icon name="download-outline" class="download-icon"></ion-icon>
+          </div>
 
           <!-- CONTACT -->
           <div *ngIf="getMsgType(msg.text) === 'contact'" class="contact-content">
@@ -155,6 +166,27 @@
             <div class="location-label">
               <ion-icon name="location-outline"></ion-icon>
               <span>{{ msg.text.label || 'Shared Location' }}</span>
+            </div>
+          </div>
+
+          <!-- LIVE LOCATION -->
+          <div *ngIf="getMsgType(msg.text) === 'live_location'" class="live-location-content" (click)="openLiveMap()">
+            <div class="live-location-preview">
+              <img [src]="getStaticMapUrl(msg.text.lat, msg.text.lng)" class="static-map-img" />
+              <div class="live-badge">
+                <ion-icon name="pulse"></ion-icon>
+                LIVE
+              </div>
+            </div>
+            <div class="live-location-info">
+              <ion-icon name="location-outline"></ion-icon>
+              <span>Live location</span>
+              <span class="live-remaining" *ngIf="getLiveRemaining(msg.text) > 0">
+                • {{ formatLiveRemaining(msg.text) }}
+              </span>
+              <span class="live-expired" *ngIf="getLiveRemaining(msg.text) <= 0">
+                • Expired
+              </span>
             </div>
           </div>
 

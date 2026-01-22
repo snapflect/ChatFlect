@@ -30,6 +30,10 @@ export class LocationService {
         this.currentChatId = chatId;
         this.expiresAt = Date.now() + (durationMinutes * 60 * 1000);
 
+        // Persist to localStorage for state recovery
+        localStorage.setItem('live_location_chatId', chatId);
+        localStorage.setItem('live_location_expiresAt', String(this.expiresAt));
+
         try {
             this.watchId = await Geolocation.watchPosition({
                 enableHighAccuracy: true,
@@ -73,14 +77,42 @@ export class LocationService {
             this.currentChatId = null;
         }
         this.expiresAt = 0;
+
+        // Clear localStorage
+        localStorage.removeItem('live_location_chatId');
+        localStorage.removeItem('live_location_expiresAt');
     }
 
     isSharing(): boolean {
-        return this.watchId !== null && Date.now() < this.expiresAt;
+        // Check in-memory first
+        if (this.watchId !== null && Date.now() < this.expiresAt) {
+            return true;
+        }
+        // Recover from localStorage if in-memory is empty
+        const storedExpiry = localStorage.getItem('live_location_expiresAt');
+        if (storedExpiry) {
+            const expiry = parseInt(storedExpiry, 10);
+            if (Date.now() < expiry) {
+                this.expiresAt = expiry; // Restore
+                return true;
+            } else {
+                // Expired, clean up
+                localStorage.removeItem('live_location_chatId');
+                localStorage.removeItem('live_location_expiresAt');
+            }
+        }
+        return false;
     }
 
     getRemainingTime(): number {
-        if (!this.isSharing()) return 0;
+        // Try localStorage recovery if needed
+        if (this.expiresAt === 0) {
+            const storedExpiry = localStorage.getItem('live_location_expiresAt');
+            if (storedExpiry) {
+                this.expiresAt = parseInt(storedExpiry, 10);
+            }
+        }
+        if (Date.now() >= this.expiresAt) return 0;
         return Math.max(0, this.expiresAt - Date.now());
     }
 

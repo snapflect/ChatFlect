@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { LocationService } from 'src/app/services/location.service';
+import { ChatService } from 'src/app/services/chat.service';
 import * as L from 'leaflet';
 import { Subscription } from 'rxjs';
 import { NavController } from '@ionic/angular';
@@ -16,6 +17,7 @@ export class LiveMapPage implements OnInit, OnDestroy {
   chatId: string | null = null;
   subscription: Subscription | null = null;
   markers: Map<string, L.Marker> = new Map();
+  userNames: Map<string, string> = new Map(); // Cache for user names
   myId = localStorage.getItem('user_id');
 
   // Sharing status
@@ -26,6 +28,7 @@ export class LiveMapPage implements OnInit, OnDestroy {
   constructor(
     private route: ActivatedRoute,
     private locService: LocationService,
+    private chatService: ChatService,
     private nav: NavController
   ) { }
 
@@ -48,6 +51,7 @@ export class LiveMapPage implements OnInit, OnDestroy {
   }
 
   ionViewDidEnter() {
+    this.updateSharingStatus(); // Check immediately on view enter
     this.initMap();
     if (this.chatId) {
       this.subscribeToLocations();
@@ -94,7 +98,7 @@ export class LiveMapPage implements OnInit, OnDestroy {
     // 1. Add/Update
     const activeIds = new Set();
 
-    locs.forEach(loc => {
+    locs.forEach(async loc => {
       activeIds.add(loc.userId);
       const latLng = new L.LatLng(loc.lat, loc.lng);
 
@@ -102,15 +106,28 @@ export class LiveMapPage implements OnInit, OnDestroy {
         const marker = this.markers.get(loc.userId);
         marker?.setLatLng(latLng);
       } else {
+        // Get user display name
+        let displayName = "You";
+        if (loc.userId !== this.myId) {
+          // Check cache first
+          if (this.userNames.has(loc.userId)) {
+            displayName = this.userNames.get(loc.userId)!;
+          } else {
+            // Fetch from API
+            try {
+              const userInfo = await this.chatService.getUserInfo(loc.userId);
+              displayName = userInfo.username || `User ${loc.userId}`;
+              this.userNames.set(loc.userId, displayName);
+            } catch (e) {
+              displayName = `User ${loc.userId}`;
+            }
+          }
+        }
+
         const marker = L.marker(latLng)
-          .bindPopup(loc.userId === this.myId ? "You" : "User " + loc.userId) // Ideally Name
+          .bindPopup(displayName)
           .addTo(this.map!);
         this.markers.set(loc.userId, marker);
-
-        // Auto center on first update if it's me?
-        if (loc.userId === this.myId) {
-          // this.map?.setView(latLng, 15);
-        }
       }
     });
 

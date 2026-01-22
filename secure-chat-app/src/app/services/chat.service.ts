@@ -340,6 +340,14 @@ export class ChatService {
                     } else if (data['type'] === 'system_signal') {
                         msgsRaw.push({ id: d.id, ...data });
                         continue;
+                    } else if (data['type'] === 'live_location') {
+                        // Live location is NOT encrypted - pass through directly
+                        decrypted = {
+                            type: 'live_location',
+                            lat: data['lat'],
+                            lng: data['lng'],
+                            expiresAt: data['expiresAt']
+                        };
                     } else if (privateKeyStr) {
                         // --- Decryption Logic ---
                         try {
@@ -357,7 +365,7 @@ export class ChatService {
                                     const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
                                     try {
                                         decrypted = JSON.parse(jsonStr);
-                                        // Ensure type is set on object if needed, or rely on msg.type
+                                        decrypted.type = data['type']; // Preserve type for UI rendering
                                     } catch (e) {
                                         decrypted = jsonStr; // Fallback
                                     }
@@ -375,13 +383,15 @@ export class ChatService {
                                     // Construct Media Object for UI (using msg.text which maps to this)
                                     decrypted = {
                                         type: data['type'],
-                                        url: data['file_url'],
+                                        url: data['file_url'] || data['url'], // Support both field names
                                         k: rawKeyBase64,
                                         i: data['iv'],
                                         caption: data['caption'] || '',
                                         mime: data['mime'] || '',
                                         d: data['d'] || 0,
-                                        thumb: data['thumb'] || ''
+                                        thumb: data['thumb'] || '',
+                                        name: data['name'] || '',  // Document name
+                                        size: data['size'] || 0    // Document size
                                     };
                                 }
                             } else {
@@ -479,6 +489,41 @@ export class ChatService {
             await this.distributeSecurePayload(chatId, senderId, 'location', cipherText, ivBase64, sessionKey, {});
         } catch (e) {
             this.logger.error("Location Send Failed", e);
+        }
+    }
+
+    async sendLiveLocationMessage(chatId: string, lat: number, lng: number, senderId: string, durationMinutes: number) {
+        try {
+            const expiresAt = Date.now() + (durationMinutes * 60 * 1000);
+            const chatDoc = await this.getChatDoc(chatId);
+            const participants = chatDoc.exists() ? (chatDoc.data() as any)['participants'] : [];
+
+            const payload: any = {
+                id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+                type: 'live_location',
+                lat: lat,
+                lng: lng,
+                expiresAt: expiresAt,
+                senderId: senderId,
+                timestamp: Date.now()
+            };
+
+            await this.addMessageDoc(chatId, payload);
+
+            // Update parent chat
+            const updatePayload: any = {
+                lastMessage: '📍 Live location',
+                lastTimestamp: Date.now()
+            };
+            participants.forEach((p: any) => {
+                if (String(p) !== String(senderId)) {
+                    updatePayload[`unread_${p}`] = increment(1);
+                }
+            });
+            await this.updateChatDoc(chatId, updatePayload);
+            this.sendPushNotification(chatId, senderId, '📍 Live location');
+        } catch (e) {
+            this.logger.error("Live Location Send Failed", e);
         }
     }
 
