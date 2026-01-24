@@ -25,6 +25,7 @@ dependencies {
     implementation project(':capacitor-native-biometric')
     implementation project(':capacitor-plugin-audio-toggle')
     implementation project(':capacitor-plugin-callkit-voip')
+    implementation project(':capacitor-secure-storage-plugin')
     implementation project(':capacitor-voice-recorder')
 
 }

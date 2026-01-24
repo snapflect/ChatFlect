@@ -1,6 +1,10 @@
 <?php
 require 'db.php';
+require_once 'rate_limiter.php';
+require_once 'auth_middleware.php';
 
+// Enforce rate limiting
+enforceRateLimit();
 /* ---------- URL NORMALIZATION HELPERS ---------- */
 function getBaseUrl(): string
 {

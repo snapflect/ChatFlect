@@ -250,6 +250,114 @@ export class CryptoService {
         return new Blob([decryptedBuffer]);
     }
 
+    // --- Security Enhancement #9: Message Integrity Verification --- //
+
+    /**
+     * Generate HMAC-SHA256 signature for message integrity
+     * @param message - The message to sign
+     * @param signingKeyStr - The HMAC signing key (base64)
+     * @returns Base64-encoded HMAC signature
+     */
+    async signMessage(message: string, signingKeyStr: string): Promise<string> {
+        const encoder = new TextEncoder();
+        const keyData = this.base64ToArrayBuffer(signingKeyStr);
+
+        const signingKey = await window.crypto.subtle.importKey(
+            "raw",
+            keyData,
+            { name: "HMAC", hash: "SHA-256" },
+            false,
+            ["sign"]
+        );
+
+        const signature = await window.crypto.subtle.sign(
+            "HMAC",
+            signingKey,
+            encoder.encode(message)
+        );
+
+        return this.arrayBufferToBase64(signature);
+    }
+
+    /**
+     * Verify HMAC-SHA256 signature for message integrity
+     * @param message - The message to verify
+     * @param signatureBase64 - The base64-encoded signature to check
+     * @param signingKeyStr - The HMAC signing key (base64)
+     * @returns true if signature is valid, false otherwise
+     */
+    async verifySignature(message: string, signatureBase64: string, signingKeyStr: string): Promise<boolean> {
+        const encoder = new TextEncoder();
+        const keyData = this.base64ToArrayBuffer(signingKeyStr);
+        const signature = this.base64ToArrayBuffer(signatureBase64);
+
+        const signingKey = await window.crypto.subtle.importKey(
+            "raw",
+            keyData,
+            { name: "HMAC", hash: "SHA-256" },
+            false,
+            ["verify"]
+        );
+
+        return window.crypto.subtle.verify(
+            "HMAC",
+            signingKey,
+            signature,
+            encoder.encode(message)
+        );
+    }
+
+    /**
+     * Generate a random signing key for HMAC
+     * @returns Base64-encoded 256-bit signing key
+     */
+    async generateSigningKey(): Promise<string> {
+        const key = await window.crypto.subtle.generateKey(
+            { name: "HMAC", hash: "SHA-256" },
+            true,
+            ["sign", "verify"]
+        );
+
+        const exported = await window.crypto.subtle.exportKey("raw", key);
+        return this.arrayBufferToBase64(exported);
+    }
+
+    /**
+     * Create a signed message package (message + signature)
+     * @param message - The message content
+     * @param signingKeyStr - The HMAC signing key
+     * @returns JSON string with message and signature
+     */
+    async createSignedMessage(message: string, signingKeyStr: string): Promise<string> {
+        const signature = await this.signMessage(message, signingKeyStr);
+        return JSON.stringify({
+            m: message,
+            s: signature
+        });
+    }
+
+    /**
+     * Verify and extract a signed message
+     * @param signedPackage - The JSON package with message and signature
+     * @param signingKeyStr - The HMAC signing key
+     * @returns The original message if valid, throws if tampered
+     */
+    async verifyAndExtractMessage(signedPackage: string, signingKeyStr: string): Promise<string> {
+        const pkg = JSON.parse(signedPackage);
+
+        if (!pkg.m || !pkg.s) {
+            throw new Error('Invalid signed message format');
+        }
+
+        const isValid = await this.verifySignature(pkg.m, pkg.s, signingKeyStr);
+
+        if (!isValid) {
+            throw new Error('Message integrity check failed - possible tampering detected');
+        }
+
+        return pkg.m;
+    }
+
     // --- Phase 8: Signal Protocol Parity (Double Ratchet Primitives) --- //
 
     // 1. HKDF (RFC 5869) - Extract and Expand using HMAC-SHA256

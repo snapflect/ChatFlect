@@ -1,10 +1,17 @@
 <?php
 require 'db.php';
+require_once 'rate_limiter.php';
+require_once 'auth_middleware.php';
+
+// Enforce rate limiting
+enforceRateLimit();
+
 $data = json_decode(file_get_contents("php://input"), true);
 
 /* ---------- URL NORMALIZATION HELPERS ---------- */
 // --- Helper: Ensure Invite Code Column Exists ---
-function ensureInviteCodeColumn($conn) {
+function ensureInviteCodeColumn($conn)
+{
     // Check if column exists
     $check = $conn->query("SHOW COLUMNS FROM groups LIKE 'invite_code'");
     if ($check && $check->num_rows == 0) {
@@ -17,9 +24,20 @@ function ensureInviteCodeColumn($conn) {
 
 // Create Group
 if (isset($data['action']) && $data['action'] === 'create') {
-    $name = $data['name'] ?? '';
-    $creator = $data['created_by'] ?? '';
+    // Require authentication
+    $authUserId = requireAuth();
+
+    // Sanitize inputs
+    $name = sanitizeString($data['name'] ?? '', 100);
+    $creator = sanitizeUserId($data['created_by'] ?? '');
     $members = $data['members'] ?? []; // Array
+
+    // Validate creator matches authenticated user
+    if ($creator !== $authUserId) {
+        http_response_code(403);
+        echo json_encode(["error" => "Cannot create group for another user"]);
+        exit;
+    }
 
     if (count($members) > 256) {
         echo json_encode(["error" => "Group limit exceeded (Max 256 members)"]);
@@ -44,13 +62,19 @@ if (isset($data['action']) && $data['action'] === 'create') {
     $stmt->execute();
     $stmt->close();
 
-    // Add Members
+    // Add Members (sanitize each member ID)
     $stmt = $conn->prepare("INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, 'member')");
     foreach ($members as $m) {
-        $stmt->bind_param("ss", $group_id, $m);
-        $stmt->execute();
+        $sanitizedMember = sanitizeUserId($m);
+        if ($sanitizedMember) {
+            $stmt->bind_param("ss", $group_id, $sanitizedMember);
+            $stmt->execute();
+        }
     }
     $stmt->close();
+
+    // Audit log
+    auditLog(AUDIT_GROUP_CREATE, $creator, ['group_id' => $group_id, 'name' => $name]);
 
     echo json_encode(["status" => "success", "group_id" => $group_id]);
     exit;
@@ -63,7 +87,7 @@ if (isset($data['action']) && $data['action'] === 'add_member') {
 
     $stmt = $conn->prepare("INSERT IGNORE INTO group_members (group_id, user_id, role) VALUES (?, ?, 'member')");
     $stmt->bind_param("ss", $groupId, $userId);
-    
+
     if ($stmt->execute()) {
         echo json_encode(["status" => "success"]);
     } else {
@@ -81,7 +105,7 @@ if (isset($data['action']) && $data['action'] === 'remove_member') {
 
     $stmt = $conn->prepare("DELETE FROM group_members WHERE group_id=? AND user_id=?");
     $stmt->bind_param("ss", $groupId, $targetId);
-    
+
     if ($stmt->execute()) {
         echo json_encode(["status" => "success"]);
     } else {
@@ -98,7 +122,7 @@ if (isset($data['action']) && $data['action'] === 'leave') {
 
     $stmt = $conn->prepare("DELETE FROM group_members WHERE group_id=? AND user_id=?");
     $stmt->bind_param("ss", $groupId, $userId);
-    
+
     if ($stmt->execute()) {
         echo json_encode(["status" => "success"]);
     } else {
@@ -160,7 +184,7 @@ if (isset($data['action']) && $data['action'] === 'regenerate_invite_code') {
     $code = substr(md5(uniqid($groupId, true)), 0, 8);
     $stmt = $conn->prepare("UPDATE groups SET invite_code=? WHERE id=?");
     $stmt->bind_param("ss", $code, $groupId);
-    
+
     if ($stmt->execute()) {
         echo json_encode(["status" => "success", "invite_code" => $code]);
     } else {
@@ -180,15 +204,15 @@ if (isset($data['action']) && $data['action'] === 'join_via_code') {
     $stmt->bind_param("s", $code);
     $stmt->execute();
     $res = $stmt->get_result();
-    
+
     if ($row = $res->fetch_assoc()) {
         $groupId = $row['id'];
-        
+
         // Add to members
         $stmt2 = $conn->prepare("INSERT IGNORE INTO group_members (group_id, user_id, role) VALUES (?, ?, 'member')");
         $stmt2->bind_param("ss", $groupId, $userId);
         $stmt2->execute();
-        
+
         echo json_encode(["status" => "success", "group_id" => $groupId, "group_name" => $row['name']]);
     } else {
         echo json_encode(["error" => "Invalid invite code"]);

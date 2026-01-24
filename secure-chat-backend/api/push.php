@@ -1,6 +1,10 @@
 <?php
 require 'db.php';
+require_once 'rate_limiter.php';
+require_once 'auth_middleware.php';
 
+// Enforce rate limiting
+enforceRateLimit();
 // IMPORTANT: Upload your 'service-account.json' to the same folder as this file.
 
 function getAccessToken($serviceAccountPath)

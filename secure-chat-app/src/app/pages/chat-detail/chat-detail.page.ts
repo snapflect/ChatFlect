@@ -1415,10 +1415,6 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     return '';
   }
 
-  trackByMsgId(index: number, item: any) {
-    return item.id;
-  }
-
   // --- Audio Logic ---
   currentAudio: HTMLAudioElement | null = null;
   currentPlayingMsg: any = null;

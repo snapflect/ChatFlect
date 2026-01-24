@@ -1,5 +1,10 @@
 <?php
 require 'db.php';
+require_once 'rate_limiter.php';
+require_once 'auth_middleware.php';
+
+// Enforce rate limiting
+enforceRateLimit();
 
 // Headers handled by db.php
 
@@ -102,6 +107,9 @@ if ($method === 'POST') {
         $del->bind_param("s", $phone);
         $del->execute();
 
+        // Audit log successful login
+        auditLog(AUDIT_LOGIN_SUCCESS, $userId, ['is_new_user' => $isNewUser]);
+
         echo json_encode([
             "status" => "success",
             "message" => "Login Successful",
@@ -113,7 +121,9 @@ if ($method === 'POST') {
 
     /* ---------- PROFILE UPDATE ---------- */
     if (isset($data->user_id)) {
-        $userId = $data->user_id;
+        // Require authentication and verify user matches
+        $userId = sanitizeUserId($data->user_id);
+        requireAuth($userId);
 
         $check = $conn->prepare("SELECT id FROM users WHERE user_id = ?");
         $check->bind_param("s", $userId);
@@ -131,12 +141,12 @@ if ($method === 'POST') {
         if (isset($data->first_name)) {
             $fields[] = "first_name=?";
             $types .= "s";
-            $params[] = trim($data->first_name);
+            $params[] = sanitizeString($data->first_name, 50);
         }
         if (isset($data->last_name)) {
             $fields[] = "last_name=?";
             $types .= "s";
-            $params[] = trim($data->last_name);
+            $params[] = sanitizeString($data->last_name, 50);
         }
         if (isset($data->short_note)) {
             $fields[] = "short_note=?";
