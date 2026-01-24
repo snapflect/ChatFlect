@@ -556,3 +556,105 @@ ion-content.chat-content {
         opacity: 0.5;
     }
 }
+
+/* Emoji Picker */
+.emoji-picker-container {
+    width: 100%;
+    height: 280px;
+    background: #ffffff;
+    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+
+    emoji-mart {
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    // Override emoji-mart internal styles for light theme
+    ::ng-deep {
+        .emoji-mart {
+            background: #ffffff !important;
+            border: none !important;
+            font-family: inherit;
+        }
+
+        .emoji-mart-bar {
+            background: #f8f8f8 !important;
+            border-color: #e8e8e8 !important;
+        }
+
+        .emoji-mart-search input {
+            background: #f0f0f0 !important;
+            color: #333 !important;
+            border-color: #ddd !important;
+            border-radius: 8px;
+        }
+
+        .emoji-mart-category-label span {
+            background: #ffffff !important;
+            color: #666 !important;
+        }
+
+        .emoji-mart-anchor {
+            color: #888 !important;
+        }
+
+        .emoji-mart-anchor-selected,
+        .emoji-mart-anchor:hover {
+            color: var(--ion-color-primary) !important;
+        }
+
+        .emoji-mart-scroll {
+            height: 200px !important;
+        }
+    }
+}
+
+/* Media Content (Images & Videos) */
+.media-content {
+    position: relative;
+    width: 100%;
+    max-width: 280px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.2);
+
+    .message-image {
+        width: 100%;
+        max-height: 300px;
+        object-fit: cover;
+        display: block;
+        border-radius: 12px;
+    }
+
+    .message-video {
+        width: 100%;
+        min-height: 180px;
+        max-height: 300px;
+        object-fit: contain;
+        background: #000;
+        display: block;
+        border-radius: 12px;
+    }
+
+    p {
+        padding: 8px 12px;
+        margin: 0;
+        font-size: 14px;
+    }
+}
+
+/* Revoked / Deleted Message */
+.revoked-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    color: rgba(255, 255, 255, 0.6);
+    font-style: italic;
+    font-size: 14px;
+
+    ion-icon {
+        font-size: 16px;
+    }
+}

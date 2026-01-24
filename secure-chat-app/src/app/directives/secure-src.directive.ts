@@ -24,7 +24,7 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
     private resolvedUrl: string | null = null;
 
     constructor(
-        private el: ElementRef<HTMLImageElement>,
+        private el: ElementRef<HTMLImageElement | HTMLVideoElement>,
         private renderer: Renderer2,
         private mediaService: SecureMediaService
     ) { }
@@ -39,7 +39,11 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
         this.cancel();
 
         // Reset UI immediately (important for DOM reuse)
-        this.setSrc('assets/placeholder_user.png');
+        // Only set placeholder for images, not videos
+        const isVideo = this.el.nativeElement.tagName.toLowerCase() === 'video';
+        if (!isVideo) {
+            this.setSrc('assets/placeholder_user.png');
+        }
         this.setOpacity('0.5');
 
         if (!this.src || typeof this.src !== 'string') {
@@ -59,7 +63,9 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
                 this.setOpacity('1');
             },
             error: () => {
-                this.setSrc('assets/placeholder_broken.png');
+                if (!isVideo) {
+                    this.setSrc('assets/placeholder_broken.png');
+                }
                 this.setOpacity('1');
             }
         });

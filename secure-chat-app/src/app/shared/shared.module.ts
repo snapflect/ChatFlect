@@ -4,11 +4,12 @@ import { IonicModule } from '@ionic/angular';
 import { LongPressDirective } from '../directives/long-press.directive';
 import { SecureSrcDirective } from '../directives/secure-src.directive';
 import { AudioWaveformComponent } from './audio-waveform/audio-waveform.component';
+import { EmojiPickerComponent } from './emoji-picker/emoji-picker.component';
 
 @NgModule({
-    declarations: [LongPressDirective, SecureSrcDirective, AudioWaveformComponent],
+    declarations: [LongPressDirective, SecureSrcDirective, AudioWaveformComponent, EmojiPickerComponent],
     imports: [CommonModule, IonicModule],
-    exports: [LongPressDirective, SecureSrcDirective, AudioWaveformComponent]
+    exports: [LongPressDirective, SecureSrcDirective, AudioWaveformComponent, EmojiPickerComponent]
 })
 export class SharedModule { }
 

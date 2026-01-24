@@ -134,6 +134,18 @@ export class CallService {
                             }
                         }, 60000);
                     }
+                } else if (change.type === 'modified') {
+                    // Handle Remote Termination via Document Update
+                    const data: any = change.doc.data();
+                    if (change.doc.id === this.currentCallId && data.status === 'ended') {
+                        this.logger.log("[Call] Remote call ended via document update");
+                        if (this.callStatus.value === 'incoming') {
+                            this.callEndReason = 'missed'; // Caller cancelled?
+                        } else {
+                            this.callEndReason = 'completed';
+                        }
+                        this.cleanup();
+                    }
                 }
             });
         });
@@ -320,14 +332,24 @@ export class CallService {
             return;
         }
 
+        const callId = this.currentCallId;
+
         // Send 'end' signal to all connected peers
-        if (this.currentCallId) {
+        if (callId) {
             const promises: Promise<void>[] = [];
             this.peers.forEach((_, peerId) => {
                 promises.push(this.sendSignal(peerId, 'end', { reason: 'user_hangup' }));
             });
-            await Promise.all(promises);
-            this.logger.log("[Call] End signals sent to all peers");
+
+            // ALSO update the main Call Document status to 'ended' (Reliable Fallback)
+            const callDocRef = this.firestoreDoc(this.firestoreCollection(this.db, 'calls'), callId);
+            promises.push(this.firestoreUpdateDoc(callDocRef, {
+                status: 'ended',
+                ended_at: Date.now()
+            }));
+
+            await Promise.all(promises).catch(e => this.logger.error("End call signals/update failed", e));
+            this.logger.log("[Call] End signals sent to all peers & Doc updated");
         }
 
         // If I was calling and I ended it, it's a 'cancelled' call (if not yet connected)

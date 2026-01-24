@@ -336,7 +336,8 @@ export class ChatService {
                     let mediaUrl = data['file_url'] || null;
 
                     if (data['isDeleted']) {
-                        decrypted = "🚫 Message deleted";
+                        // Return object so UI can distinguish type 'revoked'
+                        decrypted = { type: 'revoked' };
                     } else if (data['type'] === 'system_signal') {
                         msgsRaw.push({ id: d.id, ...data });
                         continue;
@@ -660,14 +661,29 @@ export class ChatService {
         const msgRef = this.fsDoc('chats', chatId, 'messages', messageId);
 
         if (forEveryone) {
-            // Delete content globally
+            // Delete content globally - mark as revoked
             await this.fsUpdateDoc(msgRef, {
-                isDeleted: true,
+                type: 'revoked',
                 content: '',
                 content_self: '',
-                deletedBy: myId
+                caption: '',
+                deletedBy: myId,
+                isDeleted: true,
+                // Securely wipe all data fields so it can never be recovered/displayed
+                ciphertext: '',
+                keys: {},
+                iv: '',
+                file_url: '',
+                url: '',
+                thumb: '',
+                lat: null,
+                lng: null,
+                mime: '',
+                name: '',
+                size: 0,
+                contact_name: '',
+                contact_number: ''
             });
-            // Optional: Trigger push to update UI? Not strictly needed for silent update.
         } else {
             // Delete for Me Only
             await this.fsUpdateDoc(msgRef, {

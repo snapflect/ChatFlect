@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, ViewChild, ElementRef, ChangeDetectorRef, ViewEncapsulation } from '@angular/core';
+import { Component, OnInit, OnDestroy, ViewChild, ElementRef, ChangeDetectorRef, ViewEncapsulation, NgZone } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { ChatService } from 'src/app/services/chat.service';
 import { AuthService } from 'src/app/services/auth.service';
@@ -11,6 +11,8 @@ import { ImagePreviewModalPage } from '../image-preview-modal/image-preview-moda
 import { RecordingService } from 'src/app/services/recording.service';
 import { Geolocation } from '@capacitor/geolocation';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Keyboard } from '@capacitor/keyboard';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { CallService } from 'src/app/services/call.service';
 import { ForwardModalPage } from '../forward-modal/forward-modal.page';
 import { PopoverController } from '@ionic/angular';
@@ -82,7 +84,8 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     private presence: PresenceService,
     private locationService: LocationService,
     private soundService: SoundService,
-    private secureMedia: SecureMediaService
+    private secureMedia: SecureMediaService,
+    private zone: NgZone
   ) {
     this.auth.currentUserId.subscribe(id => this.currentUserId = String(id));
   }
@@ -446,21 +449,91 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     this.exitSelectionMode();
   }
 
+  // TrackBy function for efficient DOM updates
+  trackByMsgId(index: number, item: any): string {
+    return item.id;
+  }
+
   async deleteSelectedMessages() {
+    const ids = Array.from(this.selectedMessages);
+    if (ids.length === 0) return;
+
+    // Get message objects to check ownership and time
+    const messagesToDelete = this.messages.filter(m => ids.includes(m.id));
+
+    // Check if ALL selected messages are mine (for "Delete for Everyone" option)
+    const allMine = messagesToDelete.every(m => this.isMyMsg(m));
+
+    // Check if ALL selected messages are within 24h limit (for "Delete for Everyone")
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const withinTimeLimit = messagesToDelete.every(m => {
+      // Use timestamp (seconds) or createdAt (Date object/string) depending on your data model
+      const msgTime = m.timestamp ? (m.timestamp.seconds ? m.timestamp.seconds * 1000 : m.timestamp) : 0;
+      return (now - msgTime) < oneDayMs;
+    });
+
+    const buttons: any[] = [
+      { text: 'Cancel', role: 'cancel' }
+    ];
+
+    // "Delete for Everyone" option: Only if ALL are mine and within time limit
+    if (allMine && withinTimeLimit) {
+      buttons.push({
+        text: 'Delete for Everyone',
+        role: 'destructive',
+        handler: () => {
+          this.zone.run(async () => {
+            this.exitSelectionMode(); // Exit first to clear selection UI
+
+            for (const id of ids) {
+              // Optimistic update
+              const msg = this.messages.find(m => m.id === id);
+              if (msg) {
+                msg.type = 'revoked';
+                msg.text = { type: 'revoked' };
+              }
+              // Also update in filteredMessages
+              const fMsg = this.filteredMessages.find(m => m.id === id);
+              if (fMsg) {
+                fMsg.type = 'revoked';
+                fMsg.text = { type: 'revoked' };
+              }
+            }
+            // Force *ngFor re-render by destructively updating array reference
+            this.filteredMessages = [...this.filteredMessages];
+            this.cdr.detectChanges();
+
+            for (const id of ids) {
+              await this.chatService.deleteMessage(this.chatId!, id, true);
+            }
+          });
+        }
+      });
+    }
+
+    // "Delete for Me" option: Always available
+    buttons.push({
+      text: 'Delete for Me',
+      role: 'destructive',
+      handler: () => {
+        this.zone.run(async () => {
+          this.exitSelectionMode();
+
+          this.messages = this.messages.filter(m => !ids.includes(m.id));
+          this.filteredMessages = this.filteredMessages.filter(m => !ids.includes(m.id));
+          this.cdr.detectChanges();
+
+          for (const id of ids) {
+            await this.chatService.deleteMessage(this.chatId!, id, false);
+          }
+        });
+      }
+    });
+
     const alert = await this.alertCtrl.create({
       header: `Delete ${this.selectedMessages.size} messages?`,
-      buttons: [
-        { text: 'Cancel', role: 'cancel' },
-        {
-          text: 'Delete for me',
-          role: 'destructive',
-          handler: () => {
-            const ids = Array.from(this.selectedMessages);
-            ids.forEach(id => this.chatService.deleteMessage(this.chatId!, id, false));
-            this.exitSelectionMode();
-          }
-        }
-      ]
+      buttons: buttons
     });
     await alert.present();
   }
@@ -720,19 +793,124 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
   // ... (Live Location methods moved to line ~1067)
 
-  showStickerPicker = false;
+  showEmojiPicker = false;
 
-  toggleStickerPicker() {
-    this.showStickerPicker = !this.showStickerPicker;
-    if (this.showStickerPicker) {
+  toggleEmojiPicker() {
+    const wasOpen = this.showEmojiPicker;
+    this.showEmojiPicker = !this.showEmojiPicker;
+
+    if (this.showEmojiPicker) {
+      // Opening emoji picker -> Hide keyboard
+      Keyboard.hide().catch(() => { });
       setTimeout(() => this.content.scrollToBottom(300), 100);
+    } else if (wasOpen) {
+      // Closing emoji picker -> Focus textarea to show keyboard
+      setTimeout(() => {
+        const textarea = document.querySelector('.chat-input') as HTMLTextAreaElement;
+        if (textarea) {
+          textarea.focus();
+        }
+      }, 100);
     }
+  }
+
+  onInputFocus() {
+    // Close emoji picker when keyboard opens
+    if (this.showEmojiPicker) {
+      this.showEmojiPicker = false;
+    }
+  }
+
+  addEmoji(event: any) {
+    if (!this.newMessage) this.newMessage = '';
+    this.newMessage += event.emoji.native;
+
+    // Resume typing tracking
+    this.onTyping();
+  }
+
+  addEmojiDirect(emoji: string) {
+    if (!this.newMessage) this.newMessage = '';
+    this.newMessage += emoji;
+    this.onTyping();
+  }
+
+  async captureMedia() {
+    try {
+      // Show action sheet to choose photo or video
+      const actionSheet = await this.actionSheetCtrl.create({
+        header: 'Capture Media',
+        buttons: [
+          {
+            text: 'Take Photo',
+            icon: 'camera',
+            handler: () => { this.takePhoto(); }
+          },
+          {
+            text: 'Record Video',
+            icon: 'videocam',
+            handler: () => { this.recordVideo(); }
+          },
+          {
+            text: 'Cancel',
+            icon: 'close',
+            role: 'cancel'
+          }
+        ]
+      });
+      await actionSheet.present();
+    } catch (e) {
+      this.logger.error('Capture media failed', e);
+    }
+  }
+
+  private async takePhoto() {
+    try {
+      const image = await Camera.getPhoto({
+        quality: 80,
+        allowEditing: false,
+        resultType: CameraResultType.Uri,
+        source: CameraSource.Camera
+      });
+
+      if (image.webPath && this.chatId) {
+        // Fetch the image blob
+        const response = await fetch(image.webPath);
+        const blob = await response.blob();
+        const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
+
+        // Compress and send
+        const compressed = await this.compressImage(file);
+        await this.chatService.sendImageMessage(this.chatId, compressed, this.currentUserId, '');
+        this.scrollToBottom();
+      }
+    } catch (e) {
+      this.logger.error('Take photo failed', e);
+    }
+  }
+
+  private async recordVideo() {
+    // Note: Capacitor Camera doesn't support video directly
+    // Fallback to file input for video
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*';
+    input.capture = 'environment';
+    input.onchange = async (e: any) => {
+      const file = e.target.files[0];
+      if (file && this.chatId) {
+        // sendVideoMessage args: chatId, videoBlob, senderId, duration, thumbnailBlob, caption
+        await this.chatService.sendVideoMessage(this.chatId, file, this.currentUserId, 0, null, '');
+        this.scrollToBottom();
+      }
+    };
+    input.click();
   }
 
   sendSticker(url: string) {
     if (!this.chatId) return;
     this.chatService.sendStickerMessage(this.chatId, url, this.currentUserId);
-    this.showStickerPicker = false;
+    this.showEmojiPicker = false;
   }
 
   isSticker(msg: any): boolean {
@@ -741,6 +919,59 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
   getStickerUrl(msg: any): string {
     return msg.url;
+  }
+
+  async openDocument(docData: any) {
+    try {
+      // 1. Decrypt and get blob URL via SecureMediaService
+      const blobUrl = await this.secureMedia.getMedia(
+        docData.url,
+        docData.k,
+        docData.i
+      ).toPromise();
+
+      if (!blobUrl) {
+        this.showToast('Failed to load document');
+        return;
+      }
+
+      // 2. Fetch the blob
+      const response = await fetch(blobUrl);
+      const blob = await response.blob();
+
+      // 3. Convert to base64 for Filesystem
+      const reader = new FileReader();
+      const base64Data = await new Promise<string>((resolve) => {
+        reader.onloadend = () => {
+          const base64 = (reader.result as string).split(',')[1];
+          resolve(base64);
+        };
+        reader.readAsDataURL(blob);
+      });
+
+      // 4. Save to device
+      const fileName = docData.name || 'document_' + Date.now();
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: base64Data,
+        directory: Directory.Cache
+      });
+
+      // 5. Get the file URI and share/open it
+      const fileUri = savedFile.uri;
+
+      // Use Share plugin to open with system viewer
+      const { Share } = await import('@capacitor/share');
+      await Share.share({
+        title: docData.name || 'Document',
+        url: fileUri,
+        dialogTitle: 'Open document with...'
+      });
+
+    } catch (e) {
+      this.logger.error('Open document failed', e);
+      this.showToast('Failed to open document');
+    }
   }
 
   // --- Voice Recording ---
@@ -881,54 +1112,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     // CORRECT FIX: Update HTML to use `isMyMsg(msg)`.
   }
 
-  async openDocument(docData: any) {
-    if (!docData.url) {
-      this.showToast('Document URL not available');
-      return;
-    }
-
-    this.showToast('Downloading document...');
-
-    // Use SecureMediaService to decrypt the document
-    this.secureMedia.getMedia(docData.url, docData.k, docData.i).subscribe(
-      async (blobUrl: string) => {
-        try {
-          // Fetch the blob from the object URL
-          const response = await fetch(blobUrl);
-          const blob = await response.blob();
-
-          // Convert blob to base64 for Filesystem
-          const reader = new FileReader();
-          reader.onloadend = async () => {
-            try {
-              const base64Data = (reader.result as string).split(',')[1];
-              const fileName = docData.name || `document_${Date.now()}`;
-
-              // Write to Downloads directory using Capacitor Filesystem
-              await Filesystem.writeFile({
-                path: fileName,
-                data: base64Data,
-                directory: Directory.Documents
-              });
-
-              this.showToast(`Saved: ${fileName}`);
-            } catch (writeErr) {
-              this.logger.error('File write failed', writeErr);
-              this.showToast('Failed to save document');
-            }
-          };
-          reader.readAsDataURL(blob);
-        } catch (e) {
-          this.logger.error('Document download failed', e);
-          this.showToast('Failed to download document');
-        }
-      },
-      (error) => {
-        this.logger.error('Document decryption failed', error);
-        this.showToast('Failed to decrypt document');
-      }
-    );
-  }
+  // openDocument moved to line ~853
 
   // retryDecrypt removed - directives handle retries now
 

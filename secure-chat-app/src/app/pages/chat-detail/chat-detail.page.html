@@ -68,7 +68,7 @@
 <ion-content [fullscreen]="true" class="chat-content" (ionScroll)="onScroll($event)">
   <ion-list lines="none" class="bg-transparent" style="padding-top: 10px; padding-bottom: 20px;">
 
-    <div *ngFor="let msg of filteredMessages; let i = index" class="message-wrapper"
+    <div *ngFor="let msg of filteredMessages; let i = index; trackBy: trackByMsgId" class="message-wrapper"
       [class.selected-row]="isSelected(msg.id)">
 
       <!-- Date Separator -->
@@ -137,6 +137,12 @@
               <div class="document-size">{{ formatFileSize(msg.text.size) }}</div>
             </div>
             <ion-icon name="download-outline" class="download-icon"></ion-icon>
+          </div>
+
+          <!-- REVOKED / DELETED MESSAGE -->
+          <div *ngIf="getMsgType(msg.text) === 'revoked'" class="revoked-content">
+            <ion-icon name="ban" slot="start"></ion-icon>
+            <span>{{ isMe ? 'You deleted this message' : 'This message was deleted' }}</span>
           </div>
 
           <!-- CONTACT -->
@@ -226,17 +232,19 @@
   </div>
 
   <div class="chat-footer">
-    <ion-button fill="clear" class="action-btn" (click)="toggleStickerPicker()">
-      <ion-icon name="happy-outline" slot="icon-only"></ion-icon>
+    <ion-button fill="clear" class="action-btn emoji-toggle-btn" (click)="toggleEmojiPicker()">
+      <ion-icon [name]="showEmojiPicker ? 'keyboard-outline' : 'happy-outline'" slot="icon-only"
+        color="medium"></ion-icon>
     </ion-button>
 
     <div class="input-container">
       <textarea rows="1" placeholder="Message" [(ngModel)]="newMessage" (ngModelChange)="onTyping()"
-        class="chat-input"></textarea>
+        (focus)="onInputFocus()" class="chat-input"></textarea>
       <ion-button fill="clear" class="action-btn" (click)="presentAttachmentMenu()">
         <ion-icon name="attach" slot="icon-only" style="transform: rotate(45deg);"></ion-icon>
       </ion-button>
-      <ion-button *ngIf="!newMessage" fill="clear" class="action-btn" style="margin-left: -5px;">
+      <ion-button *ngIf="!newMessage" fill="clear" class="action-btn" style="margin-left: -5px;"
+        (click)="captureMedia()">
         <ion-icon name="camera" slot="icon-only"></ion-icon>
       </ion-button>
     </div>
@@ -263,5 +271,10 @@
     <div class="send-btn" *ngIf="newMessage" (click)="sendMessage()">
       <ion-icon name="send"></ion-icon>
     </div>
+  </div>
+
+  <!-- Emoji Picker -->
+  <div *ngIf="showEmojiPicker" class="emoji-picker-container">
+    <app-emoji-picker (emojiSelect)="addEmojiDirect($event)"></app-emoji-picker>
   </div>
 </ion-footer>
