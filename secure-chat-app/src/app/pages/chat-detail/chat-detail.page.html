@@ -102,7 +102,7 @@
 
           <!-- IMAGE -->
           <div *ngIf="isMedia(msg.text) && (msg.text.type === 'image' || !msg.text.type)" class="media-content">
-            <img [secureSrc]="msg.text.url" [pymKey]="isMe ? (msg.text.ks || msg.text.k) : msg.text.k"
+            <img [secureSrc]="msg.text.url" [pymKey]="isMyMsg(msg) ? (msg.text.ks || msg.text.k) : msg.text.k"
               [pymIv]="msg.text.i" class="message-image" (click)="openImage(msg.text)"
               (error)="$event.target.src = 'assets/placeholder_broken.png'" />
             <p *ngIf="msg.text.caption">{{ msg.text.caption }}</p>
@@ -111,7 +111,7 @@
           <!-- VIDEO -->
           <div *ngIf="getMsgType(msg.text) === 'video'" class="media-content">
             <!-- Video Thumb or Player. SecureSrc sets src. -->
-            <video [secureSrc]="msg.text.url" [pymKey]="isMe ? (msg.text.ks || msg.text.k) : msg.text.k"
+            <video [secureSrc]="msg.text.url" [pymKey]="isMyMsg(msg) ? (msg.text.ks || msg.text.k) : msg.text.k"
               [pymIv]="msg.text.i" controls class="message-video"></video>
             <p *ngIf="msg.text.caption">{{ msg.text.caption }}</p>
           </div>
@@ -142,7 +142,7 @@
           <!-- REVOKED / DELETED MESSAGE -->
           <div *ngIf="getMsgType(msg.text) === 'revoked'" class="revoked-content">
             <ion-icon name="ban" slot="start"></ion-icon>
-            <span>{{ isMe ? 'You deleted this message' : 'This message was deleted' }}</span>
+            <span>{{ isMyMsg(msg) ? 'You deleted this message' : 'This message was deleted' }}</span>
           </div>
 
           <!-- CONTACT -->

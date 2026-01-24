@@ -33,6 +33,11 @@ export class GroupCallPage implements OnInit, OnDestroy {
 
   speakerEnabled = false; // Default false (earpiece) for audio, true for video
 
+  // Active Speaker & Grid State
+  audioLevels: Map<string, number> = new Map();
+  activeSpeakerId: string | null = null;
+  private audioMonitorInterval: any;
+
   ngOnInit() {
     this.updateCallerInfo();
 
@@ -41,12 +46,15 @@ export class GroupCallPage implements OnInit, OnDestroy {
     // Attempt to set it in service (might fail if no devices ready yet, but good to try)
     this.callService.toggleSpeaker(this.speakerEnabled);
 
+    this.startAudioMonitor(); // Start monitoring audio levels
+
     this.subs.push(
       this.callService.localStream.subscribe(s => this.localStream = s),
       this.callService.remoteStreams.subscribe(map => this.remoteStreams = map),
       this.callService.callStatus.subscribe(async (status) => {
         if (status === 'idle') {
           this.stopTimer();
+          this.stopAudioMonitor();
           this.nav.back();
         } else if (status === 'connected') {
           this.startTimer();
@@ -57,6 +65,56 @@ export class GroupCallPage implements OnInit, OnDestroy {
         }
       })
     );
+  }
+
+  // Poll audio levels for active speaker highlighting
+  private startAudioMonitor() {
+    this.audioMonitorInterval = setInterval(async () => {
+      this.callService.remoteStreams.value.forEach(async (stream, peerId) => {
+        // Mock level or get from WebRTC Stats if exposed
+        // Since getting stats is async and heavy, we might simulating or using a lightweight Web Audio API analyzer if stream available
+        // For now, let's assume we maintain a visual "talking" state based on simple AudioContext analysis if possible
+        // Implementation of WebAudio analysis:
+        const level = await this.getStreamVolume(stream);
+        this.audioLevels.set(peerId, level);
+      });
+
+      // Determine max
+      let maxVol = 0;
+      let maxId = null;
+      this.audioLevels.forEach((vol, id) => {
+        if (vol > 0.1 && vol > maxVol) {
+          maxVol = vol;
+          maxId = id;
+        }
+      });
+      this.activeSpeakerId = maxId;
+    }, 500);
+  }
+
+  private stopAudioMonitor() {
+    if (this.audioMonitorInterval) clearInterval(this.audioMonitorInterval);
+  }
+
+  // Simple Web Audio API volume meter
+  private async getStreamVolume(stream: MediaStream): Promise<number> {
+    try {
+      if (!stream.getAudioTracks().length) return 0;
+      const audioContext = new AudioContext(); // Re-use this in production!
+      const mediaStreamSource = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 32;
+      mediaStreamSource.connect(analyser);
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(dataArray);
+
+      let sum = 0;
+      for (const a of dataArray) sum += a;
+      await audioContext.close(); // Clean up!
+      return sum / dataArray.length / 255; // Normalize 0-1
+    } catch (e) {
+      return 0;
+    }
   }
 
   async showToast(msg: string) {

@@ -118,7 +118,7 @@ export class SecureMediaService implements OnDestroy {
             const rawKeyBase64 = keyEncBase64.substring(4);
             const rawKey = this.crypto.base64ToArrayBuffer(rawKeyBase64);
 
-            const aesKey = await crypto.subtle.importKey(
+            const aesKey = await window.crypto.subtle.importKey(
                 'raw',
                 rawKey,
                 { name: 'AES-GCM' },
@@ -135,7 +135,7 @@ export class SecureMediaService implements OnDestroy {
 
         const privKey = await this.crypto.importKey(priv, 'private');
 
-        const keyBuf = await crypto.subtle.decrypt(
+        const keyBuf = await window.crypto.subtle.decrypt(
             { name: 'RSA-OAEP' },
             privKey,
             this.crypto.base64ToArrayBuffer(keyEncBase64)
@@ -143,7 +143,7 @@ export class SecureMediaService implements OnDestroy {
 
         const rawKey = this.crypto.base64ToArrayBuffer(new TextDecoder().decode(keyBuf));
 
-        const aesKey = await crypto.subtle.importKey(
+        const aesKey = await window.crypto.subtle.importKey(
             'raw',
             rawKey,
             { name: 'AES-GCM' },

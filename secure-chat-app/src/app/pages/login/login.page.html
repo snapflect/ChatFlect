@@ -40,11 +40,23 @@
             <ion-input type="text" [(ngModel)]="otp" placeholder="Enter OTP"></ion-input>
           </ion-item>
 
-          <p class="ion-text-center hint-text">Mock OTP: 123456</p>
-
           <ion-button expand="block" shape="round" class="vibrant-btn" (click)="verifyOtp()" [disabled]="!otp">
             Verify & Login
           </ion-button>
+
+          <!-- Resend OTP Section -->
+          <div class="resend-section ion-text-center ion-margin-top">
+            <ion-button fill="clear" size="small" (click)="resendOtp()"
+              [disabled]="resendCooldown > 0 || resendAttempts >= maxResendAttempts">
+              <ion-icon name="refresh-outline" slot="start"></ion-icon>
+              <span *ngIf="resendCooldown > 0">Resend in {{ resendCooldown }}s</span>
+              <span *ngIf="resendCooldown === 0 && resendAttempts < maxResendAttempts">Resend OTP</span>
+              <span *ngIf="resendAttempts >= maxResendAttempts">Max attempts reached</span>
+            </ion-button>
+            <p class="hint-text small" *ngIf="resendAttempts > 0 && resendAttempts < maxResendAttempts">
+              {{ maxResendAttempts - resendAttempts }} resend(s) remaining
+            </p>
+          </div>
         </div>
       </div>
 

@@ -22,6 +22,12 @@ export class LoginPage implements OnDestroy {
   otpSent = false;
   qrLoading = false;
 
+  // Resend OTP properties
+  resendCooldown = 0;
+  resendAttempts = 0;
+  maxResendAttempts = 3;
+  private cooldownInterval: any = null;
+
   private syncSub: any;
 
   constructor(
@@ -35,6 +41,7 @@ export class LoginPage implements OnDestroy {
 
   ngOnDestroy() {
     if (this.syncSub) this.syncSub.unsubscribe();
+    if (this.cooldownInterval) clearInterval(this.cooldownInterval);
   }
 
   segmentChanged(ev: any) {
@@ -112,6 +119,7 @@ export class LoginPage implements OnDestroy {
       next: (res: any) => {
         this.otpSent = true;
         this.showToast('OTP Sent to Email!');
+        this.startCooldown();
       },
       error: (err) => {
         this.logger.error("Login Error", err);
@@ -124,6 +132,50 @@ export class LoginPage implements OnDestroy {
         this.showToast(msg);
       }
     });
+  }
+
+  async resendOtp() {
+    if (this.resendCooldown > 0) {
+      this.showToast(`Please wait ${this.resendCooldown} seconds`);
+      return;
+    }
+
+    if (this.resendAttempts >= this.maxResendAttempts) {
+      this.showToast('Maximum resend attempts reached. Please try again later.');
+      return;
+    }
+
+    this.resendAttempts++;
+
+    this.auth.requestOtp(this.phoneNumber, this.email).subscribe({
+      next: (res: any) => {
+        this.showToast(`OTP Resent! (Attempt ${this.resendAttempts}/${this.maxResendAttempts})`);
+        this.startCooldown();
+      },
+      error: (err) => {
+        this.logger.error("Resend OTP Error", err);
+        let msg = 'Error resending OTP';
+        if (err && err.error && err.error.error) {
+          msg = err.error.error;
+        } else if (err && err.status === 429) {
+          msg = 'Too many requests. Please wait a few minutes.';
+        }
+        this.showToast(msg);
+      }
+    });
+  }
+
+  private startCooldown() {
+    this.resendCooldown = 60;
+    if (this.cooldownInterval) clearInterval(this.cooldownInterval);
+
+    this.cooldownInterval = setInterval(() => {
+      this.resendCooldown--;
+      if (this.resendCooldown <= 0) {
+        clearInterval(this.cooldownInterval);
+        this.cooldownInterval = null;
+      }
+    }, 1000);
   }
 
   async verifyOtp() {

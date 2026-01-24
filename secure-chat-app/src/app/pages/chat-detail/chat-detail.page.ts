@@ -173,24 +173,11 @@ export class ChatDetailPage implements OnInit, OnDestroy {
         this.filterMessages(); // Update view
         if (!this.isSearchActive) this.scrollToBottom(); // Only scroll if not searching history
 
-        this.messages.forEach(async msg => {
-          // ... (Decryption Logic Same as before)
-          if (this.getMsgType(msg.text) === 'text') {
-            const url = this.extractUrl(msg.text);
-            if (url) {
-              msg.linkMeta = {
-                url: url,
-                domain: new URL(url).hostname,
-                title: url,
-                image: 'https://www.google.com/s2/favicons?domain=' + new URL(url).hostname
-              };
-            }
-          }
+        // Logic moved to ChatService to prevent UI thread blocking
+        // this.messages.forEach(async msg => { ... });
 
-          // Manual Media Decryption Block Removed - Handled by SecureSrcDirective
-        });
-
-        this.chatService.markAsRead(this.chatId!);
+        // Temporarily disabled to rule out infinite loop crash
+        // this.chatService.markAsRead(this.chatId!);
       });
     }
   }
@@ -1428,6 +1415,10 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     return '';
   }
 
+  trackByMsgId(index: number, item: any) {
+    return item.id;
+  }
+
   // --- Audio Logic ---
   currentAudio: HTMLAudioElement | null = null;
   currentPlayingMsg: any = null;
@@ -1534,16 +1525,26 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   filterMessages() {
-    if (!this.searchTerm || this.searchTerm.trim() === '') {
-      this.filteredMessages = [...this.messages];
-    } else {
-      this.filteredMessages = this.messages.filter(msg => {
+    let filtered = this.messages.filter(msg => {
+      // 1. Filter out "Delete for Me"
+      if (msg.deletedFor && msg.deletedFor.includes(this.currentUserId)) {
+        return false;
+      }
+      return true;
+    });
+
+    // 2. Search Filter
+    if (this.searchTerm && this.searchTerm.trim() !== '') {
+      filtered = filtered.filter(msg => {
         if (this.getMsgType(msg.text) === 'text') {
-          return msg.text.toLowerCase().includes(this.searchTerm.toLowerCase());
+          const content = typeof msg.text === 'string' ? msg.text : '';
+          return content.toLowerCase().includes(this.searchTerm.toLowerCase());
         }
-        return false; // Skip media for text search
+        return false;
       });
     }
+
+    this.filteredMessages = filtered;
   }
 
   // --- Date Separator Logic (WhatsApp Parity) ---

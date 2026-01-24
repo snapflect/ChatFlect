@@ -80,9 +80,12 @@
   </div>
 
   <!-- CONNECTED: AUDIO MODE -->
+  <!-- CONNECTED: AUDIO MODE -->
   <div *ngIf="(callService.callStatus | async) === 'connected' && callService.activeCallType === 'audio'"
-    class="audio-connected">
-    <div class="ion-text-center">
+    class="audio-connected" [class.grid-mode]="remoteStreams.size > 1">
+
+    <!-- 1:1 Call View (Single Peer) -->
+    <div class="ion-text-center" *ngIf="remoteStreams.size <= 1">
       <div class="avatar-ripple animate-pulse">
         <ion-avatar class="large-avatar">
           <img [secureSrc]="callerPhoto" />
@@ -93,9 +96,30 @@
       <p class="status-subtitle">Audio Call Encrypted</p>
     </div>
 
-    <!-- Hidden Audio Playback for Audio Mode -->
-    <div *ngFor="let peer of asArray(remoteStreams); trackBy: trackByPeerId" style="display: none">
-      <audio [srcObject]="peer[1]" autoplay playsinline controls="false"></audio>
+    <!-- Group Call Grid View (> 1 Peer) -->
+    <div class="participants-grid" *ngIf="remoteStreams.size > 1" [class.large-group]="remoteStreams.size > 8">
+      <!-- Me -->
+      <div class="participant-tile" [class.talking]="micEnabled">
+        <ion-avatar><img src="assets/user.png" /></ion-avatar>
+        <span>Me</span>
+      </div>
+      <!-- Remotes -->
+      <div class="participant-tile" *ngFor="let peer of asArray(remoteStreams); trackBy: trackByPeerId"
+        [class.talking]="activeSpeakerId === peer[0]">
+        <ion-avatar><img [src]="'assets/user.png'" /></ion-avatar>
+        <!-- In real app, we need a pipe to fetch name by ID or pre-fetch participant info -->
+        <span>Peer {{peer[0].slice(-4)}}</span>
+
+        <!-- Hidden Audio Element -->
+        <audio [srcObject]="peer[1]" autoplay playsinline></audio>
+      </div>
+    </div>
+
+    <!-- Hidden Audio Playback for 1:1 (Grid has its own inside loop) -->
+    <div *ngIf="remoteStreams.size <= 1">
+      <div *ngFor="let peer of asArray(remoteStreams); trackBy: trackByPeerId" style="display: none">
+        <audio [srcObject]="peer[1]" autoplay playsinline controls="false"></audio>
+      </div>
     </div>
   </div>
 

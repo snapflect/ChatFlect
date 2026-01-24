@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, NgZone } from '@angular/core';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion, arrayRemove, collectionGroup, getDocs, deleteDoc } from 'firebase/firestore';
 import { environment } from 'src/environments/environment';
@@ -19,13 +19,16 @@ export class ChatService {
     // Event emitter for new incoming messages (for sound notifications)
     public newMessage$ = new Subject<{ chatId: string; senderId: string; timestamp: number }>();
     private lastKnownTimestamps: Map<string, number> = new Map();
+    private publicKeyCache = new Map<string, string>();
+    private decryptedCache = new Map<string, any>();
 
     constructor(
         private crypto: CryptoService,
         private api: ApiService,
         private toast: ToastController,
         private logger: LoggingService,
-        private auth: AuthService
+        private auth: AuthService,
+        private zone: NgZone
     ) {
         this.initFirestore();
     }
@@ -152,9 +155,17 @@ export class ChatService {
                 if (pid === String(senderId).trim()) continue;
 
                 try {
-                    const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
-                    if (res && res.public_key) {
-                        keysMap[pid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, res.public_key);
+                    let pKey: string | undefined = this.publicKeyCache.get(pid);
+                    if (!pKey) {
+                        const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
+                        if (res && res.public_key) {
+                            pKey = String(res.public_key);
+                            this.publicKeyCache.set(pid, pKey);
+                        }
+                    }
+
+                    if (pKey) {
+                        keysMap[pid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, pKey);
                     }
                 } catch (e) {
                     this.logger.error(`Failed to fetch key for ${pid}`, e);
@@ -322,27 +333,30 @@ export class ChatService {
         return new Observable(observer => {
             let messages: any[] = [];
 
-            const unsubMsg = this.fsOnSnapshot(q, async (snapshot: any) => {
-                const msgsRaw = [];
+            const unsubMsg = this.fsOnSnapshot(q, (snapshot: any) => {
                 const privateKeyStr = localStorage.getItem('private_key');
                 const myId = String(localStorage.getItem('user_id')).trim();
 
-                for (const d of snapshot.docs) {
+                const promises = snapshot.docs.map(async (d: any) => {
                     const data = d.data();
-                    if (data['deletedFor'] && data['deletedFor'].includes(myId)) continue;
+                    const msgId = d.id;
+
+                    if (this.decryptedCache.has(msgId)) {
+                        return this.decryptedCache.get(msgId);
+                    }
+
+                    if (data['deletedFor'] && data['deletedFor'].includes(myId)) return null;
 
                     const senderId = String(data['senderId']).trim();
                     let decrypted: any = "🔒 Decrypting...";
-                    let mediaUrl = data['file_url'] || null;
 
                     if (data['isDeleted']) {
-                        // Return object so UI can distinguish type 'revoked'
                         decrypted = { type: 'revoked' };
                     } else if (data['type'] === 'system_signal') {
-                        msgsRaw.push({ id: d.id, ...data });
-                        continue;
+                        const sysMsg = { id: msgId, ...data };
+                        this.decryptedCache.set(msgId, sysMsg);
+                        return sysMsg;
                     } else if (data['type'] === 'live_location') {
-                        // Live location is NOT encrypted - pass through directly
                         decrypted = {
                             type: 'live_location',
                             lat: data['lat'],
@@ -350,68 +364,42 @@ export class ChatService {
                             expiresAt: data['expiresAt']
                         };
                     } else if (privateKeyStr) {
-                        // --- Decryption Logic ---
                         try {
-                            // Check for New Format (keys map)
                             if (data['keys'] && data['keys'][myId]) {
-                                // 1. Decrypt AES Key
                                 const encKey = data['keys'][myId];
                                 const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
 
-                                // 2. Decrypt Content (Text or Media)
                                 if (data['type'] === 'text') {
                                     decrypted = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
                                 } else if (data['type'] === 'contact' || data['type'] === 'location') {
-                                    // Decrypt Payload -> JSON Object
                                     const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
                                     try {
                                         decrypted = JSON.parse(jsonStr);
-                                        decrypted.type = data['type']; // Preserve type for UI rendering
-                                    } catch (e) {
-                                        decrypted = jsonStr; // Fallback
-                                    }
+                                        decrypted.type = data['type'];
+                                    } catch (e) { decrypted = jsonStr; }
                                 } else {
-                                    // Media: We have the Session Key. We can decrypt the BLOB later.
-                                    // The 'ciphertext' field is empty caption.
-                                    // We pass the RAW KEY (exported) to the UI? 
-                                    // Or the UI calls a service method to decrypt the blob?
-                                    // For now, allow viewing.
                                     const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
-                                    // Convert ArrayBuffer to Base64 String for SecureSrcDirective
-                                    // Prefix with "RAW:" so SecureMediaService knows to skip RSA decryption
                                     const rawKeyBase64 = "RAW:" + this.crypto.arrayBufferToBase64(rawKey);
-
-                                    // Construct Media Object for UI (using msg.text which maps to this)
                                     decrypted = {
                                         type: data['type'],
-                                        url: data['file_url'] || data['url'], // Support both field names
+                                        url: data['file_url'] || data['url'],
                                         k: rawKeyBase64,
                                         i: data['iv'],
                                         caption: data['caption'] || '',
                                         mime: data['mime'] || '',
                                         d: data['d'] || 0,
                                         thumb: data['thumb'] || '',
-                                        name: data['name'] || '',  // Document name
-                                        size: data['size'] || 0    // Document size
+                                        name: data['name'] || '',
+                                        size: data['size'] || 0
                                     };
                                 }
                             } else {
-                                // Legacy Format Support (content map)
                                 const isMe = senderId === myId;
                                 let cipherText = '';
-                                if (isMe) {
-                                    cipherText = data['content_self'];
-                                } else if (data['content'] && data['content'][myId]) {
-                                    cipherText = data['content'][myId];
-                                }
+                                if (isMe) cipherText = data['content_self'];
+                                else if (data['content'] && data['content'][myId]) cipherText = data['content'][myId];
 
-                                if (cipherText) {
-                                    // Legacy Hybrid Decrypt
-                                    // We can't easily support this if we removed the old crypto method.
-                                    // But let's assume old messages are lost or we add back `decryptMessage` alias in CryptoService if needed.
-                                    // For now, show "Legacy Message".
-                                    decrypted = "🔒 Legacy Message";
-                                }
+                                if (cipherText) decrypted = "🔒 Legacy Message";
                             }
                         } catch (e) {
                             console.error("Decrypt Fail", e);
@@ -419,9 +407,31 @@ export class ChatService {
                         }
                     }
 
-                    msgsRaw.push({ id: d.id, ...data, text: decrypted });
-                }
-                observer.next(msgsRaw);
+                    if (typeof decrypted === 'string') {
+                        const match = decrypted.match(/https?:\/\/[^\s]+/);
+                        if (match) {
+                            (data as any)['linkMeta'] = {
+                                url: match[0],
+                                domain: new URL(match[0]).hostname,
+                                title: match[0],
+                                image: 'https://www.google.com/s2/favicons?domain=' + new URL(match[0]).hostname
+                            };
+                        }
+                    }
+
+                    const finalMsg = { id: msgId, ...data, text: decrypted };
+                    this.decryptedCache.set(msgId, finalMsg);
+                    return finalMsg;
+                });
+
+                Promise.all(promises).then(msgs => {
+                    const validMsgs = msgs.filter(m => m !== null);
+                    this.zone.run(() => {
+                        observer.next(validMsgs);
+                    });
+                }).catch(err => {
+                    console.error("Critical msg processing error", err);
+                });
             });
             return () => unsubMsg();
         });

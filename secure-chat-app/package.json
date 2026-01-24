@@ -42,6 +42,7 @@
     "@types/leaflet": "^1.9.21",
     "capacitor-native-biometric": "^4.2.2",
     "capacitor-plugin-audio-toggle": "^1.0.29",
+    "capacitor-plugin-callkit-voip": "^1.0.4",
     "capacitor-voice-recorder": "^7.0.6",
     "fabric": "^7.1.0",
     "firebase": "^12.7.0",

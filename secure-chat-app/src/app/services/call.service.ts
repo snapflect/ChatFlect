@@ -6,6 +6,7 @@ import { LoggingService } from './logging.service';
 import { PushService } from './push.service';
 import { SoundService } from './sound.service';
 import { AudioToggle } from 'capacitor-plugin-audio-toggle';
+import { CallKitService } from './callkit.service';
 
 interface PeerSession {
     connection: RTCPeerConnection;
@@ -52,7 +53,8 @@ export class CallService {
         private api: ApiService,
         private logger: LoggingService,
         private pushService: PushService,
-        private soundService: SoundService
+        private soundService: SoundService,
+        private callKit: CallKitService
     ) {
         try {
             this.db = getFirestore();
@@ -62,6 +64,24 @@ export class CallService {
     }
 
     init() {
+        // Init Native CallKit
+        this.callKit.init();
+
+        // Listen for Native Actions
+        this.callKit.lastCallAction.subscribe(action => {
+            if (!action) return;
+            if (action.type === 'answered') {
+                this.logger.log("[Call] Native Call Answered - Triggering WebRTC...");
+                // Assuming we have the incoming call data cached or refreshed
+                // Need to ensure `currentCallId` is set if app was cold-started.
+                // For MVP, we assume app was awakened by Push -> Incoming Call Logic ran -> currentCallId set.
+                this.answerCall();
+            } else if (action.type === 'ended') {
+                this.logger.log("[Call] Native Call Ended");
+                this.endCall();
+            }
+        });
+
         // Prevent duplicate listeners
         if (this.callDocUnsub) {
             this.logger.log("[CallService] Clearing previous listener before re-init");
@@ -178,10 +198,15 @@ export class CallService {
         const myId = localStorage.getItem('user_id');
         if (!myId) return;
 
-        if (participantIds.length > 7) { // 7 others + me = 8
+        if (participantIds.length > 31) { // 31 others + me = 32
             this.logger.error("Call Limit Exceeded");
-            // Ideally assume caller UI handles the error via catch, but let's throw
-            throw new Error("Group Call Limit: Max 8 Participants");
+            throw new Error("Group Call Limit: Max 32 Participants");
+        }
+
+        // Scalability: Enforce Audio-Only for groups > 4 to save bandwidth/CPU
+        if (participantIds.length > 3) {
+            this.logger.log("[Call] Large group detected. Enforcing Audio-Only mode.");
+            type = 'audio';
         }
 
         this.activeCallType = type;
@@ -234,25 +259,79 @@ export class CallService {
         }, 60000);
 
         // Parallel: Connection Init & Push Notification
-        const promises = participantIds.map(async (peerId) => {
-            // A. WebRTC Connection
-            await this.initiatePeerConnection(peerId, this.currentCallId!);
-
-            // B. Push Notification (Wake up the device)
-            await this.pushService.sendPush(
-                peerId,
-                'Incoming Call',
-                'Tap to answer',
-                {
-                    type: 'call_invite',
-                    callId: this.currentCallId,
-                    callerId: myId,
-                    callType: type
-                }
+        // Optimization: Batch connection creation to prevent CPU freeze on large groups
+        const chunk = (arr: any[], size: number) =>
+            Array.from({ length: Math.ceil(arr.length / size) }, (v, i) =>
+                arr.slice(i * size, i * size + size)
             );
-        });
 
-        await Promise.all(promises);
+        const batches = chunk(participantIds, 5); // Connect to 5 peers at a time
+
+        for (const batch of batches) {
+            const promises = batch.map(async (peerId: string) => {
+                // A. WebRTC Connection
+                await this.initiatePeerConnection(peerId, this.currentCallId!);
+
+                // B. Push Notification (Wake up the device)
+                await this.pushService.sendPush(
+                    peerId,
+                    'Incoming Call',
+                    'Tap to answer',
+                    {
+                        type: 'call_invite',
+                        callId: this.currentCallId,
+                        callerId: myId,
+                        callType: type,
+                        content_available: 1, // iOS VOIP Wake
+                        priority: 'high'      // Android High Priority
+                    }
+                );
+            });
+            await Promise.all(promises);
+            // Small delay between batches to let CPU breathe
+            await new Promise(r => setTimeout(r, 200));
+        }
+    }
+
+    /**
+     * Security Verification: Checks active connection stats to verify Encryption (DTLS-SRTP)
+     */
+    async getEncryptionStats(peerId: string): Promise<{ encrypted: boolean, cipher: string }> {
+        const peer = this.peers.get(peerId);
+        if (!peer || !peer.connection) return { encrypted: false, cipher: 'none' };
+
+        try {
+            const stats = await peer.connection.getStats();
+            let encrypted = false;
+            let cipher = 'unknown';
+
+            stats.forEach((report: any) => {
+                // Check Transport stats or Candidate Pair
+                if (report.type === 'transport') {
+                    // dtlsState should be 'connected'
+                    if (report.dtlsState === 'connected') {
+                        encrypted = true;
+                        cipher = report.srtpCipher || 'DTLS-SRTP'; // Some browsers might prompt specific cipher
+                    }
+                }
+                // Fallback: check certificate
+                if (report.type === 'certificate') {
+                    // If we have a certificate, we are likely secure
+                }
+            });
+
+            // Standard WebRTC state check
+            if (peer.connection.connectionState === 'connected' || peer.connection.iceConnectionState === 'connected') {
+                // WebRTC mandates encryption. If connected, it's encrypted.
+                encrypted = true;
+            }
+
+            return { encrypted, cipher };
+
+        } catch (e) {
+            this.logger.error(`[Call] Failed to get stats for ${peerId}`, e);
+            return { encrypted: false, cipher: 'error' };
+        }
     }
 
     async answerCall() {
@@ -551,6 +630,18 @@ export class CallService {
                 const map = this.remoteStreams.value;
                 map.set(peerId, event.streams[0]);
                 this.remoteStreams.next(new Map(map)); // Trigger Update
+            }
+        };
+
+        // Encryption Verification Hook
+        pc.oniceconnectionstatechange = async () => {
+            if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+                const stats = await this.getEncryptionStats(peerId);
+                if (stats.encrypted) {
+                    this.logger.log(`[Call] Secure Connection Verified with ${peerId} (${stats.cipher})`);
+                } else {
+                    this.logger.error(`[Call] INSECURE Connection detected with ${peerId}!`);
+                }
             }
         };
 

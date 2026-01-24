@@ -121,17 +121,41 @@ export class GroupInfoPage implements OnInit {
 
   async toggleAdmin(member: any) {
     const action = member.role === 'admin' ? 'demote' : 'promote';
-    await this.api.post('groups.php', {
-      action, group_id: this.groupId, target_id: member.user_id
-    }).toPromise();
-    this.loadGroupInfo();
+    try {
+      await this.api.post('groups.php', {
+        action, group_id: this.groupId, target_id: member.user_id
+      }).toPromise();
+      this.showToast(`User ${action}d successfully`);
+      this.loadGroupInfo();
+    } catch (e) {
+      this.showToast('Action failed');
+    }
   }
 
   async removeMember(member: any) {
-    await this.api.post('groups.php', {
-      action: 'remove_member', group_id: this.groupId, target_id: member.user_id
-    }).toPromise();
-    this.loadGroupInfo();
+    try {
+      await this.api.post('groups.php', {
+        action: 'remove_member', group_id: this.groupId, target_id: member.user_id
+      }).toPromise();
+      this.showToast('Member removed');
+      this.loadGroupInfo(); // Refresh list
+    } catch (e) {
+      this.showToast('Failed to remove member');
+    }
+  }
+
+  async regenerateInviteCode() {
+    try {
+      const res: any = await this.api.post('groups.php', {
+        action: 'regenerate_invite_code', group_id: this.groupId
+      }).toPromise();
+      if (res && res.invite_code) {
+        this.inviteCode = res.invite_code;
+        this.showToast('Invite link reset!');
+      }
+    } catch (e) {
+      this.showToast('Failed to reset link');
+    }
   }
 
   async leaveGroup() {

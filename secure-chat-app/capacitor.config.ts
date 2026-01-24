@@ -19,7 +19,7 @@ const config: CapacitorConfig = {
       spinnerColor: "#999999"
     },
     PushNotifications: {
-      presentationOptions: ["badge", "sound", "alert"]
+      presentationOptions: ["badge", "sound"]
     },
     BackgroundRunner: {
       label: 'com.chatflect.location.runner',

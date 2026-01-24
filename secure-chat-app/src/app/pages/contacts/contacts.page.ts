@@ -173,14 +173,19 @@ export class ContactsPage implements OnInit {
 
   async inviteFriend() {
     try {
+      const myId = localStorage.getItem('user_id');
+      const link = `https://snapflect.com/?ref=${myId}`; // Generalized Invite Link
+
       await Share.share({
-        title: 'Join me on SecureChat!',
-        text: 'Let\'s chat securely! Download the app: ',
-        url: 'https://snapflect.com/chat-app-download', // Placeholder
+        title: 'Join me on ChatFlect!',
+        text: 'Let\'s chat securely! Download ChatFlect here: ',
+        url: link,
         dialogTitle: 'Invite Friends'
       });
     } catch (e) {
-      this.logger.error("Share failed", e);
+      if ((e as any).message !== 'Share canceled') { // Ignore user cancellation logic
+        this.logger.error("Share failed", e);
+      }
     }
   }
 

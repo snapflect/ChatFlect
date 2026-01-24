@@ -288,12 +288,72 @@ ion-button[fill="clear"] {
     justify-content: center;
     color: #ffc409;
     z-index: 20;
-    gap: 15px;
 
     p {
         margin: 0;
         font-weight: 700;
         font-size: 1.2rem;
         letter-spacing: 2px;
+    }
+}
+
+// --- Group Call Grid (Audio & Video) ---
+.participants-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    grid-auto-rows: 1fr;
+    gap: 8px;
+    padding: 10px;
+    height: 100%;
+    width: 100%;
+    overflow-y: auto;
+    align-content: center;
+
+    // Adjust for many participants
+    &.large-group {
+        grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    }
+}
+
+.participant-tile {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    min-height: 120px;
+    border: 2px solid transparent;
+    transition: border-color 0.2s ease;
+
+    &.talking {
+        border-color: #00ff88; // Active Speaker Highlight
+        box-shadow: 0 0 15px rgba(0, 255, 136, 0.3);
+    }
+
+    ion-avatar {
+        width: 60px;
+        height: 60px;
+        margin-bottom: 8px;
+    }
+
+    span {
+        color: white;
+        font-size: 0.8rem;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+        z-index: 2;
+    }
+
+    // For Video Tiles
+    video {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        z-index: 1;
     }
 }

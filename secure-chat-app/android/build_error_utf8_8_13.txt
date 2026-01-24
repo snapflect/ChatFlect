@@ -1,0 +1,741 @@
+﻿To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :app
+WARNING: Using flatDir should be avoided because it doesn't support any meta-data formats.
+
+> Configure project :capacitor-background-runner
+WARNING: Using flatDir should be avoided because it doesn't support any meta-data formats.
+
+> Configure project :capacitor-cordova-android-plugins
+WARNING: Using flatDir should be avoided because it doesn't support any meta-data formats.
+Checking the license for package Android SDK Platform 34 in C:\Users\mypav\AppData\Local\Android\Sdk\licenses
+License for package Android SDK Platform 34 accepted.
+Preparing "Install Android SDK Platform 34 (revision 3)".
+"Install Android SDK Platform 34 (revision 3)" ready.
+Installing Android SDK Platform 34 in C:\Users\mypav\AppData\Local\Android\Sdk\platforms\android-34
+"Install Android SDK Platform 34 (revision 3)" complete.
+"Install Android SDK Platform 34 (revision 3)" finished.
+[=========                              ] 25%                                   
+
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+> Task :capacitor-android:preBuild UP-TO-DATE
+> Task :capacitor-android:preDebugBuild UP-TO-DATE
+> Task :capacitor-android:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-app:preBuild UP-TO-DATE
+> Task :capacitor-app:preDebugBuild UP-TO-DATE
+> Task :capacitor-app:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-background-runner:preBuild UP-TO-DATE
+> Task :capacitor-background-runner:preDebugBuild UP-TO-DATE
+> Task :capacitor-background-runner:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-camera:preBuild UP-TO-DATE
+> Task :capacitor-camera:preDebugBuild UP-TO-DATE
+> Task :capacitor-camera:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-community-contacts:preBuild UP-TO-DATE
+> Task :capacitor-community-contacts:preDebugBuild UP-TO-DATE
+> Task :capacitor-community-contacts:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:preBuild UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:preDebugBuild UP-TO-DATE
+> Task :capacitor-filesystem:preBuild UP-TO-DATE
+> Task :capacitor-filesystem:preDebugBuild UP-TO-DATE
+> Task :capacitor-filesystem:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-geolocation:preBuild UP-TO-DATE
+> Task :capacitor-geolocation:preDebugBuild UP-TO-DATE
+> Task :capacitor-geolocation:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-haptics:preBuild UP-TO-DATE
+> Task :capacitor-haptics:preDebugBuild UP-TO-DATE
+> Task :capacitor-haptics:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-keyboard:preBuild UP-TO-DATE
+> Task :capacitor-keyboard:preDebugBuild UP-TO-DATE
+> Task :capacitor-keyboard:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-mlkit-barcode-scanning:preBuild UP-TO-DATE
+> Task :capacitor-mlkit-barcode-scanning:preDebugBuild UP-TO-DATE
+> Task :capacitor-mlkit-barcode-scanning:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-native-biometric:preBuild UP-TO-DATE
+> Task :capacitor-native-biometric:preDebugBuild UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:writeDebugAarMetadata
+> Task :capacitor-native-biometric:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-plugin-audio-toggle:preBuild UP-TO-DATE
+> Task :capacitor-plugin-audio-toggle:preDebugBuild UP-TO-DATE
+> Task :capacitor-plugin-audio-toggle:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-plugin-callkit-voip:preBuild UP-TO-DATE
+> Task :capacitor-plugin-callkit-voip:preDebugBuild UP-TO-DATE
+> Task :capacitor-plugin-callkit-voip:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-push-notifications:preBuild UP-TO-DATE
+> Task :capacitor-push-notifications:preDebugBuild UP-TO-DATE
+> Task :capacitor-push-notifications:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-share:preBuild UP-TO-DATE
+> Task :capacitor-share:preDebugBuild UP-TO-DATE
+> Task :capacitor-share:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-splash-screen:preBuild UP-TO-DATE
+> Task :capacitor-splash-screen:preDebugBuild UP-TO-DATE
+> Task :capacitor-splash-screen:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-status-bar:preBuild UP-TO-DATE
+> Task :capacitor-status-bar:preDebugBuild UP-TO-DATE
+> Task :capacitor-status-bar:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-voice-recorder:preBuild UP-TO-DATE
+> Task :capacitor-voice-recorder:preDebugBuild UP-TO-DATE
+> Task :capacitor-voice-recorder:writeDebugAarMetadata UP-TO-DATE
+> Task :capacitor-android:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-app:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-background-runner:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-camera:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-community-contacts:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-cordova-android-plugins:processDebugNavigationResources
+> Task :capacitor-filesystem:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-geolocation:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-haptics:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-keyboard:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-mlkit-barcode-scanning:processDebugNavigationResources UP-TO-DATE
+> Task :app:checkDebugAarMetadata FAILED
+> Task :capacitor-native-biometric:processDebugNavigationResources UP-TO-DATE
+> Task :capacitor-plugin-audio-toggle:processDebugNavigationResources UP-TO-DATE
+
+[Incubating] Problems report is available at: file:///D:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/secure-chat-app/android/build/reports/problems/problems-report.html
+.\gradlew : 
+At line:1 char:1
++ .\gradlew 
+assembleDebug 
+--no-daemon > build_e
+rror_final_8_13.txt 
+2>&1
++ ~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (:String   
+ ) [], RemoteExce    
+ption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+FAILURE: Build 
+failed with an 
+exception.
+
+* What went wrong:
+Execution failed for 
+task ':app:checkDebug
+AarMetadata'.
+> A failure occurred 
+while executing com.a
+ndroid.build.gradle.i
+nternal.tasks.CheckAa
+rMetadataWorkAction
+   > 13 issues were 
+found when checking 
+AAR metadata:
+     
+       1.  
+Dependency 'androidx.
+core:core-splashscree
+n:1.2.0' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 35 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 35, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+       2.  
+Dependency 'androidx.
+camera:camera-video:1
+.5.2' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 35 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 35, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+       3.  
+Dependency 'androidx.
+camera:camera-lifecyc
+le:1.5.2' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 35 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 35, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+       4.  
+Dependency 'androidx.
+camera:camera-core:1.
+5.2' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 35 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 35, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+       5.  
+Dependency 'androidx.
+camera:camera-camera2
+:1.5.2' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 35 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 35, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+       6.  
+Dependency 'androidx.
+camera:camera-view:1.
+5.2' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 35 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 35, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+       7.  
+Dependency 'androidx.
+activity:activity-ktx
+:1.11.0' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 36 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 36, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+       8.  
+Dependency 'androidx.
+work:work-runtime-ktx
+:2.11.0' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 35 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 35, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+       9.  
+Dependency 'androidx.
+work:work-runtime:2.1
+1.0' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 35 
+or later of the
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+34 actionable tasks: 3 executed, 31 up-to-date
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 35, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+      10.  
+Dependency 'androidx.
+core:core-ktx:1.17.0'
+ requires libraries 
+and applications that
+           depend on 
+it to compile 
+against version 36 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 36, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+      11.  
+Dependency 'androidx.
+core:core:1.17.0' 
+requires libraries 
+and applications that
+           depend on 
+it to compile 
+against version 36 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 36, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+      12.  
+Dependency 'androidx.
+activity:activity:1.1
+1.0' requires 
+libraries and 
+applications that
+           depend on 
+it to compile 
+against version 36 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 36, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+     
+      13.  
+Dependency 'androidx.
+camera.featurecombina
+tionquery:featurecomb
+inationquery:1.5.2' 
+requires libraries 
+and applications that
+           depend on 
+it to compile 
+against version 35 
+or later of the
+           Android 
+APIs.
+     
+           :app is 
+currently compiled 
+against android-34.
+     
+           
+Recommended action: 
+Update this project 
+to use a newer 
+compileSdk
+           of at 
+least 35, for 
+example 36.
+     
+           Note that 
+updating a library 
+or application's 
+compileSdk (which
+           allows 
+newer APIs to be 
+used) can be done 
+separately from 
+updating
+           targetSdk 
+(which opts the app 
+in to new runtime 
+behavior) and
+           minSdk 
+(which determines 
+which devices the 
+app can be installed
+           on).
+
+* Try:
+> Run with 
+--stacktrace option 
+to get the stack 
+trace.
+> Run with --info or 
+--debug option to 
+get more log output.
+> Run with --scan to 
+get full insights.
+> Get more help at ht
+tps://help.gradle.org
+.
+
+BUILD FAILED in 58s
+

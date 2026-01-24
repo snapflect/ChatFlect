@@ -56,7 +56,8 @@ export class AppComponent implements OnInit {
     // Real-time Message Sound (from Firestore listener)
     this.chatService.newMessage$.subscribe(msg => {
       // SoundService checks if user is already in this chat
-      this.soundService.playMessageSound(msg.chatId);
+      // Temporarily disabled to debug crash
+      // this.soundService.playMessageSound(msg.chatId);
     });
 
     App.addListener('appStateChange', async ({ isActive }) => {

@@ -1,0 +1,27 @@
+<ion-content class="ion-padding ion-text-center">
+    <div class="center-container">
+        <ion-spinner *ngIf="isLoading" name="crescent" color="primary"></ion-spinner>
+
+        <div *ngIf="!isLoading">
+            <ion-icon name="alert-circle-outline" size="large" color="medium"></ion-icon>
+            <h2>{{ statusMessage }}</h2>
+            <ion-button expand="block" (click)="goHome()" class="mt-20">
+                Go to Home
+            </ion-button>
+        </div>
+    </div>
+</ion-content>
+
+<style>
+    .center-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+    }
+
+    .mt-20 {
+        margin-top: 20px;
+    }
+</style>

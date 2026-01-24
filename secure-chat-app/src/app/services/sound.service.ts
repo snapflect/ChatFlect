@@ -234,10 +234,10 @@ export class SoundService {
     // Short vibration for message notifications
     private async vibrateForMessage(): Promise<void> {
         try {
-            await Haptics.notification({ type: NotificationType.Success });
+            // await Haptics.notification({ type: NotificationType.Success });
         } catch (e) {
             if (typeof navigator.vibrate === 'function') {
-                navigator.vibrate(100);
+                // navigator.vibrate(100);
             }
         }
     }
