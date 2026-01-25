@@ -16,8 +16,15 @@ export class ProfilePage implements OnInit {
     first_name: '',
     last_name: '',
     short_note: '',
-    photo_url: ''
+    photo_url: '',
+    phone_number: '',
+    is_profile_complete: 0
   };
+
+  isEditingPhone = false;
+  showPhoneOtpInput = false;
+  phoneOtp = '';
+  tempEmail = ''; // To be fetched from profile or auth
 
   constructor(
     private profileService: ProfileService,
@@ -43,15 +50,87 @@ export class ProfilePage implements OnInit {
   }
 
   async saveProfile() {
+    if (!this.profile.phone_number || !/^\+?[0-9]{10,15}$/.test(this.profile.phone_number)) {
+      const t = await this.toast.create({ message: 'Valid Phone Number Required', duration: 1500 });
+      t.present();
+      return;
+    }
+
     try {
       await this.profileService.updateProfile(this.profile);
       const t = await this.toast.create({ message: 'Profile Saved', duration: 1500 });
       t.present();
+
+      // Update local storage
+      localStorage.setItem('is_profile_complete', '1');
+      if (this.profile.first_name) {
+        localStorage.setItem('user_first_name', this.profile.first_name);
+      }
+
       this.nav.navigateRoot('/tabs/chats');
-    } catch (e) {
-      const errToast = await this.toast.create({ message: 'Error Saving', duration: 1500 });
+    } catch (e: any) {
+      let msg = 'Error Saving';
+      if (e && e.error && e.error.error) msg = e.error.error;
+      const errToast = await this.toast.create({ message: msg, duration: 1500 });
       errToast.present();
     }
+  }
+
+  startPhoneEdit() {
+    this.isEditingPhone = true;
+  }
+
+  async requestPhoneUpdateOtp() {
+    if (!this.profile.phone_number || !/^\+?[0-9]{10,15}$/.test(this.profile.phone_number)) {
+      this.showToast("Enter valid new phone number");
+      return;
+    }
+
+    try {
+      // We need the user's email to send the OTP.
+      // ProfileService.getProfile should ideally return email too now.
+      // For now, assume it's available in some way or trigger a generic request.
+      // The backend 'register.php' handles sending OTP to the logged in user's email if we update it.
+      // Actually, let's use a simpler approach: use AuthService.requestOtp but for the EXISTING email.
+      // But wait, the user said "otp is only through email always... even for changing phone number".
+
+      // I'll fetch the email from the profile res if I update the backend.
+      const fullProfile: any = await this.profileService.getProfile();
+      if (fullProfile && fullProfile.email) {
+        await this.profileService.requestPhoneUpdateOtp(fullProfile.email, this.profile.phone_number);
+        this.showPhoneOtpInput = true;
+        this.showToast("OTP sent to your registered email");
+      } else {
+        this.showToast("Email not found for verification");
+      }
+    } catch (e: any) {
+      if (e.status === 409) {
+        this.showToast("This phone number is already linked to another account");
+      } else {
+        this.showToast(e.error?.error || "Failed to send OTP");
+      }
+    }
+  }
+
+  async verifyPhoneUpdate() {
+    try {
+      const fullProfile: any = await this.profileService.getProfile();
+      await this.profileService.verifyPhoneUpdate(fullProfile.email, this.phoneOtp);
+
+      this.isEditingPhone = false;
+      this.showPhoneOtpInput = false;
+      this.profile.is_profile_complete = 1;
+      this.showToast("Phone Number Verified!");
+      // Refresh profile to get the latest DB state
+      await this.loadProfile();
+    } catch (e: any) {
+      this.showToast(e.error?.error || "Invalid OTP");
+    }
+  }
+
+  private async showToast(msg: string) {
+    const t = await this.toast.create({ message: msg, duration: 1500 });
+    t.present();
   }
 
 

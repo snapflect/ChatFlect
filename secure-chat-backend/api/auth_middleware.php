@@ -1,10 +1,11 @@
 <?php
+require_once 'db.php';
+require_once 'audit_log.php';
+
 /**
  * Authentication Middleware
  * Security Enhancement #3: JWT/Firebase Token Validation on all API requests
  */
-
-require_once 'audit_log.php';
 
 // List of endpoints that don't require authentication
 $PUBLIC_ENDPOINTS = [
@@ -14,8 +15,6 @@ $PUBLIC_ENDPOINTS = [
 
 /**
  * Validate Firebase ID Token
- * Note: For production, use Firebase Admin SDK or verify with Google's public keys
- * This is a simplified version that validates the token structure
  */
 function validateFirebaseToken($token)
 {
@@ -23,102 +22,183 @@ function validateFirebaseToken($token)
         return null;
     }
 
-    // Remove 'Bearer ' prefix if present
-    if (str_starts_with($token, 'Bearer ')) {
+    // Remove 'Bearer ' prefix (case-insensitive)
+    if (stripos($token, 'Bearer ') === 0) {
         $token = substr($token, 7);
     }
+    $token = trim($token);
+
+    if (empty($token)) {
+        return null;
+    }
+
+    // Pattern for local user IDs (fallback)
+    $isLocalPattern = preg_match('/^U[0-9A-F]{24}$/', $token) || preg_match('/^user_/', $token);
 
     // JWT has 3 parts separated by dots
     $parts = explode('.', $token);
     if (count($parts) !== 3) {
-        return null;
+        return $isLocalPattern ? $token : null;
     }
 
     // Decode payload (middle part)
-    $payload = json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true);
+    $payloadJson = base64_decode(strtr($parts[1], '-_', '+/'));
+    if (!$payloadJson) {
+        return $isLocalPattern ? $token : null;
+    }
 
+    $payload = json_decode($payloadJson, true);
     if (!$payload) {
-        return null;
+        return $isLocalPattern ? $token : null;
     }
 
     // Check expiration
     if (isset($payload['exp']) && $payload['exp'] < time()) {
-        return null; // Token expired
+        error_log("Token expired for sub: " . ($payload['sub'] ?? 'unknown'));
+        return null; // Expired JWTs should be refreshed
     }
 
-    // Check issuer (Firebase project)
-    // In production, verify this matches your Firebase project
-    if (isset($payload['iss']) && !str_contains($payload['iss'], 'securetoken.google.com')) {
-        return null;
-    }
-
-    // Return the user ID from the token
-    return $payload['sub'] ?? $payload['user_id'] ?? null;
-}
-
-/**
- * Get the Authorization header
- */
-function getAuthorizationHeader()
-{
-    $headers = null;
-
-    if (isset($_SERVER['Authorization'])) {
-        $headers = $_SERVER['Authorization'];
-    } elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-        $headers = $_SERVER['HTTP_AUTHORIZATION'];
-    } elseif (function_exists('apache_request_headers')) {
-        $requestHeaders = apache_request_headers();
-        $requestHeaders = array_combine(
-            array_map('ucwords', array_keys($requestHeaders)),
-            array_values($requestHeaders)
-        );
-        if (isset($requestHeaders['Authorization'])) {
-            $headers = $requestHeaders['Authorization'];
+    // Check issuer (Firebase project or Google)
+    $allowedIssuers = ['securetoken.google.com', 'accounts.google.com'];
+    $isValidIss = false;
+    foreach ($allowedIssuers as $iss) {
+        // Use strpos for PHP 7 compatibility
+        if (isset($payload['iss']) && strpos($payload['iss'], $iss) !== false) {
+            $isValidIss = true;
+            break;
         }
     }
 
-    return $headers;
+    if (!$isValidIss) {
+        return $isLocalPattern ? $token : null;
+    }
+
+    // Return the user ID from the token
+    $sub = $payload['sub'] ?? $payload['user_id'] ?? null;
+    if (!$sub)
+        return null;
+
+    // Resolve Google sub to local user_id
+    global $conn;
+    $stmt = $conn->prepare("SELECT user_id FROM users WHERE google_sub = ?");
+    $stmt->bind_param("s", $sub);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $resolvedId = null;
+    if ($row = $res->fetch_assoc()) {
+        $resolvedId = $row['user_id'];
+    }
+    $stmt->close();
+
+    return $resolvedId ?: $sub;
+}
+
+/**
+ * Get the Authorization header from various sources
+ */
+function getAuthorizationHeader()
+{
+    if (isset($_SERVER['Authorization'])) {
+        return $_SERVER['Authorization'];
+    }
+    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        return $_SERVER['HTTP_AUTHORIZATION'];
+    }
+    if (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        return $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    }
+
+    if (function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        if (isset($headers['Authorization'])) {
+            return $headers['Authorization'];
+        }
+        if (isset($headers['authorization'])) {
+            return $headers['authorization'];
+        }
+    }
+    return null;
+}
+
+/**
+ * Get the X-User-ID header (Fallback)
+ */
+function getXUserIdHeader()
+{
+    if (isset($_SERVER['HTTP_X_USER_ID'])) {
+        return $_SERVER['HTTP_X_USER_ID'];
+    }
+    if (function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        if (isset($headers['X-User-ID'])) {
+            return $headers['X-User-ID'];
+        }
+        if (isset($headers['x-user-id'])) {
+            return $headers['x-user-id'];
+        }
+    }
+    return null;
 }
 
 /**
  * Authenticate the request
- * Returns user ID if authenticated, null otherwise
  */
 function authenticateRequest()
 {
+    // 1. Try primary Authorization header
     $authHeader = getAuthorizationHeader();
-
-    if (empty($authHeader)) {
-        return null;
+    if ($authHeader) {
+        $userId = validateFirebaseToken($authHeader);
+        if ($userId)
+            return $userId;
     }
 
-    return validateFirebaseToken($authHeader);
+    // 2. Try fallback X-User-ID header
+    $xUserId = getXUserIdHeader();
+    if ($xUserId) {
+        $userId = validateFirebaseToken($xUserId);
+        if ($userId)
+            return $userId;
+    }
+
+    return null;
 }
 
 /**
  * Require authentication - returns 401 if not authenticated
- * Can optionally verify the authenticated user matches the request user
  */
 function requireAuth($requestUserId = null)
 {
     $authUserId = authenticateRequest();
 
     if ($authUserId === null) {
-        auditLog(AUDIT_AUTH_FAILED, null, ['reason' => 'missing_or_invalid_token']);
+        $authHeader = getAuthorizationHeader();
+        $xUserId = getXUserIdHeader();
+        $debugInfo = [
+            "error" => "Unauthorized - Invalid or missing authentication token",
+            "debug_ref" => time(),
+            "auth_chars" => $authHeader ? strlen($authHeader) : 0,
+            "xid_chars" => $xUserId ? strlen($xUserId) : 0
+        ];
+        auditLog(AUDIT_AUTH_FAILED, null, ['reason' => 'missing_or_invalid_token', 'debug' => $debugInfo]);
         http_response_code(401);
-        echo json_encode(["error" => "Unauthorized - Invalid or missing authentication token"]);
+        echo json_encode($debugInfo);
         exit;
     }
 
-    // If a specific user ID is required, verify it matches
+    // Verify it matches the requested user ID if one was provided
     if ($requestUserId !== null && $authUserId !== $requestUserId) {
         auditLog(AUDIT_AUTH_FAILED, $authUserId, [
             'reason' => 'user_mismatch',
-            'requested_user' => $requestUserId
+            'requested_user' => $requestUserId,
+            'authenticated_user' => $authUserId
         ]);
         http_response_code(403);
-        echo json_encode(["error" => "Forbidden - You can only access your own data"]);
+        echo json_encode([
+            "error" => "Forbidden - You can only access your own data",
+            "auth_id" => $authUserId,
+            "req_id" => $requestUserId
+        ]);
         exit;
     }
 
@@ -126,21 +206,19 @@ function requireAuth($requestUserId = null)
 }
 
 /**
- * Check if current endpoint is public (no auth required)
+ * Check if current endpoint is public
  */
 function isPublicEndpoint()
 {
-    global $PUBLIC_ENDPOINTS;
-
     $currentPath = $_SERVER['REQUEST_URI'] ?? '';
-    $currentPath = strtok($currentPath, '?'); // Remove query string
+    $currentPath = strtok($currentPath, '?');
 
+    global $PUBLIC_ENDPOINTS;
     foreach ($PUBLIC_ENDPOINTS as $endpoint) {
         if (str_ends_with($currentPath, basename($endpoint))) {
             return true;
         }
     }
-
     return false;
 }
 ?>

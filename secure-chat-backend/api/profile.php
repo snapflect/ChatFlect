@@ -31,91 +31,144 @@ if ($method === 'POST' && json_last_error() !== JSON_ERROR_NONE) {
 if ($method === 'POST') {
 
     /* ---------- OTP CONFIRM (UNCHANGED) ---------- */
+    /* ---------- OTP CONFIRM (HYBRID) ---------- */
     if (isset($data->action) && $data->action === 'confirm_otp') {
-        $phone = $data->phone_number ?? '';
-        $otp = $data->otp ?? '';
         $email = $data->email ?? '';
+        $otp = $data->otp ?? '';
         $publicKey = $data->public_key ?? '';
 
         // Validate
-        if (!$phone || !$otp) {
+        if (!$email || !$otp) {
             http_response_code(400);
-            echo json_encode(["error" => "Missing phone or OTP"]);
+            echo json_encode(["error" => "Missing email or OTP"]);
             exit;
         }
 
         // 1. Verify OTP
-        $stmt = $conn->prepare("SELECT id FROM otps WHERE phone_number = ? AND otp_code = ? AND expires_at > NOW()");
-        $stmt->bind_param("ss", $phone, $otp);
+        $stmt = $conn->prepare("SELECT id FROM otps WHERE email = ? AND otp_code = ? AND expires_at > NOW()");
+        $stmt->bind_param("ss", $email, $otp);
         $stmt->execute();
         $res = $stmt->get_result();
 
         if ($res->num_rows === 0) {
-            http_response_code(400); // 400 for logic error vs 401
+            http_response_code(400);
             echo json_encode(["error" => "Invalid or Expired OTP"]);
             exit;
         }
 
-        // 2. Strict 1:1 Check: Is Email used by DIFFERENT phone?
-        if ($email) {
-            $eCheck = $conn->prepare("SELECT user_id FROM users WHERE email = ? AND phone_number != ?");
-            $eCheck->bind_param("ss", $email, $phone);
-            $eCheck->execute();
-            if ($eCheck->get_result()->num_rows > 0) {
-                http_response_code(409); // Conflict
-                echo json_encode(["error" => "Email already linked to another account"]);
-                exit;
-            }
-        }
-
-        // 3. Check/Create User
-        $check = $conn->prepare("SELECT user_id FROM users WHERE phone_number = ?");
-        $check->bind_param("s", $phone);
+        // 2. Check/Create User
+        $check = $conn->prepare("SELECT user_id, is_profile_complete FROM users WHERE email = ?");
+        $check->bind_param("s", $email);
         $check->execute();
         $userRes = $check->get_result();
 
         $userId = null;
         $isNewUser = false;
+        $isProfileComplete = 0;
 
         if ($userRes->num_rows > 0) {
             // Existing
             $row = $userRes->fetch_assoc();
             $userId = $row['user_id'];
+            $isProfileComplete = (int) $row['is_profile_complete'];
 
-            // Update Key & Email
-            $upd = $conn->prepare("UPDATE users SET public_key = ?, email = ? WHERE user_id = ?");
-            // If email is empty, maybe don't overwrite? But here we assume fresh login has fresh email.
-            $upd->bind_param("sss", $publicKey, $email, $userId);
+            // Update Key
+            $upd = $conn->prepare("UPDATE users SET public_key = ? WHERE user_id = ?");
+            $upd->bind_param("ss", $publicKey, $userId);
             $upd->execute();
+            $upd->close();
         } else {
             // New
             $isNewUser = true;
-            $userId = uniqid('user_', true);
+            $userId = 'U' . strtoupper(bin2hex(random_bytes(12)));
+            $isProfileComplete = 0;
 
-            $ins = $conn->prepare("INSERT INTO users (user_id, phone_number, email, first_name, public_key) VALUES (?, ?, ?, ?, ?)");
-            $tempName = ""; // Leave blank so user is forced/prompted to set it
-            $ins->bind_param("sssss", $userId, $phone, $email, $tempName, $publicKey);
+            $ins = $conn->prepare("INSERT INTO users (user_id, email, public_key, is_profile_complete) VALUES (?, ?, ?, 0)");
+            $ins->bind_param("sss", $userId, $email, $publicKey);
             if (!$ins->execute()) {
                 http_response_code(500);
                 echo json_encode(["error" => "Registration DB Error: " . $ins->error]);
                 exit;
             }
+            $ins->close();
         }
 
         // 3. Clear OTP
-        $del = $conn->prepare("DELETE FROM otps WHERE phone_number = ?");
-        $del->bind_param("s", $phone);
+        $del = $conn->prepare("DELETE FROM otps WHERE email = ?");
+        $del->bind_param("s", $email);
         $del->execute();
 
         // Audit log successful login
-        auditLog(AUDIT_LOGIN_SUCCESS, $userId, ['is_new_user' => $isNewUser]);
+        auditLog(AUDIT_LOGIN_SUCCESS, $userId, ['method' => 'email_otp', 'is_new_user' => $isNewUser]);
 
         echo json_encode([
             "status" => "success",
             "message" => "Login Successful",
             "user_id" => $userId,
-            "is_new_user" => $isNewUser
+            "token" => $userId, // Session token for 401 fix
+            "is_new_user" => $isNewUser,
+            "is_profile_complete" => $isProfileComplete
         ]);
+        exit;
+    }
+
+    /* ---------- VERIFY PHONE OTP (HYBRID) ---------- */
+    if (isset($data->action) && $data->action === 'verify_phone_otp') {
+        $email = $data->email ?? '';
+        $otp = $data->otp ?? '';
+
+        if (!$email || !$otp) {
+            http_response_code(400);
+            echo json_encode(["error" => "Missing email or OTP"]);
+            exit;
+        }
+
+        // 1. Verify OTP
+        $stmt = $conn->prepare("SELECT phone_number FROM otps WHERE email = ? AND otp_code = ? AND type = 'phone_update' AND expires_at > NOW()");
+        $stmt->bind_param("ss", $email, $otp);
+        $stmt->execute();
+        $res = $stmt->get_result();
+
+        if ($row = $res->fetch_assoc()) {
+            $newPhone = $row['phone_number'];
+
+            // 2. Uniqueness Check (Final)
+            $pCheck = $conn->prepare("SELECT user_id FROM users WHERE phone_number = ?");
+            $pCheck->bind_param("s", $newPhone);
+            $pCheck->execute();
+            if ($pCheck->get_result()->num_rows > 0) {
+                http_response_code(409);
+                echo json_encode(["error" => "This phone number is already linked to another account"]);
+                exit;
+            }
+
+            // 3. Resolve user_id from email
+            $uCheck = $conn->prepare("SELECT user_id FROM users WHERE email = ?");
+            $uCheck->bind_param("s", $email);
+            $uCheck->execute();
+            $uRow = $uCheck->get_result()->fetch_assoc();
+            $userId = $uRow['user_id'] ?? null;
+
+            if ($userId) {
+                // 4. Update Phone
+                $upd = $conn->prepare("UPDATE users SET phone_number = ?, is_profile_complete = 1 WHERE user_id = ?");
+                $upd->bind_param("ss", $newPhone, $userId);
+                $upd->execute();
+
+                // 5. Clear OTP
+                $del = $conn->prepare("DELETE FROM otps WHERE email = ? AND type = 'phone_update'");
+                $del->bind_param("s", $email);
+                $del->execute();
+
+                echo json_encode(["status" => "success", "message" => "Phone number verified and updated"]);
+            } else {
+                http_response_code(404);
+                echo json_encode(["error" => "User not found"]);
+            }
+        } else {
+            http_response_code(400);
+            echo json_encode(["error" => "Invalid or Expired OTP"]);
+        }
         exit;
     }
 
@@ -125,10 +178,12 @@ if ($method === 'POST') {
         $userId = sanitizeUserId($data->user_id);
         requireAuth($userId);
 
-        $check = $conn->prepare("SELECT id FROM users WHERE user_id = ?");
+        $check = $conn->prepare("SELECT id, phone_number, is_profile_complete FROM users WHERE user_id = ?");
         $check->bind_param("s", $userId);
         $check->execute();
-        if ($check->get_result()->num_rows === 0) {
+        $userRow = $check->get_result()->fetch_assoc();
+
+        if (!$userRow) {
             http_response_code(404);
             echo json_encode(["error" => "User ID not found"]);
             exit;
@@ -137,6 +192,34 @@ if ($method === 'POST') {
         $fields = [];
         $types = "";
         $params = [];
+
+        // Mandatory Phone Registration / Update Policy
+        if (isset($data->phone_number)) {
+            $newPhone = sanitizeString($data->phone_number, 20);
+
+            // 1. Check if phone is different and update is allowed
+            if ($newPhone !== $userRow['phone_number']) {
+                // For returning users, update only with verification (handled by frontend triggering action: update_phone)
+                // But if is_profile_complete is 0, we allow setting it once.
+
+                // 2. Uniqueness Check: Ensure phone is not linked to ANOTHER email
+                $pCheck = $conn->prepare("SELECT email FROM users WHERE phone_number = ? AND user_id != ?");
+                $pCheck->bind_param("ss", $newPhone, $userId);
+                $pCheck->execute();
+                if ($pCheck->get_result()->num_rows > 0) {
+                    http_response_code(409);
+                    echo json_encode(["error" => "This phone number is already linked to another account"]);
+                    exit;
+                }
+
+                $fields[] = "phone_number=?";
+                $types .= "s";
+                $params[] = $newPhone;
+
+                // If this was the missing piece, mark profile complete
+                $fields[] = "is_profile_complete=1";
+            }
+        }
 
         if (isset($data->first_name)) {
             $fields[] = "first_name=?";
@@ -207,7 +290,7 @@ if ($method === 'POST') {
     }
 
     $stmt = $conn->prepare("
-        SELECT user_id, first_name, last_name, short_note, photo_url
+        SELECT user_id, email, first_name, last_name, short_note, photo_url, phone_number, is_profile_complete
         FROM users WHERE user_id = ?
     ");
     $stmt->bind_param("s", $userId);

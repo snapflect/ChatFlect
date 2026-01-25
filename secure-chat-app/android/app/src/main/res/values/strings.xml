@@ -4,4 +4,6 @@
     <string name="title_activity_main">SecureChat</string>
     <string name="package_name">io.ionic.starter</string>
     <string name="custom_url_scheme">io.ionic.starter</string>
+    <string name="server_client_id">1036135506512-1fj8d144k2i3k9aikpn34lu27ut1bhht.apps.googleusercontent.com</string>
+    <string name="google_client_id">1036135506512-1fj8d144k2i3k9aikpn34lu27ut1bhht.apps.googleusercontent.com</string>
 </resources>

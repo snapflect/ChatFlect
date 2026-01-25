@@ -31,11 +31,18 @@ export class ProfileService {
                 const db = this.firestoreGetInstance();
                 const docSnap = await this.firestoreGetDoc(this.firestoreDoc(db, 'users', id));
                 if (docSnap.exists()) {
-                    const firestoreData = docSnap.data();
+                    const firestoreData = docSnap.data() as any;
                     this.logger.log("[Profile] Found in Firestore:", firestoreData);
-                    return { ...apiRes, ...(firestoreData as any) };
+
+                    // Merge logic: Favor Firestore but keep API photo if Firestore is empty
+                    const merged = { ...apiRes, ...firestoreData };
+                    if (!firestoreData.photo_url && apiRes.photo_url) {
+                        merged.photo_url = apiRes.photo_url;
+                    }
+                    return merged;
                 }
             }
+            this.logger.log("[Profile] Final Profile:", apiRes);
             return apiRes;
         } catch (e) {
             this.logger.error("[Profile] Get Error", e);
@@ -70,6 +77,7 @@ export class ProfileService {
                     last_name: profileData.last_name || '',
                     short_note: profileData.short_note || '',
                     photo_url: profileData.photo_url || '',
+                    phone_number: profileData.phone_number || '', // Added
                     username: username,
                     updated_at: Date.now()
                 }, { merge: true });
@@ -81,6 +89,20 @@ export class ProfileService {
         }
 
         return apiPromise;
+    }
+
+    async requestPhoneUpdateOtp(email: string, newPhone: string) {
+        return this.api.post('register.php', { email, phone_number: newPhone, action: 'phone_update' }).toPromise();
+    }
+
+    async verifyPhoneUpdate(email: string, otp: string) {
+        // Technically this could just be a special call to profile.php 
+        // to verify against the otps table for this email
+        return this.api.post('profile.php', {
+            action: 'verify_phone_otp',
+            email: email,
+            otp: otp
+        }).toPromise();
     }
 
     async uploadPhoto(formData: FormData): Promise<string> {

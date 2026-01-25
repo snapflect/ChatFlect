@@ -96,6 +96,44 @@ class EmailService
     }
 
     /**
+     * Send Phone Update OTP email
+     * 
+     * @param string $to Recipient email address
+     * @param string $otp The OTP code
+     * @param string $newPhone The proposed new phone number
+     * @return array ['success' => bool, 'message' => string]
+     */
+    public static function sendPhoneUpdateOTP($to, $otp, $newPhone)
+    {
+        try {
+            $mailer = self::getMailer();
+
+            // Clear previous recipients
+            $mailer->clearAddresses();
+            $mailer->addAddress($to);
+
+            // Email content
+            $mailer->Subject = 'Confirm Your Phone Number Change';
+
+            // HTML version
+            $mailer->isHTML(true);
+            $mailer->Body = self::getPhoneUpdateEmailHTML($otp, $newPhone);
+
+            // Plain text version
+            $mailer->AltBody = "You are requesting to change your SnapFlect phone number to: $newPhone\n\nYour verification code is: $otp\n\nThis code expires in 5 minutes.";
+
+            $mailer->send();
+
+            error_log("Phone update OTP email sent successfully to: $to");
+            return ['success' => true, 'message' => 'OTP sent successfully'];
+
+        } catch (Exception $e) {
+            error_log("Failed to send phone update OTP email to $to: " . $e->getMessage());
+            return ['success' => false, 'message' => 'Failed to send email: ' . $e->getMessage()];
+        }
+    }
+
+    /**
      * Generate HTML email template for OTP
      */
     private static function getOTPEmailHTML($otp)
@@ -133,6 +171,69 @@ class EmailService
                                     </p>
                                     <p style="margin: 0; color: #999999; font-size: 13px;">
                                         If you didn\'t request this code, you can safely ignore this email.
+                                    </p>
+                                </td>
+                            </tr>
+                            <!-- Footer -->
+                            <tr>
+                                <td style="padding: 20px 30px; text-align: center; background-color: #f8f9fa; border-radius: 0 0 10px 10px;">
+                                    <p style="margin: 0; color: #999999; font-size: 12px;">
+                                        © 2025 SnapFlect. All rights reserved.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        </body>
+        </html>';
+    }
+
+    /**
+     * Generate HTML email template for Phone Update OTP
+     */
+    private static function getPhoneUpdateEmailHTML($otp, $newPhone)
+    {
+        return '
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+            <table role="presentation" style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td align="center" style="padding: 40px 0;">
+                        <table role="presentation" style="width: 600px; max-width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            <!-- Header -->
+                            <tr>
+                                <td style="padding: 40px 30px; text-align: center; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border-radius: 10px 10px 0 0;">
+                                    <h1 style="margin: 0; color: #ffffff; font-size: 28px;">SnapFlect Security</h1>
+                                </td>
+                            </tr>
+                            <!-- Body -->
+                            <tr>
+                                <td style="padding: 40px 30px;">
+                                    <h2 style="margin: 0 0 20px; color: #333333; font-size: 24px;">Confirm Your Phone Number Change</h2>
+                                    <p style="margin: 0 0 10px; color: #666666; font-size: 16px; line-height: 1.5;">
+                                        You are requesting to link a new phone number to your SnapFlect account:
+                                    </p>
+                                    <p style="margin: 0 0 30px; text-align: center; font-size: 20px; color: #333; font-weight: bold;">
+                                        ' . $newPhone . '
+                                    </p>
+                                    <p style="margin: 0 0 20px; color: #666666; font-size: 16px;">
+                                        Please enter the verification code below in the app to confirm this change:
+                                    </p>
+                                    <div style="background-color: #f8f9fa; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 30px;">
+                                        <span style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #f5576c;">' . $otp . '</span>
+                                    </div>
+                                    <p style="margin: 0 0 10px; color: #666666; font-size: 14px;">
+                                        ⏱️ This code expires in <strong>5 minutes</strong>.
+                                    </p>
+                                    <p style="margin: 0; color: #999999; font-size: 13px;">
+                                        If you did not initiate this change, please contact support immediately or change your password.
                                     </p>
                                 </td>
                             </tr>
