@@ -51,7 +51,7 @@ if (!$idToken) {
 // Verify Google ID Token
 function verifyGoogleToken($idToken)
 {
-    $googleClientId = '1036135506512-eke9ocopr8j2m5oss3k7h2651he778da.apps.googleusercontent.com';
+    $googleClientId = '1036135506512-1fj8d144k2i3k9aikpn34lu27ut1bhht.apps.googleusercontent.com';
 
     // Verify token with Google API
     $verifyUrl = "https://oauth2.googleapis.com/tokeninfo?id_token=" . urlencode($idToken);
@@ -109,7 +109,7 @@ function generateUserId()
 }
 
 // Check if user exists by email
-$stmt = $conn->prepare("SELECT user_id, first_name FROM users WHERE email = ?");
+$stmt = $conn->prepare("SELECT user_id, is_profile_complete FROM users WHERE email = ?");
 $stmt->bind_param("s", $verifiedEmail);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -117,13 +117,16 @@ $existingUser = $result->fetch_assoc();
 $stmt->close();
 
 $isNewUser = false;
+$isProfileComplete = 0;
+$googleProfileData = json_encode($tokenPayload);
 
 if ($existingUser) {
-    // Existing user - update public key
+    // Existing user - update public key and profile data
     $userId = $existingUser['user_id'];
+    $isProfileComplete = (int) $existingUser['is_profile_complete'];
 
-    $updateStmt = $conn->prepare("UPDATE users SET public_key = ?, google_sub = ? WHERE user_id = ?");
-    $updateStmt->bind_param("sss", $publicKey, $googleSub, $userId);
+    $updateStmt = $conn->prepare("UPDATE users SET public_key = ?, google_sub = ?, google_profile_data = ? WHERE user_id = ?");
+    $updateStmt->bind_param("ssss", $publicKey, $googleSub, $googleProfileData, $userId);
     $updateStmt->execute();
     $updateStmt->close();
 
@@ -132,17 +135,18 @@ if ($existingUser) {
     // New user - create account
     $userId = generateUserId();
     $isNewUser = true;
+    $isProfileComplete = 0; // Fresh Google users need phone registration
 
     // Extract first name from full name
     $firstName = explode(' ', $name)[0] ?? $name;
     $lastName = trim(str_replace($firstName, '', $name)) ?: null;
 
-    $insertStmt = $conn->prepare("INSERT INTO users (user_id, email, first_name, last_name, photo_url, public_key, google_sub, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())");
-    $insertStmt->bind_param("sssssss", $userId, $verifiedEmail, $firstName, $lastName, $photoUrl, $publicKey, $googleSub);
+    $insertStmt = $conn->prepare("INSERT INTO users (user_id, email, first_name, last_name, photo_url, public_key, google_sub, google_profile_data, is_profile_complete, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())");
+    $insertStmt->bind_param("ssssssssi", $userId, $verifiedEmail, $firstName, $lastName, $photoUrl, $publicKey, $googleSub, $googleProfileData, $isProfileComplete);
 
     if (!$insertStmt->execute()) {
         http_response_code(500);
-        echo json_encode(["error" => "Failed to create user"]);
+        echo json_encode(["error" => "Failed to create user: " . $insertStmt->error]);
         exit;
     }
     $insertStmt->close();
@@ -155,5 +159,8 @@ echo json_encode([
     "status" => "success",
     "message" => $isNewUser ? "Account created" : "Login successful",
     "user_id" => $userId,
-    "is_new_user" => $isNewUser
+    "token" => $idToken, // Session token for header auth
+    "is_new_user" => $isNewUser,
+    "is_profile_complete" => $isProfileComplete
 ]);
+?>

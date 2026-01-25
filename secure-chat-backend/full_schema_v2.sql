@@ -7,6 +7,9 @@ START TRANSACTION;
 SET time_zone = "+00:00";
 
 -- 1. Clean Up
+DROP TABLE IF EXISTS `audit_logs`;
+DROP TABLE IF EXISTS `rate_limits`;
+DROP TABLE IF EXISTS `user_devices`;
 DROP TABLE IF EXISTS `status_updates`;
 DROP TABLE IF EXISTS `calls`;
 DROP TABLE IF EXISTS `group_members`;
@@ -20,18 +23,19 @@ DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` varchar(255) NOT NULL, -- UUID
-  `phone_number` varchar(50) NOT NULL,
-  `email` varchar(100) DEFAULT NULL, -- Added for Auth v2
+  `phone_number` varchar(50) DEFAULT NULL, -- Nullable for OAuth users
+  `email` varchar(100) DEFAULT NULL,
   `first_name` varchar(100) DEFAULT NULL,
   `last_name` varchar(100) DEFAULT NULL,
   `short_note` varchar(255) DEFAULT NULL,
   `photo_url` varchar(500) DEFAULT NULL,
-  `public_key` text DEFAULT NULL, -- Critical for Encryption
+  `public_key` text DEFAULT NULL,
+  `google_sub` varchar(255) DEFAULT NULL, -- Google Unique ID
   `fcm_token` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `phone_number` (`phone_number`),
-  UNIQUE KEY `user_id` (`user_id`)
+  UNIQUE KEY `user_id` (`user_id`),
+  UNIQUE KEY `google_sub` (`google_sub`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 3. OTPs Table (Required for Auth)
@@ -105,6 +109,49 @@ CREATE TABLE `status_updates` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`id`),
   INDEX `idx_user_time` (`user_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
+-- 9. User Devices (Multi-Device Support)
+CREATE TABLE `user_devices` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` varchar(255) NOT NULL,
+  `device_uuid` varchar(64) NOT NULL,
+  `public_key` text NOT NULL,
+  `fcm_token` text DEFAULT NULL,
+  `device_name` varchar(100) DEFAULT 'Unknown Device',
+  `last_active` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_device` (`user_id`, `device_uuid`),
+  FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 10. Rate Limits (Security)
+CREATE TABLE `rate_limits` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `identifier` varchar(255) NOT NULL COMMENT 'IP address or user ID',
+  `endpoint` varchar(255) NOT NULL COMMENT 'API endpoint path',
+  `request_count` int(11) DEFAULT 1 COMMENT 'Number of requests in window',
+  `window_start` timestamp NOT NULL DEFAULT current_timestamp() COMMENT 'Start of rate limit window',
+  PRIMARY KEY (`id`),
+  INDEX `idx_identifier_endpoint` (`identifier`, `endpoint`),
+  INDEX `idx_window_start` (`window_start`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 11. Audit Logs (Security)
+CREATE TABLE `audit_logs` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT,
+  `user_id` varchar(255) DEFAULT NULL COMMENT 'User performing the action',
+  `action` varchar(100) NOT NULL COMMENT 'Action type',
+  `details` text DEFAULT NULL COMMENT 'JSON details',
+  `ip_address` varchar(45) DEFAULT NULL,
+  `user_agent` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  INDEX `idx_user_action` (`user_id`, `action`),
+  INDEX `idx_action_time` (`action`, `created_at`),
+  INDEX `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 COMMIT;

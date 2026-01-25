@@ -23,6 +23,22 @@ function getBaseUrl(): string
 
 /* ---------- INPUT ---------- */
 $data = json_decode(file_get_contents("php://input"));
+
+// Email Discovery Support
+if (isset($data->query) && !empty($data->query)) {
+    $search = "%" . sanitizeString($data->query) . "%";
+    $stmt = $conn->prepare("SELECT user_id, email, phone_number, first_name, last_name, photo_url FROM users WHERE email LIKE ? OR first_name LIKE ? OR last_name LIKE ? LIMIT 20");
+    $stmt->bind_param("sss", $search, $search, $search);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $matches = [];
+    while ($user = $result->fetch_assoc()) {
+        $matches[] = $user;
+    }
+    echo json_encode($matches);
+    exit;
+}
+
 if (!isset($data->phone_numbers) || !is_array($data->phone_numbers)) {
     echo json_encode([]);
     exit;
