@@ -32,6 +32,15 @@
             [disabled]="!phoneNumber || !email">
             Send OTP to Email <ion-icon name="arrow-forward-outline" slot="end"></ion-icon>
           </ion-button>
+
+          <div class="divider ion-margin-vertical">
+            <span>OR</span>
+          </div>
+
+          <ion-button expand="block" shape="round" fill="outline" class="google-btn" (click)="signInWithGoogle()">
+            <ion-icon name="logo-google" slot="start"></ion-icon>
+            Sign in with Google
+          </ion-button>
         </div>
 
         <div *ngIf="otpSent" class="input-group">

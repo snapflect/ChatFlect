@@ -1,6 +1,6 @@
 import { Injectable, NgZone } from '@angular/core';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion, arrayRemove, collectionGroup, getDocs, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion, arrayRemove, collectionGroup, getDocs, deleteDoc, limit, startAfter } from 'firebase/firestore';
 import { environment } from 'src/environments/environment';
 import { Observable, BehaviorSubject, Subject } from 'rxjs';
 import { CryptoService } from './crypto.service';
@@ -31,6 +31,7 @@ export class ChatService {
         private zone: NgZone
     ) {
         this.initFirestore();
+        this.initHistorySyncLogic();
     }
 
     protected initFirestore() {
@@ -152,20 +153,65 @@ export class ChatService {
             // Other Participants
             for (const p of participants) {
                 const pid = String(p).trim();
-                if (pid === String(senderId).trim()) continue;
+                // Send to self as well if we have multiple devices (Phase 2), but for now ensuring we have our own entry (handled by myPubKey above for current device).
+                // Actually, for multi-device self-sync, we should also query our own OTHER devices.
+                // But let's stick to standard flow: Query keys for all participants.
+
+                if (pid === String(senderId).trim()) {
+                    // For Sender (Me): We already added current device key above.
+                    // Ideally we should fetch other devices of mine too.
+                    try {
+                        const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
+                        if (res && res.devices) {
+                            // Encrypt for my OTHER devices
+                            const myCurrentUuid = localStorage.getItem('device_uuid');
+                            for (const [devUuid, devKey] of Object.entries(res.devices)) {
+                                if (devUuid !== myCurrentUuid) {
+                                    // Use a composite key for the map: "userId:deviceUuid" or just "userId" if we want to blast?
+                                    // The current structure uses `keysMap[userId] = encKey`. It doesn't support multiple keys per user yet.
+                                    // We need to change `keysMap` structure OR keysMap key format.
+                                    // Proposed: keysMap key = "userId" for primary, or "userId:uuid".
+                                    // BUT, the DECIPHER logic looks for keys[myId].
+                                    // So `keys[myId]` should be an OBJECT of { uuid: encKey } OR we flatten keys to use UUIDs?
+                                    // Flattening is risky if we don't know which UUID is ours easily on receipt.
+                                    // Better: keys[userId] = { default: encKey, [uuid]: encKey, ... }
+
+                                    if (!keysMap[pid]) keysMap[pid] = {}; // Ensure object
+                                    // If keysMap[pid] is string (legacy), convert?
+                                    if (typeof keysMap[pid] === 'string') {
+                                        const old = keysMap[pid];
+                                        keysMap[pid] = { 'primary': old };
+                                    }
+
+                                    keysMap[pid][devUuid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, String(devKey));
+                                }
+                            }
+                        }
+                    } catch (e) { }
+                    continue;
+                }
 
                 try {
-                    let pKey: string | undefined = this.publicKeyCache.get(pid);
-                    if (!pKey) {
-                        const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
-                        if (res && res.public_key) {
-                            pKey = String(res.public_key);
-                            this.publicKeyCache.set(pid, pKey);
-                        }
-                    }
+                    // Fetch Keys (Multiple)
+                    const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
 
-                    if (pKey) {
-                        keysMap[pid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, pKey);
+                    if (res) {
+                        // keysMap[pid] will be an object: { "dev_xyz": "enc_key_...", "dev_abc": "enc_key_..." }
+                        const userKeys: any = {};
+
+                        // 1. Primary/Legacy Key
+                        if (res.public_key) {
+                            userKeys['primary'] = await this.crypto.encryptAesKeyForRecipient(sessionKey, res.public_key);
+                        }
+
+                        // 2. Device Keys
+                        if (res.devices) {
+                            for (const [devUuid, devKey] of Object.entries(res.devices)) {
+                                userKeys[devUuid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, String(devKey));
+                            }
+                        }
+
+                        keysMap[pid] = userKeys;
                     }
                 } catch (e) {
                     this.logger.error(`Failed to fetch key for ${pid}`, e);
@@ -237,22 +283,27 @@ export class ChatService {
         }
     }
 
-    async sendImageMessage(chatId: string, imageBlob: Blob, senderId: string, caption: string = '') {
+
+
+    // Overload for viewOnce
+    async sendImageMessage(chatId: string, imageBlob: Blob, senderId: string, caption: string = '', viewOnce: boolean = false) {
         try {
-            // 1. Encrypt File (Generates Key + IV)
+            // 1. Encrypt Image
             const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(imageBlob);
             const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
 
-            // 2. Upload
+            // 2. Upload Encrypted
             const formData = new FormData();
             formData.append('file', encryptedBlob, 'secure_img.bin');
             const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
             if (!uploadRes?.url) throw new Error("Upload Failed");
 
             // 3. Metadata
-            const metadata = {
+            const metadata: any = {
                 file_url: uploadRes.url,
-                mime: 'image/jpeg'
+                caption: caption,
+                mime: 'image/jpeg',
+                viewOnce: viewOnce
             };
 
             await this.distributeSecurePayload(chatId, senderId, 'image', '', ivBase64, sessionKey, metadata);
@@ -262,7 +313,7 @@ export class ChatService {
         }
     }
 
-    async sendVideoMessageClean(chatId: string, videoBlob: Blob, senderId: string, duration: number, thumbnailBlob: Blob | null, caption: string = '') {
+    async sendVideoMessageClean(chatId: string, videoBlob: Blob, senderId: string, duration: number, thumbnailBlob: Blob | null, caption: string = '', viewOnce: boolean = false) {
         try {
             // 1. Encrypt Video
             const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(videoBlob);
@@ -287,7 +338,8 @@ export class ChatService {
                 file_url: uploadRes.url,
                 mime: 'video/mp4',
                 d: duration,
-                thumb: thumbUrl
+                thumb: thumbUrl,
+                viewOnce: viewOnce
             };
 
             await this.distributeSecurePayload(chatId, senderId, 'video', '', ivBase64, sessionKey, metadata);
@@ -297,8 +349,8 @@ export class ChatService {
     }
 
     // Alias for compatibility
-    async sendVideoMessage(chatId: string, videoBlob: Blob, senderId: string, duration: number, thumbnailBlob: Blob | null, caption: string = '') {
-        return this.sendVideoMessageClean(chatId, videoBlob, senderId, duration, thumbnailBlob, caption);
+    async sendVideoMessage(chatId: string, videoBlob: Blob, senderId: string, duration: number, thumbnailBlob: Blob | null, caption: string = '', viewOnce: boolean = false) {
+        return this.sendVideoMessageClean(chatId, videoBlob, senderId, duration, thumbnailBlob, caption, viewOnce);
     }
 
     async sendDocumentMessage(chatId: string, file: File, senderId: string) {
@@ -347,6 +399,11 @@ export class ChatService {
 
                     if (data['deletedFor'] && data['deletedFor'].includes(myId)) return null;
 
+                    // Filter Expired Messages (Disappearing Messages)
+                    if (data['expiresAt'] && data['expiresAt'] < Date.now()) {
+                        return null;
+                    }
+
                     const senderId = String(data['senderId']).trim();
                     let decrypted: any = "🔒 Decrypting...";
 
@@ -366,7 +423,22 @@ export class ChatService {
                     } else if (privateKeyStr) {
                         try {
                             if (data['keys'] && data['keys'][myId]) {
-                                const encKey = data['keys'][myId];
+                                let encKey = data['keys'][myId];
+
+                                // Phase 2: Check if encKey is an object (multi-device)
+                                if (typeof encKey === 'object') {
+                                    const devUuid = localStorage.getItem('device_uuid');
+                                    // Try specific device key, else 'primary', else first available
+                                    if (devUuid && encKey[devUuid]) {
+                                        encKey = encKey[devUuid];
+                                    } else if (encKey['primary']) {
+                                        encKey = encKey['primary'];
+                                    } else {
+                                        // Pick first
+                                        encKey = Object.values(encKey)[0];
+                                    }
+                                }
+
                                 const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
 
                                 if (data['type'] === 'text') {
@@ -390,7 +462,8 @@ export class ChatService {
                                         d: data['d'] || 0,
                                         thumb: data['thumb'] || '',
                                         name: data['name'] || '',
-                                        size: data['size'] || 0
+                                        size: data['size'] || 0,
+                                        viewOnce: data['viewOnce']
                                     };
                                 }
                             } else {
@@ -767,5 +840,187 @@ export class ChatService {
             this.logger.error("Failed to fetch user info", e);
         }
         return { username: `User ${userId.substr(0, 4)}`, photo: '' };
+    }
+    // --- History Sync ---
+    private syncReqUnsub: any;
+
+    initHistorySyncLogic() {
+        this.auth.currentUserId.subscribe(uid => {
+            if (uid) {
+                this.listenForSyncRequests(String(uid));
+                this.checkAndRequestHistory(String(uid));
+            } else {
+                if (this.syncReqUnsub) this.syncReqUnsub();
+            }
+        });
+    }
+
+    private async checkAndRequestHistory(uid: string) {
+        const synced = localStorage.getItem('history_synced');
+        if (!synced) {
+            const deviceUuid = localStorage.getItem('device_uuid');
+            // Only request if we have a device UUID (i.e. we are a "Device")
+            if (deviceUuid) {
+                await this.requestHistorySync(uid);
+                localStorage.setItem('history_synced', 'true');
+            }
+        }
+    }
+
+    async requestHistorySync(uid: string) {
+        const deviceUuid = localStorage.getItem('device_uuid');
+        const publicKey = localStorage.getItem('public_key');
+        if (!deviceUuid || !publicKey) return;
+
+        // Check recent requests to avoid spam
+        const col = collection(this.db, 'users', uid, 'sync_requests');
+        // Add request
+        await addDoc(col, {
+            requesterUuid: deviceUuid,
+            requesterPubK: publicKey,
+            timestamp: Date.now()
+        });
+        this.logger.log("Requested Secret History Sync");
+    }
+
+    listenForSyncRequests(uid: string) {
+        if (this.syncReqUnsub) this.syncReqUnsub();
+        const col = collection(this.db, 'users', uid, 'sync_requests');
+        // Offline Support: Increase limit to handle queue
+        const q = query(col, orderBy('timestamp', 'asc'), limit(10));
+
+        this.syncReqUnsub = onSnapshot(q, (snapshot: any) => {
+            snapshot.docChanges().forEach(async (change: any) => {
+                const data = change.doc.data();
+                const myUuid = localStorage.getItem('device_uuid');
+
+                // Only process additions that are PENDING (or undefined status)
+                // And not from me
+                if (change.type === 'added' && myUuid && data['requesterUuid'] !== myUuid) {
+                    if (!data['status'] || data['status'] === 'pending') {
+                        this.tryLockAndProcess(uid, change.doc.id, data);
+                    }
+                }
+            });
+        });
+    }
+
+    async tryLockAndProcess(uid: string, reqId: string, data: any) {
+        const myUuid = localStorage.getItem('device_uuid');
+        const docRef = doc(this.db, 'users', uid, 'sync_requests', reqId);
+
+        try {
+            // Attempt to Lock
+            await updateDoc(docRef, {
+                status: 'processing',
+                processorUuid: myUuid,
+                processedAt: Date.now()
+            });
+
+            // If lock success, process
+            await this.processSyncRequest(uid, reqId, data);
+
+        } catch (e) {
+            // Lock failed (someone else took it), ignore
+            this.logger.log("Sync request locked by another device");
+        }
+    }
+
+    async processSyncRequest(uid: string, reqId: string, data: any) {
+        const targetUuid = data['requesterUuid'];
+        const targetPubK = data['requesterPubK'];
+        this.logger.log("Processing History Sync for", targetUuid);
+
+        // Fetch Top 5 Active Chats
+        const chatsRef = collection(this.db, 'chats');
+        const qChats = query(chatsRef, where('participants', 'array-contains', uid), orderBy('lastTimestamp', 'desc'), limit(5));
+        const chatSnaps = await getDocs(qChats);
+
+        for (const chatDoc of chatSnaps.docs) {
+            const chatId = chatDoc.id;
+
+            // Pagination Logic for Larger History (Performance)
+            let lastDoc = null;
+            let hasMore = true;
+            let count = 0;
+            const MAX_HISTORY = 200; // Limit per chat
+
+            while (hasMore && count < MAX_HISTORY) {
+                const msgsRef = collection(this.db, 'chats', chatId, 'messages');
+                let qMsgs;
+
+                if (lastDoc) {
+                    qMsgs = query(msgsRef, orderBy('timestamp', 'desc'), startAfter(lastDoc), limit(50));
+                } else {
+                    qMsgs = query(msgsRef, orderBy('timestamp', 'desc'), limit(50));
+                }
+
+                const msgSnaps: any = await getDocs(qMsgs);
+                if (msgSnaps.empty) {
+                    hasMore = false;
+                    break;
+                }
+
+                for (const msgD of msgSnaps.docs) {
+                    lastDoc = msgD;
+                    count++;
+                    const msgData = msgD.data();
+
+                    // Skip if too old (e.g. > 30 days)
+                    if (msgData['timestamp'] < (Date.now() - 30 * 24 * 60 * 60 * 1000)) {
+                        hasMore = false;
+                        break;
+                    }
+
+                    if (msgData['keys'] && msgData['keys'][uid]) {
+                        const userKeys = msgData['keys'][uid];
+                        if (typeof userKeys === 'object' && userKeys[targetUuid]) continue;
+
+                        // Re-encrypt
+                        await this.reEncryptMessageKey(chatId, msgD.id, msgData, targetUuid, targetPubK, uid);
+                    }
+                }
+
+                // Yield to UI thread to prevent freeze
+                await new Promise(r => setTimeout(r, 50));
+            }
+        }
+
+        await deleteDoc(doc(this.db, 'users', uid, 'sync_requests', reqId));
+        this.logger.log("History Sync Completed");
+    }
+
+    async reEncryptMessageKey(chatId: string, msgId: string, msgData: any, targetUuid: string, targetPubK: string, myId: string) {
+        try {
+            let myEncKey = msgData['keys'][myId];
+            if (!myEncKey) return;
+
+            const myDeviceUuid = localStorage.getItem('device_uuid');
+            if (typeof myEncKey === 'object') {
+                if (myDeviceUuid && myEncKey[myDeviceUuid]) myEncKey = myEncKey[myDeviceUuid];
+                else if (myEncKey['primary']) myEncKey = myEncKey['primary'];
+                else myEncKey = Object.values(myEncKey)[0];
+            }
+
+            const myPrivKey = localStorage.getItem('private_key');
+            if (!myPrivKey) return;
+
+            const sessionKey = await this.crypto.decryptAesKeyFromSender(myEncKey, myPrivKey);
+            const newEncKey = await this.crypto.encryptAesKeyForRecipient(sessionKey, targetPubK);
+
+            let updatePayload: any = {};
+            // If current is string, convert to map
+            if (typeof msgData['keys'][myId] === 'string') {
+                const legacyKey = msgData['keys'][myId];
+                updatePayload[`keys.${myId}`] = { primary: legacyKey, [targetUuid]: newEncKey };
+            } else {
+                updatePayload[`keys.${myId}.${targetUuid}`] = newEncKey;
+            }
+
+            await updateDoc(doc(this.db, 'chats', chatId, 'messages', msgId), updatePayload);
+
+        } catch (e) {
+            this.logger.error("Re-encrypt failed", e);
+        }
     }
 }

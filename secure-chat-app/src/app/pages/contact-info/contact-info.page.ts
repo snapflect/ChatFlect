@@ -1,5 +1,5 @@
 import { Component, OnInit } from '@angular/core';
-import { NavController } from '@ionic/angular';
+import { NavController, AlertController, ToastController } from '@ionic/angular';
 import { ActivatedRoute } from '@angular/router';
 import { ChatService } from 'src/app/services/chat.service';
 import { map } from 'rxjs/operators';
@@ -15,13 +15,16 @@ export class ContactInfoPage implements OnInit {
     userId: string | null = null;
     chatId: string | null = null;
     user: any = null;
+    chatDetails: any = null;
     sharedMedia: any[] = [];
     isLoadingMedia = true;
 
     constructor(
         private route: ActivatedRoute,
         private nav: NavController,
-        private chatService: ChatService
+        private chatService: ChatService,
+        private alertCtrl: AlertController,
+        private toastCtrl: ToastController
     ) { }
 
     ngOnInit() {
@@ -34,6 +37,9 @@ export class ContactInfoPage implements OnInit {
             }
             if (this.chatId) {
                 this.loadSharedMedia();
+                this.chatService.getChatDetails(this.chatId).subscribe(details => {
+                    this.chatDetails = details;
+                });
             }
         });
     }
@@ -41,6 +47,67 @@ export class ContactInfoPage implements OnInit {
     async loadUserInfo() {
         if (!this.userId) return;
         this.user = await this.chatService.getUserInfo(this.userId);
+    }
+
+    async configureDisappearingMessages() {
+        if (!this.chatId) return;
+
+        const currentTimer = this.chatDetails?.autoDeleteTimer || 0;
+
+        const alert = await this.alertCtrl.create({
+            header: 'Disappearing Messages',
+            message: 'Automatically delete new messages after a set time.',
+            inputs: [
+                {
+                    name: 'off',
+                    type: 'radio',
+                    label: 'Off',
+                    value: 0,
+                    checked: currentTimer === 0
+                },
+                {
+                    name: '24h',
+                    type: 'radio',
+                    label: '24 Hours',
+                    value: 86400000,
+                    checked: currentTimer === 86400000
+                },
+                {
+                    name: '7d',
+                    type: 'radio',
+                    label: '7 Days',
+                    value: 604800000,
+                    checked: currentTimer === 604800000
+                },
+                {
+                    name: '90d',
+                    type: 'radio',
+                    label: '90 Days',
+                    value: 7776000000,
+                    checked: currentTimer === 7776000000
+                }
+            ],
+            buttons: [
+                {
+                    text: 'Cancel',
+                    role: 'cancel'
+                },
+                {
+                    text: 'Set',
+                    handler: (value) => {
+                        this.chatService.setChatTimer(this.chatId!, value).then(async () => {
+                            const toast = await this.toastCtrl.create({
+                                message: value > 0 ? 'Disappearing messages turned on' : 'Disappearing messages turned off',
+                                duration: 2000
+                            });
+                            toast.present();
+                        });
+                    }
+                }
+            ]
+        });
+
+        await alert.present();
     }
 
     loadSharedMedia() {

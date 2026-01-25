@@ -107,6 +107,10 @@ const routes: Routes = [
     path: 'contact-picker-modal',
     loadChildren: () => import('./pages/contact-picker-modal/contact-picker-modal.module').then( m => m.ContactPickerModalPageModule)
   },
+  {
+    path: 'linked-devices',
+    loadChildren: () => import('./pages/linked-devices/linked-devices.module').then( m => m.LinkedDevicesPageModule)
+  },
 
 ];
 

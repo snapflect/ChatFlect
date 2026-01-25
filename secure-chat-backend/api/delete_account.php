@@ -1,5 +1,8 @@
 <?php
 require 'db.php';
+require_once 'rate_limiter.php';
+enforceRateLimit();
+
 $data = json_decode(file_get_contents("php://input"), true);
 
 if (isset($data['user_id'])) {

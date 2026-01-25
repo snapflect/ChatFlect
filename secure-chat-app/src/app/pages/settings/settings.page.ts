@@ -59,52 +59,8 @@ export class SettingsPage implements OnInit {
   }
 
   // --- DEVICE LINKING ---
-  async linkDevice() {
-    this.isLoading = true;
-    try {
-      // 1. Install Module (needed for Capacitor MLKit)
-      // On Web this throws/does nothing? We need to handle web carefully.
-      // Ideally run only if Capacitor.isNativePlatform()
-
-      const { available } = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable();
-      if (!available) {
-        await BarcodeScanner.installGoogleBarcodeScannerModule();
-      }
-
-      // 2. Scan
-      const { barcodes } = await BarcodeScanner.scan({
-        formats: [BarcodeFormat.QrCode]
-      });
-
-      if (barcodes.length > 0) {
-        const raw = barcodes[0].rawValue;
-        if (raw) {
-          try {
-            const data = JSON.parse(raw);
-            if (data.sid && data.pk) {
-              await this.linkService.sendSyncData(data.sid, data.pk);
-              window.alert(`Device Linked! Desktop should reload automatically.`);
-            } else {
-              window.alert("Invalid QR Code");
-            }
-          } catch (e) {
-            window.alert("Invalid QR Format");
-          }
-        }
-      }
-
-    } catch (e: any) {
-      if (e && e.message && e.message.includes('canceled')) {
-        // User canceled
-      } else {
-        this.logger.error("Scan Failed", e);
-        const msg = (e && e.message) ? e.message : 'Unknown Scan Error';
-        window.alert("Scan Failed: " + msg);
-      }
-    } finally {
-      this.isLoading = false;
-    }
-  }
+  // Moved to LinkedDevicesPage
+  // For future: QR Code scanning for instant login can be re-added here or in LinkedDevicesPage.
 
   openPrivacy() {
     // ... 

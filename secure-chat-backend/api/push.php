@@ -70,47 +70,70 @@ $data = json_decode(file_get_contents("php://input"), true);
 if (isset($data['target_user_id']) && isset($data['title'])) {
     $target_id = $data['target_user_id'];
 
-    // Get Token using prepared statement
-    $stmt = $conn->prepare("SELECT fcm_token FROM users WHERE user_id = ?");
-    $stmt->bind_param("s", $target_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    // Get Tokens (Multi-Device Support)
+    $tokens = [];
 
-    if ($row = $result->fetch_assoc()) {
-        $to = $row['fcm_token'];
+    // 1. Get from user_devices
+    // Added table check logic implicitly via query success
+    $stmt = $conn->prepare("SELECT fcm_token FROM user_devices WHERE user_id = ? AND fcm_token IS NOT NULL AND fcm_token != ''");
+    if ($stmt) {
+        $stmt->bind_param("s", $target_id);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        while ($row = $res->fetch_assoc()) {
+            $tokens[] = $row['fcm_token'];
+        }
         $stmt->close();
+    }
 
-        if (!$to)
-            exit;
-
-        $accessToken = getAccessToken('service-account.json');
-
-        if (is_array($accessToken) && isset($accessToken['error'])) {
-            http_response_code(500);
-            echo json_encode($accessToken);
-            exit;
+    // 2. Fallback to `users` table (Legacy)
+    if (empty($tokens)) {
+        $stmt = $conn->prepare("SELECT fcm_token FROM users WHERE user_id = ?");
+        $stmt->bind_param("s", $target_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        if ($row = $result->fetch_assoc()) {
+            if ($row['fcm_token'])
+                $tokens[] = $row['fcm_token'];
         }
+        $stmt->close();
+    }
 
-        if (!$accessToken) {
-            http_response_code(500);
-            echo json_encode(["error" => "Unknown error generating access token"]);
-            exit;
-        }
+    $tokens = array_unique($tokens);
 
+    if (empty($tokens))
+        exit;
+
+    $accessToken = getAccessToken('service-account.json');
+
+    if (is_array($accessToken) && isset($accessToken['error'])) {
+        http_response_code(500);
+        echo json_encode($accessToken);
+        exit;
+    }
+
+    if (!$accessToken) {
+        http_response_code(500);
+        echo json_encode(["error" => "Unknown error generating access token"]);
+        exit;
+    }
+
+    $projectId = json_decode(file_get_contents('service-account.json'), true)['project_id'];
+
+    // Loop Send
+    foreach ($tokens as $to) {
         // Get custom data and channel from request
         $customData = isset($data['data']) ? json_decode($data['data'], true) : [];
         $androidChannelId = $data['android_channel_id'] ?? 'messages';
 
         // Determine sound based on notification type
-        // FIX: Use 'default' to prevent OS from playing a long looping ringtone that duplicates the App's ringtone.
-        // The App (SoundService) will handle the ringing when active.
         $isCallNotification = ($customData['type'] ?? '') === 'call_invite';
-        $sound = 'default'; // Always use default system sound (short beep/ding)
+        $sound = 'default';
 
         // Set priority - calls need high priority to wake device
         $priority = $isCallNotification ? 'high' : 'normal';
 
-        // V1 Payload Structure with Android-specific settings
+        // V1 Payload Structure
         $payload = [
             'message' => [
                 'token' => $to,
@@ -144,7 +167,6 @@ if (isset($data['target_user_id']) && isset($data['title'])) {
         ];
 
         $ch = curl_init();
-        $projectId = json_decode(file_get_contents('service-account.json'), true)['project_id'];
         curl_setopt($ch, CURLOPT_URL, "https://fcm.googleapis.com/v1/projects/$projectId/messages:send");
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -156,9 +178,12 @@ if (isset($data['target_user_id']) && isset($data['title'])) {
         $result = curl_exec($ch);
         curl_close($ch);
 
-        echo $result;
-    } else {
-        $stmt->close();
+        // echo $result; // Echoing might mess up JSON response if we want to return success count, but current client doesn't check specific per-token ID.
     }
+
+    echo json_encode(["status" => "sent", "count" => count($tokens)]);
+
+} else {
+    // missing params
 }
 ?>

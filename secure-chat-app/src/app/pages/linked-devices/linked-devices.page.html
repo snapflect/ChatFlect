@@ -1,0 +1,49 @@
+<ion-header class="ion-no-border">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-button (click)="goBack()" color="medium">
+        <ion-icon name="arrow-back"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+    <ion-title>Linked Devices</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="bg-light">
+  <div class="header-section">
+    <div class="icon-circle">
+      <ion-icon name="laptop-outline"></ion-icon>
+    </div>
+    <p>Use ChatFlect on other devices</p>
+  </div>
+
+  <ion-list lines="full" class="device-list">
+    <ion-list-header>
+      <ion-label>Active Devices</ion-label>
+    </ion-list-header>
+
+    <div *ngIf="isLoading" class="ion-text-center ion-padding">
+      <ion-spinner></ion-spinner>
+    </div>
+
+    <ion-item *ngFor="let device of devices">
+      <ion-icon [name]="device.device_name.toLowerCase().includes('web') ? 'globe-outline' : 'phone-portrait-outline'"
+        slot="start" size="large" class="device-icon">
+      </ion-icon>
+      <ion-label>
+        <h2>{{ device.device_name }}</h2>
+        <p>Last active: {{ device.last_active }}</p>
+        <p *ngIf="device.device_uuid === currentDeviceUuid" class="current-device-label">This Device</p>
+      </ion-label>
+
+      <ion-button *ngIf="device.device_uuid !== currentDeviceUuid" fill="clear" color="danger"
+        (click)="confirmRevoke(device)">
+        Log Out
+      </ion-button>
+    </ion-item>
+  </ion-list>
+
+  <div class="info-footer">
+    <p>Your messages are end-to-end encrypted on all devices.</p>
+  </div>
+</ion-content>

@@ -18,6 +18,13 @@
   <ion-toolbar class="caption-toolbar">
     <div class="input-container glass-card">
       <ion-input placeholder="Add a caption..." [(ngModel)]="caption" class="caption-input"></ion-input>
+
+      <!-- View Once Toggle -->
+      <ion-button *ngIf="viewOnceAvailable" (click)="toggleViewOnce()" fill="clear"
+        [color]="isViewOnce ? 'primary' : 'medium'" class="view-once-btn">
+        <ion-icon [name]="isViewOnce ? 'timer' : 'timer-outline'" slot="icon-only"></ion-icon>
+      </ion-button>
+
       <ion-button (click)="send()" fill="clear" class="send-btn">
         <ion-icon name="send" slot="icon-only"></ion-icon>
       </ion-button>

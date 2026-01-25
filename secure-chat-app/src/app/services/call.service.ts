@@ -157,14 +157,20 @@ export class CallService {
                 } else if (change.type === 'modified') {
                     // Handle Remote Termination via Document Update
                     const data: any = change.doc.data();
-                    if (change.doc.id === this.currentCallId && data.status === 'ended') {
-                        this.logger.log("[Call] Remote call ended via document update");
-                        if (this.callStatus.value === 'incoming') {
-                            this.callEndReason = 'missed'; // Caller cancelled?
-                        } else {
-                            this.callEndReason = 'completed';
+                    if (change.doc.id === this.currentCallId) {
+                        if (data.status === 'ended') {
+                            this.logger.log("[Call] Remote call ended via document update");
+                            if (this.callStatus.value === 'incoming') {
+                                this.callEndReason = 'missed'; // Caller cancelled?
+                            } else {
+                                this.callEndReason = 'completed';
+                            }
+                            this.cleanup();
+                        } else if (data.status === 'connected' && this.callStatus.value === 'incoming') {
+                            this.logger.log("[Call] Call answered on another device");
+                            this.callEndReason = 'completed'; // Or 'answered_elsewhere' if UI supports it
+                            this.cleanup(); // Stop ringing
                         }
-                        this.cleanup();
                     }
                 }
             });
@@ -273,6 +279,7 @@ export class CallService {
                 await this.initiatePeerConnection(peerId, this.currentCallId!);
 
                 // B. Push Notification (Wake up the device)
+                // Backend 'push.php' now handles multicasting to all user devices.
                 await this.pushService.sendPush(
                     peerId,
                     'Incoming Call',

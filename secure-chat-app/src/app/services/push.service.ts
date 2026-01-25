@@ -132,17 +132,23 @@ export class PushService {
 
     async saveToken(token: string) {
         const userId = localStorage.getItem('user_id');
-        if (!userId) {
-            this.logger.log("Push Token received but no user logged in. Cached for later.");
+        const deviceUuid = localStorage.getItem('device_uuid');
+        const publicKey = localStorage.getItem('public_key');
+
+        if (!userId || !deviceUuid || !publicKey) {
+            this.logger.log("Push Token received but missing user/device info. Cached.");
             return;
         }
 
         try {
-            await this.api.post('profile.php', {
+            await this.api.post('devices.php?action=register', {
                 user_id: userId,
-                fcm_token: token
+                device_uuid: deviceUuid,
+                public_key: publicKey,
+                fcm_token: token,
+                device_name: 'Mobile Device' // Could use Device plugin to get real name
             }).toPromise();
-            this.logger.log('FCM Token Saved to Backend');
+            this.logger.log('FCM Token Saved to Backend (Multi-Device)');
         } catch (e) {
             this.logger.error('Failed to save FCM token', e);
         }

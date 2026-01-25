@@ -1,6 +1,8 @@
 <?php
 // Headers handled by db.php
 require 'db.php';
+require_once 'rate_limiter.php';
+enforceRateLimit();
 require_once 'email_service.php';
 
 // Load email config for rate limiting settings

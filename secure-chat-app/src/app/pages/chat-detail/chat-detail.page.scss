@@ -642,6 +642,46 @@ ion-content.chat-content {
         margin: 0;
         font-size: 14px;
     }
+
+    .view-once-content {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        min-width: 200px;
+        background: rgba(255, 255, 255, 0.05);
+        cursor: pointer;
+
+        .vo-icon {
+            font-size: 24px;
+            color: var(--ion-color-primary);
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--ion-color-primary);
+            border-radius: 50%;
+        }
+
+        .vo-label {
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        &.opened {
+            opacity: 0.6;
+
+            .vo-icon {
+                color: #888;
+                border-color: #888;
+            }
+
+            .vo-label {
+                color: #aaa;
+            }
+        }
+    }
 }
 
 /* Revoked / Deleted Message */
@@ -657,4 +697,40 @@ ion-content.chat-content {
     ion-icon {
         font-size: 16px;
     }
+}
+
+/* Reaction Badges */
+.reaction-badge {
+    position: absolute;
+    bottom: -10px;
+    right: 8px;
+    background: rgba(50, 50, 55, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 2px 6px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    z-index: 5;
+    cursor: pointer;
+    backdrop-filter: blur(4px);
+
+    span {
+        line-height: 1;
+    }
+
+    .reaction-count {
+        color: #bbb;
+        font-size: 11px;
+        margin-left: 3px;
+        font-weight: 500;
+    }
+}
+
+.msg-me .reaction-badge {
+    background: rgba(40, 40, 45, 0.9);
+    left: 8px;
+    right: auto;
 }

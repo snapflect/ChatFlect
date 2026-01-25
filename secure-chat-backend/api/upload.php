@@ -2,6 +2,10 @@
 // upload.php - Unified Media Upload Handler
 // Fixes: P21, P22, P23, P24, P25
 
+require_once 'rate_limiter.php';
+// Enforce Rate Limit (DoS Protection)
+enforceRateLimit();
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-User-ID");

@@ -12,7 +12,11 @@
     </ion-buttons>
 
     <ion-title class="chat-title-group" (click)="openContactInfo()">
-      <div class="chat-name">{{ chatName || 'User' }}</div>
+      <div class="chat-name">
+        {{ chatName || 'User' }}
+        <ion-icon name="time-outline" *ngIf="chatDetails?.autoDeleteTimer > 0" class="disappearing-icon"
+          style="font-size: 0.8em; color: var(--ion-color-medium); vertical-align: middle; margin-left: 5px;"></ion-icon>
+      </div>
       <div class="chat-subtitle" *ngIf="!isGroup">
         <span *ngIf="typingUsers && typingUsers.length > 0; else presenceDisplay" class="typing-text">typing...</span>
         <ng-template #presenceDisplay>
@@ -102,18 +106,47 @@
 
           <!-- IMAGE -->
           <div *ngIf="isMedia(msg.text) && (msg.text.type === 'image' || !msg.text.type)" class="media-content">
-            <img [secureSrc]="msg.text.url" [pymKey]="isMyMsg(msg) ? (msg.text.ks || msg.text.k) : msg.text.k"
-              [pymIv]="msg.text.i" class="message-image" (click)="openImage(msg.text)"
-              (error)="$event.target.src = 'assets/placeholder_broken.png'" />
-            <p *ngIf="msg.text.caption">{{ msg.text.caption }}</p>
+            <!-- Normal Image -->
+            <ng-container *ngIf="!msg.text.viewOnce">
+              <img [secureSrc]="msg.text.url" [pymKey]="isMyMsg(msg) ? (msg.text.ks || msg.text.k) : msg.text.k"
+                [pymIv]="msg.text.i" class="message-image" (click)="openImage(msg.text)"
+                (error)="$event.target.src = 'assets/placeholder_broken.png'" />
+              <p *ngIf="msg.text.caption">{{ msg.text.caption }}</p>
+            </ng-container>
+
+            <!-- View Once Image -->
+            <div *ngIf="msg.text.viewOnce" class="view-once-content" (click)="openViewOnce(msg, 'image')"
+              [class.opened]="msg.viewed">
+              <div class="vo-icon">
+                <ion-icon name="timer" *ngIf="!msg.viewed && !isMyMsg(msg)"></ion-icon>
+                <ion-icon name="radio-button-off" *ngIf="msg.viewed || isMyMsg(msg)"></ion-icon>
+              </div>
+              <div class="vo-label">
+                {{ isMyMsg(msg) ? 'View Once' : (msg.viewed ? 'Opened' : 'Photo') }}
+              </div>
+            </div>
           </div>
 
           <!-- VIDEO -->
           <div *ngIf="getMsgType(msg.text) === 'video'" class="media-content">
-            <!-- Video Thumb or Player. SecureSrc sets src. -->
-            <video [secureSrc]="msg.text.url" [pymKey]="isMyMsg(msg) ? (msg.text.ks || msg.text.k) : msg.text.k"
-              [pymIv]="msg.text.i" controls class="message-video"></video>
-            <p *ngIf="msg.text.caption">{{ msg.text.caption }}</p>
+            <!-- Normal Video -->
+            <ng-container *ngIf="!msg.text.viewOnce">
+              <video [secureSrc]="msg.text.url" [pymKey]="isMyMsg(msg) ? (msg.text.ks || msg.text.k) : msg.text.k"
+                [pymIv]="msg.text.i" controls class="message-video"></video>
+              <p *ngIf="msg.text.caption">{{ msg.text.caption }}</p>
+            </ng-container>
+
+            <!-- View Once Video -->
+            <div *ngIf="msg.text.viewOnce" class="view-once-content" (click)="openViewOnce(msg, 'video')"
+              [class.opened]="msg.viewed">
+              <div class="vo-icon">
+                <ion-icon name="timer" *ngIf="!msg.viewed && !isMyMsg(msg)"></ion-icon>
+                <ion-icon name="radio-button-off" *ngIf="msg.viewed || isMyMsg(msg)"></ion-icon>
+              </div>
+              <div class="vo-label">
+                {{ isMyMsg(msg) ? 'View Once' : (msg.viewed ? 'Opened' : 'Video') }}
+              </div>
+            </div>
           </div>
 
           <!-- AUDIO -->
@@ -198,6 +231,12 @@
 
           <!-- TEXT -->
           <span *ngIf="getMsgType(msg.text) === 'text'" class="msg-text" [innerHTML]="linkify(msg.text)"></span>
+
+          <!-- Reactions -->
+          <div class="reaction-badge" *ngIf="getReactionCount(msg) > 0">
+            <span *ngFor="let r of getTopReactions(msg)">{{ r }}</span>
+            <span class="reaction-count" *ngIf="getReactionCount(msg) > 1">{{ getReactionCount(msg) }}</span>
+          </div>
 
           <!-- Metadata (Time + Status) -->
           <div class="msg-footer">

@@ -28,6 +28,11 @@ const config: CapacitorConfig = {
       repeat: true,
       interval: 15,
       autoStart: false
+    },
+    GoogleAuth: {
+      scopes: ['profile', 'email'],
+      serverClientId: '1036135506512-eke9ocopr8j2m5oss3k7h2651he778da.apps.googleusercontent.com',
+      forceCodeForRefreshToken: true
     }
   }
 };

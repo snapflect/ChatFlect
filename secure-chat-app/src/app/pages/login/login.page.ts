@@ -212,4 +212,35 @@ export class LoginPage implements OnDestroy {
     const toast = await this.toast.create({ message: msg, duration: 2000 });
     toast.present();
   }
+
+  // Google OAuth Sign-In
+  async signInWithGoogle() {
+    try {
+      const res: any = await this.auth.signInWithGoogle();
+      this.showToast('Google Sign-In Successful');
+
+      this.zone.run(async () => {
+        let targetRoute = '/tabs';
+
+        // Check if New User OR Profile Incomplete
+        if (res.is_new_user) {
+          targetRoute = '/profile';
+        } else {
+          const isComplete = await this.auth.isProfileComplete();
+          if (!isComplete) {
+            targetRoute = '/profile';
+          }
+        }
+
+        this.router.navigate([targetRoute]).then(nav => {
+          if (!nav) this.showToast('Navigation Failed');
+        });
+      });
+    } catch (e: any) {
+      const msg = (e && e.message) ? e.message : 'Google Sign-In Failed';
+      if (!msg.includes('cancelled') && !msg.includes('cancel')) {
+        this.showToast(msg);
+      }
+    }
+  }
 }

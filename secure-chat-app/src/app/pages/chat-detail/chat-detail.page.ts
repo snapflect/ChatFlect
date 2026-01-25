@@ -712,14 +712,44 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     const file = event.target.files[0];
     if (!file) return;
 
-    if (file.type.startsWith('video/')) {
-      await this.handleVideoUpload(file);
-    } else {
-      await this.uploadImage(event); // Existing Image Logic
-    }
+    // Reset input
+    event.target.value = '';
+
+    // Open Preview Modal
+    const modal = await this.modalController.create({
+      component: ImagePreviewModalPage,
+      componentProps: {
+        file: file,
+        viewOnceAvailable: true // FEATURE FLAG
+      }
+    });
+
+    modal.onDidDismiss().then(async (result) => {
+      if (result.data && result.data.confirmed) {
+        const caption = result.data.caption || '';
+        const viewOnce = result.data.viewOnce || false;
+
+        if (file.type.startsWith('video/')) {
+          await this.handleVideoUpload(file, caption, viewOnce);
+        } else {
+          await this.processImageUpload(file, caption, viewOnce);
+        }
+      }
+    });
+
+    await modal.present();
   }
 
-  async handleVideoUpload(file: File) {
+  async processImageUpload(file: File, caption: string, viewOnce: boolean) {
+    if (!this.chatId) return;
+    const load = await this.toastCtrl.create({ message: 'Sending Image...', duration: 1000 });
+    load.present();
+
+    await this.chatService.sendImageMessage(this.chatId, file, this.currentUserId, caption, viewOnce);
+    this.scrollToBottom();
+  }
+
+  async handleVideoUpload(file: File, caption: string = '', viewOnce: boolean = false) {
     if (!this.chatId) return;
     const load = await this.toastCtrl.create({ message: 'Processing Video...', duration: 2000 });
     load.present();
@@ -733,7 +763,8 @@ export class ChatDetailPage implements OnInit, OnDestroy {
       this.currentUserId,
       duration,
       thumb,
-      '' // Caption TODO
+      caption,
+      viewOnce
     );
     this.scrollToBottom();
   }
@@ -1365,6 +1396,41 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     return 'text';
   }
 
+  async openViewOnce(msg: any, type: 'image' | 'video') {
+    if (this.isMyMsg(msg)) {
+      this.showToast("You sent this as View Once.");
+      return;
+    }
+
+    if (msg.viewed) {
+      this.showToast("Already opened");
+      return;
+    }
+
+    const modal = await this.modalController.create({
+      component: ImageModalPage,
+      componentProps: {
+        imageUrl: type === 'image' ? msg.text.url : null,
+        videoUrl: type === 'video' ? msg.text.url : null,
+        pymKey: msg.text.k, // These keys should be RAW or decrypted if we have them. 
+        // Note: SecureSrc usually handles decryption if passed key/iv. 
+        // If we decrypted it in Service, we have raw key in 'k'.
+        pymIv: msg.text.i,
+        caption: msg.text.caption,
+        // isViewOnce: true // Prevent saving
+      }
+    });
+
+    await modal.present();
+    await modal.onDidDismiss();
+
+    // Mark as viewed locally
+    msg.viewed = true;
+
+    // Force Change Detection
+    this.cdr.detectChanges();
+  }
+
   getDocIcon(mime: string): string {
     if (!mime) return 'document-outline';
     if (mime.includes('pdf')) return 'document-text-outline';
@@ -1644,8 +1710,18 @@ export class ChatDetailPage implements OnInit, OnDestroy {
       buttons: [
         {
           text: `Disappearing Messages (${this.getTimerLabel()})`,
-          icon: 'timer',
+          icon: 'time-outline',
           handler: () => this.promptDisappearingMessages()
+        },
+        {
+          text: 'Search',
+          icon: 'search-outline',
+          handler: () => { this.toggleSearch(); }
+        },
+        {
+          text: 'View Contact',
+          icon: 'person-outline',
+          handler: () => { this.openContactInfo(); }
         },
         {
           text: 'View Live Map',

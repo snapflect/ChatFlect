@@ -9,9 +9,12 @@ import { DomSanitizer } from '@angular/platform-browser';
   standalone: false
 })
 export class ImagePreviewModalPage implements OnInit {
-  @Input() imageFile: any; // File or Blob
+  @Input() file: any; // File or Blob (Renamed from imageFile to match caller)
+  @Input() viewOnceAvailable: boolean = false;
+
   previewUrl: any;
   caption: string = '';
+  isViewOnce: boolean = false;
 
   constructor(
     private modalCtrl: ModalController,
@@ -19,10 +22,14 @@ export class ImagePreviewModalPage implements OnInit {
   ) { }
 
   ngOnInit() {
-    if (this.imageFile) {
-      const url = URL.createObjectURL(this.imageFile);
+    if (this.file) {
+      const url = URL.createObjectURL(this.file);
       this.previewUrl = this.sanitizer.bypassSecurityTrustUrl(url);
     }
+  }
+
+  toggleViewOnce() {
+    this.isViewOnce = !this.isViewOnce;
   }
 
   cancel() {
@@ -31,8 +38,9 @@ export class ImagePreviewModalPage implements OnInit {
 
   send() {
     this.modalCtrl.dismiss({
+      confirmed: true,
       caption: this.caption,
-      file: this.imageFile
+      viewOnce: this.isViewOnce
     }, 'send');
   }
 }

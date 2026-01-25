@@ -8,5 +8,6 @@ export const environment = {
     messagingSenderId: "1036135506512",
     appId: "1:1036135506512:web:f231fa787fcf0335f82755"
   },
-  apiUrl: 'https://chat.snapflect.com/api'
+  apiUrl: 'https://chat.snapflect.com/api',
+  googleClientId: '1036135506512-eke9ocopr8j2m5oss3k7h2651he778da.apps.googleusercontent.com'
 };

@@ -9,6 +9,8 @@ import { CallService } from './call.service';
 import { getFirestore, collection, doc, onSnapshot, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { initializeApp } from 'firebase/app';
 import { environment } from 'src/environments/environment';
+import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
+import { Capacitor } from '@capacitor/core';
 
 @Injectable({
     providedIn: 'root'
@@ -32,6 +34,15 @@ export class AuthService {
         const app = initializeApp(environment.firebase);
         this.db = getFirestore(app);
 
+        // Initialize Google Auth on native platforms
+        if (Capacitor.isNativePlatform()) {
+            GoogleAuth.initialize({
+                clientId: environment.googleClientId,
+                scopes: ['profile', 'email'],
+                grantOfflineAccess: true
+            });
+        }
+
         const savedId = localStorage.getItem('user_id');
         if (savedId) {
             this.userIdSource.next(savedId);
@@ -48,10 +59,42 @@ export class AuthService {
         });
     }
 
+    // --- Device Management (Phase 2) ---
+
+    private getOrGenerateDeviceUUID(): string {
+        let uuid = localStorage.getItem('device_uuid');
+        if (!uuid) {
+            uuid = 'dev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('device_uuid', uuid);
+        }
+        return uuid;
+    }
+
+    private async registerDevice(userId: string) {
+        const uuid = this.getOrGenerateDeviceUUID();
+        const pubKey = localStorage.getItem('public_key');
+        if (!pubKey) return; // Should have key by now
+
+        // Get friendly name
+        const info = await import('@capacitor/device').then(m => m.Device.getInfo()).catch(() => ({ model: 'Browser', platform: 'Web' }));
+        const deviceName = `${info.platform} ${info.model || 'Device'}`;
+
+        await this.api.post('devices.php?action=register', {
+            user_id: userId,
+            device_uuid: uuid,
+            public_key: pubKey,
+            device_name: deviceName
+        }).toPromise();
+    }
+
     setSession(userId: string) {
         localStorage.setItem('user_id', userId);
         this.userIdSource.next(userId);
         this.initBlockedListener(userId);
+
+        // Register Device (Phase 2) 
+        // We do this here (fire-and-forget or await if needed) so every login refreshes device active state
+        this.registerDevice(userId).catch(e => console.error("Device Reg Failed", e));
 
         // Force Push Registration / Sync
         this.pushService.syncToken();
@@ -110,7 +153,6 @@ export class AuthService {
                 }, 2000);
 
                 return response;
-                return response;
             }
             const errorMsg = (response && response.message) ? response.message : 'API Error: Registration Failed';
             throw new Error(errorMsg);
@@ -120,7 +162,68 @@ export class AuthService {
         }
     }
 
+    // Google OAuth Sign-In
+    async signInWithGoogle(): Promise<any> {
+        try {
+            // 1. Sign in with Google
+            const googleUser = await GoogleAuth.signIn();
+            this.logger.log("Google Sign-In Success", googleUser);
+
+            // 2. Generate encryption keys (just like OTP flow)
+            const keys = await this.crypto.generateKeyPair();
+            const publicKeyStr = await this.crypto.exportKey(keys.publicKey);
+            const privateKeyStr = await this.crypto.exportKey(keys.privateKey);
+
+            // Store Private Key Locally
+            localStorage.setItem('private_key', privateKeyStr);
+            localStorage.setItem('public_key', publicKeyStr);
+
+            // 3. Send to backend for verification/registration
+            const googleUserAny = googleUser as any;
+            const response: any = await this.api.post('oauth.php', {
+                provider: 'google',
+                id_token: googleUserAny.authentication?.idToken || googleUserAny.idToken,
+                email: googleUser.email,
+                name: googleUser.name || googleUser.givenName,
+                photo_url: googleUser.imageUrl,
+                public_key: publicKeyStr
+            }).toPromise();
+
+            if (response && response.status === 'success') {
+                this.setSession(response.user_id);
+
+                // Cache user info
+                if (googleUser.name || googleUser.givenName) {
+                    localStorage.setItem('user_first_name', googleUser.givenName || googleUser.name);
+                }
+
+                return response;
+            }
+
+            throw new Error(response?.message || 'Google Sign-In failed');
+        } catch (e: any) {
+            this.logger.error("Google Sign-In Error", e);
+
+            // Handle user cancellation
+            if (e?.message?.includes('cancel') || e?.code === 'popup_closed_by_user') {
+                throw new Error('Sign-in cancelled');
+            }
+
+            throw new Error(e?.message || 'Google Sign-In failed');
+        }
+    }
+
+    // Sign out from Google (call on logout)
+    async signOutGoogle() {
+        try {
+            await GoogleAuth.signOut();
+        } catch (e) {
+            // Ignore errors during sign out
+        }
+    }
+
     logout() {
+        this.signOutGoogle();
         localStorage.removeItem('user_id');
         localStorage.removeItem('private_key');
         localStorage.removeItem('public_key');
