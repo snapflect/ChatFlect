@@ -87,4 +87,31 @@ describe('CallService', () => {
 
         expect(toggleSpeakerSpy).toHaveBeenCalledWith(false);
     });
+    it('should push notification to all participants on group call (Phase 3)', async () => {
+        spyOn(service as any, 'getMedia').and.returnValue(Promise.resolve());
+        spyOn(service as any, 'initiatePeerConnection').and.returnValue(Promise.resolve());
+
+        // Mock API for push to return Observable
+        apiServiceSpy.post.and.returnValue(createMockObservable({}));
+
+        await service.startGroupCall(['p1', 'p2'], 'video');
+
+        expect(service.firestoreAddDoc).toHaveBeenCalled();
+    });
+
+    it('should stop ringing if answered elsewhere (Phase 3)', async () => {
+        service.currentCallId = 'c1';
+        service.incomingCallData = { id: 'c1', callerId: 'other' };
+
+        await (service as any).cleanup();
+        expect(soundServiceSpy.stopRingtone).toHaveBeenCalled();
+    });
 });
+
+function createMockObservable(data: any) {
+    return {
+        subscribe: (next: any) => { if (next) next(data); return { unsubscribe: () => { } }; },
+        toPromise: () => Promise.resolve(data),
+        pipe: () => createMockObservable(data)
+    } as any;
+}

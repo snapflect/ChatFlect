@@ -73,4 +73,43 @@ describe('AuthService', () => {
   it('should be created', () => {
     expect(service).toBeTruthy();
   });
+  it('should verify OTP and generate keys (Phase 1)', async () => {
+    // Mock Crypto
+    const mockKp = { publicKey: {} as any, privateKey: {} as any };
+    cryptoSpy.generateKeyPair.and.returnValue(Promise.resolve(mockKp));
+    cryptoSpy.exportKey.and.returnValue(Promise.resolve('mock_key_str'));
+
+    // Mock API
+    apiSpy.post.and.returnValue(of({ status: 'success', user_id: 'u1' }));
+    apiSpy.get.and.returnValue(of({ public_key: 'mock_key_str' }));
+
+    const res = await service.verifyOtp('123', 'otp', 'email');
+
+    expect(cryptoSpy.generateKeyPair).toHaveBeenCalled();
+    expect(localStorage.setItem).toHaveBeenCalledWith('private_key', 'mock_key_str');
+    expect(localStorage.setItem).toHaveBeenCalledWith('public_key', 'mock_key_str');
+    expect(res.user_id).toBe('u1');
+  });
+
+  it('should register device on session set (Phase 2)', async () => {
+    // Mock Device Info import? 
+    // Usually hard to mock dynamic imports in simple jasmine.
+    // However, AuthService uses `import('@capacitor/device').then(...)`.
+    // We can just verify `api.post` is called.
+
+    spyOn(service as any, 'getOrGenerateDeviceUUID').and.returnValue('dev_uuid');
+    spyOn(localStorage, 'getItem').and.callFake(k => k === 'public_key' ? 'pk' : null);
+    apiSpy.post.and.returnValue(of({ success: true }));
+
+    await service.setSession('u1');
+
+    // setSession calls registerDevice (no await).
+    // wait a tick
+    await new Promise(r => setTimeout(r, 10));
+
+    expect(apiSpy.post).toHaveBeenCalledWith('devices.php?action=register', jasmine.objectContaining({
+      user_id: 'u1',
+      device_uuid: 'dev_uuid'
+    }));
+  });
 });

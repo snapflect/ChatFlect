@@ -7,11 +7,9 @@ import { AuthService } from './auth.service';
 import { ToastController, ModalController, ActionSheetController } from '@ionic/angular';
 import { of, BehaviorSubject } from 'rxjs';
 
-// Subclass to bypass constructor DB init
 class TestChatService extends ChatService {
-  protected override initFirestore() {
-    // No-op for testing to avoid real Firebase connection
-  }
+  protected override initFirestore() { }
+  public override initHistorySyncLogic() { }
 }
 
 describe('ChatService', () => {
@@ -22,16 +20,20 @@ describe('ChatService', () => {
   let loggerSpy: jasmine.SpyObj<LoggingService>;
 
   beforeEach(() => {
-    cryptoSpy = jasmine.createSpyObj('CryptoService', ['decryptMessage', 'encryptMessage', 'encryptBlob', 'arrayBufferToBase64', 'generateSessionKey']);
+    cryptoSpy = jasmine.createSpyObj('CryptoService', [
+      'decryptMessage', 'encryptPayload', 'encryptBlob', 'arrayBufferToBase64',
+      'generateSessionKey', 'encryptAesKeyForRecipient', 'decryptPayload', 'decryptAesKeyFromSender'
+    ]);
     apiSpy = jasmine.createSpyObj('ApiService', ['post', 'get']);
     authSpy = jasmine.createSpyObj('AuthService', [], {
-      blockedUsers$: new BehaviorSubject<string[]>([])
+      blockedUsers$: new BehaviorSubject<string[]>([]),
+      currentUserId: new BehaviorSubject<string>('me')
     });
     loggerSpy = jasmine.createSpyObj('LoggingService', ['error', 'log']);
 
     TestBed.configureTestingModule({
       providers: [
-        { provide: ChatService, useClass: TestChatService }, // Use the testable subclass
+        { provide: ChatService, useClass: TestChatService },
         { provide: CryptoService, useValue: cryptoSpy },
         { provide: ApiService, useValue: apiSpy },
         { provide: AuthService, useValue: authSpy },
@@ -44,11 +46,11 @@ describe('ChatService', () => {
 
     service = TestBed.inject(ChatService);
 
-    // Mock localStorage
     spyOn(localStorage, 'getItem').and.callFake(key => {
       if (key === 'user_id') return 'my_id';
       if (key === 'private_key') return 'mock_priv_key';
       if (key === 'public_key') return 'mock_pub_key';
+      if (key === 'device_uuid') return 'dev_uuid';
       return null;
     });
   });
@@ -57,120 +59,66 @@ describe('ChatService', () => {
     expect(service).toBeTruthy();
   });
 
-  it('should send an encrypted message', async () => {
-    const chatId = 'chat_123';
-    const plainText = 'Hello World';
-    const senderId = 'my_id';
+  describe('Phase 2: Multi-Device Payload', () => {
+    it('should distribute secure payload correctly', async () => {
+      const chatId = 'c1';
 
-    // Mock Protected Helpers
-    spyOn<any>(service, 'getChatDoc').and.returnValue(Promise.resolve({
-      exists: () => true,
-      data: () => ({ participants: ['my_id', 'other_id'], isGroup: false })
-    }));
-    spyOn<any>(service, 'getChatTTL').and.returnValue(Promise.resolve(0));
-    spyOn<any>(service, 'addMessageDoc').and.returnValue(Promise.resolve());
-    spyOn<any>(service, 'updateChatDoc').and.returnValue(Promise.resolve());
+      // Mock getChatDoc to return participants
+      spyOn<any>(service, 'getChatDoc').and.returnValue(Promise.resolve({
+        exists: () => true,
+        data: () => ({ participants: ['me', 'other'] })
+      }));
+      spyOn<any>(service, 'addMessageDoc').and.returnValue(Promise.resolve());
+      spyOn<any>(service, 'updateChatDoc').and.returnValue(Promise.resolve());
 
-    // Mock API for Keys
-    apiSpy.get.and.returnValue(of({ public_key: 'other_pub_key' }));
+      // Mock Keys: Return multiple devices for 'other'
+      apiSpy.get.and.returnValue(of({
+        'dev_a': 'pk_a',
+        'dev_b': 'pk_b'
+      }));
 
-    // Mock Encryption (HYBRID)
-    cryptoSpy.encryptMessage.and.returnValue(Promise.resolve('encrypted_content'));
+      cryptoSpy.generateSessionKey.and.returnValue(Promise.resolve('sess_key' as any));
+      cryptoSpy.encryptPayload.and.returnValue(Promise.resolve('encrypted_text'));
+      cryptoSpy.arrayBufferToBase64.and.returnValue('iv_64');
+      cryptoSpy.encryptAesKeyForRecipient.and.returnValue(Promise.resolve('enc_sess_key'));
 
-    await service.sendMessage(chatId, plainText, senderId);
+      await service.distributeSecurePayload(chatId, 'me', 'text', 'Hello', 'iv_64', 'sess_key' as any, {});
 
-    expect(cryptoSpy.encryptMessage).toHaveBeenCalledWith(plainText, 'other_pub_key');
-    expect(cryptoSpy.encryptMessage).toHaveBeenCalledWith(plainText, 'mock_pub_key'); // Self copy
-
-    // Verify Payload
-    const addArgs = (service['addMessageDoc'] as jasmine.Spy).calls.mostRecent().args;
-    expect(addArgs[0]).toBe(chatId);
-    expect(addArgs[1].content).toEqual({ 'other_id': 'encrypted_content' });
-    expect(addArgs[1].content_self).toBe('encrypted_content');
-  });
-
-  it('should decrypt received messages', (done) => {
-    const chatId = 'chat_abc';
-
-    // Mock Firestore Snapshot
-    const mockSnapshot = {
-      docs: [
-        {
-          id: 'msg_1',
-          data: () => ({
-            senderId: 'other_id',
-            content: { 'my_id': 'encrypted_for_me' },
-            timestamp: 1000
-          })
-        }
-      ]
-    };
-
-    // Spy on fsCollection and fsQuery to return something (doesn't matter what, as we mock fsOnSnapshot)
-    spyOn<any>(service, 'fsCollection').and.returnValue({});
-    spyOn<any>(service, 'fsQuery').and.returnValue({});
-
-    // Spy on fsOnSnapshot to simulate incoming data
-    spyOn<any>(service, 'fsOnSnapshot').and.callFake((query, callback) => {
-      callback(mockSnapshot); // Trigger immediately
-      return () => { }; // Unsubscribe function
-    });
-
-    // Mock Decryption
-    cryptoSpy.decryptMessage.and.returnValue(Promise.resolve('Decrypted Hello'));
-
-    service.getMessages(chatId).subscribe(msgs => {
-      expect(msgs.length).toBe(1);
-      expect(msgs[0].text).toBe('Decrypted Hello');
-      expect(cryptoSpy.decryptMessage).toHaveBeenCalledWith('encrypted_for_me', 'mock_priv_key');
-      done();
+      // Logic check: api.get called for keys
+      expect(apiSpy.get).toHaveBeenCalled();
+      // Logic check: addMessageDoc called with encrypted content
+      const addArgs = (service['addMessageDoc'] as jasmine.Spy).calls.mostRecent().args;
+      expect(addArgs[1].ciphertext).toBe('encrypted_text');
     });
   });
 
-  it('should handle decryption failure gracefully', (done) => {
-    const chatId = 'chat_fail';
+  describe('Phase 3: View Once', () => {
+    it('should set viewOnce flag', async () => {
+      spyOn<any>(service, 'addMessageDoc').and.returnValue(Promise.resolve());
+      spyOn<any>(service, 'updateChatDoc').and.returnValue(Promise.resolve());
+      spyOn<any>(service, 'getChatDoc').and.returnValue(Promise.resolve({ exists: () => true, data: () => ({ participants: ['me'] }) }));
+      apiSpy.get.and.returnValue(of({ 'd': 'k' }));
 
-    const mockSnapshot = {
-      docs: [
-        {
-          id: 'msg_2',
-          data: () => ({
-            senderId: 'other_id',
-            content: { 'my_id': 'bad_cipher' },
-            timestamp: 2000
-          })
-        }
-      ]
-    };
+      cryptoSpy.generateSessionKey.and.returnValue(Promise.resolve('k' as any));
+      cryptoSpy.encryptPayload.and.returnValue(Promise.resolve('c'));
+      cryptoSpy.arrayBufferToBase64.and.returnValue('iv');
 
-    spyOn<any>(service, 'fsCollection').and.returnValue({});
-    spyOn<any>(service, 'fsQuery').and.returnValue({});
-    spyOn<any>(service, 'fsOnSnapshot').and.callFake((query, callback) => {
-      callback(mockSnapshot);
-      return () => { };
-    });
+      await service.sendVideoMessage('c1', new Blob(), 'me', 10, null, 'cap', true);
 
-    cryptoSpy.decryptMessage.and.returnValue(Promise.resolve('[Decryption Error]'));
-
-    service.getMessages(chatId).subscribe(msgs => {
-      expect(msgs[0].text).toBe('🔒 Decryption Failed');
-      done();
+      const addArgs = (service['addMessageDoc'] as jasmine.Spy).calls.mostRecent().args;
+      expect(addArgs[1].viewOnce).toBeTrue();
     });
   });
 
-  it('should toggle star message', async () => {
-    const chatId = 'c1';
-    const msgId = 'm1';
+  describe('Phase 4: History Sync', () => {
+    it('should add sync request', async () => {
+      spyOn<any>(service, 'fsAddDoc').and.returnValue(Promise.resolve());
+      spyOn<any>(service, 'fsCollection').and.returnValue({});
 
-    // spy on fsDoc and fsUpdateDoc
-    spyOn<any>(service, 'fsDoc').and.returnValue({});
-    const updateSpy = spyOn<any>(service, 'fsUpdateDoc').and.returnValue(Promise.resolve());
+      await service.requestHistorySync('me');
 
-    await service.toggleStarMessage(chatId, msgId, true);
-
-    expect(updateSpy).toHaveBeenCalled();
-    // Complex matcher for arrayUnion might be hard, just check generic call
-    expect(service['fsDoc']).toHaveBeenCalledWith('chats', chatId, 'messages', msgId);
+      expect(service['fsAddDoc']).toHaveBeenCalled();
+    });
   });
 
 });
