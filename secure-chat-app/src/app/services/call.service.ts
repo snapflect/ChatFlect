@@ -64,8 +64,11 @@ export class CallService {
     }
 
     init() {
-        // Init Native CallKit
-        this.callKit.init();
+        // Init Native CallKit (iOS Only)
+        const isIos = localStorage.getItem('platform_ios') === 'true' || (window as any).Capacitor?.getPlatform() === 'ios';
+        if (isIos) {
+            this.callKit.init();
+        }
 
         // Listen for Native Actions
         this.callKit.lastCallAction.subscribe(action => {

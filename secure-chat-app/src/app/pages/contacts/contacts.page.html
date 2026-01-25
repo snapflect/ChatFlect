@@ -65,6 +65,25 @@
         </ion-label>
       </ion-item>
     </ion-item-group>
+
+    <!-- Global Results (Email Search) -->
+    <div *ngIf="globalResults.length > 0" class="ion-margin-top anim-fade-in">
+      <ion-list-header>
+        <ion-label color="secondary">Global Discovery</ion-label>
+        <ion-spinner *ngIf="isSearchingGlobally" name="dots"></ion-spinner>
+      </ion-list-header>
+
+      <ion-item *ngFor="let c of globalResults" button (click)="startChat(c)" class="contact-item">
+        <ion-avatar slot="start" class="contact-avatar global-avatar">
+          <img [secureSrc]="c.photo_url" />
+        </ion-avatar>
+        <ion-label>
+          <h2 class="contact-name">{{ c.first_name }} {{ c.last_name }}</h2>
+          <p class="contact-number">{{ c.email || 'Email user' }}</p>
+        </ion-label>
+        <ion-icon name="chatbubble-outline" slot="end" color="secondary"></ion-icon>
+      </ion-item>
+    </div>
   </div>
 </ion-content>
 

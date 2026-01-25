@@ -15,9 +15,8 @@ import * as QRCode from 'qrcode';
 export class LoginPage implements OnDestroy {
   @ViewChild('qrCanvas') qrCanvas!: ElementRef;
 
-  mode: 'phone' | 'qr' = 'phone';
-  phoneNumber = '';
-  email = ''; // Added
+  mode: 'email' | 'qr' = 'email';
+  email = '';
   otp = '';
   otpSent = false;
   qrLoading = false;
@@ -110,12 +109,12 @@ export class LoginPage implements OnDestroy {
   }
 
   async sendOtp() {
-    if (!this.phoneNumber || !this.email) {
-      this.showToast("Please enter Phone Number and Email");
+    if (!this.email) {
+      this.showToast("Please enter your Email");
       return;
     }
 
-    this.auth.requestOtp(this.phoneNumber, this.email).subscribe({
+    this.auth.requestOtp(this.email).subscribe({
       next: (res: any) => {
         this.otpSent = true;
         this.showToast('OTP Sent to Email!');
@@ -147,7 +146,7 @@ export class LoginPage implements OnDestroy {
 
     this.resendAttempts++;
 
-    this.auth.requestOtp(this.phoneNumber, this.email).subscribe({
+    this.auth.requestOtp(this.email).subscribe({
       next: (res: any) => {
         this.showToast(`OTP Resent! (Attempt ${this.resendAttempts}/${this.maxResendAttempts})`);
         this.startCooldown();
@@ -180,7 +179,7 @@ export class LoginPage implements OnDestroy {
 
   async verifyOtp() {
     try {
-      const res: any = await this.auth.verifyOtp(this.phoneNumber, this.otp, this.email);
+      const res: any = await this.auth.verifyOtp(this.otp, this.email);
       this.showToast('Login Successful');
 
       this.zone.run(async () => { // Async for profile check

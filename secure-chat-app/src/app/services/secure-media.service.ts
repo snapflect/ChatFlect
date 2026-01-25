@@ -32,7 +32,13 @@ export class SecureMediaService implements OnDestroy {
             return of(this.cache.get(cacheKey)!);
         }
 
-        if (url.startsWith('assets/') || url.startsWith('data:') || url.startsWith('blob:')) {
+        if (
+            url.startsWith('assets/') ||
+            url.startsWith('data:') ||
+            url.startsWith('blob:') ||
+            url.includes('googleusercontent.com')
+        ) {
+            this.logger.log(`[SecureMedia] Bypassing blob download for trusted URL: ${url}`);
             return of(url);
         }
 

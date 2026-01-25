@@ -21,7 +21,9 @@ import { LoggingService } from 'src/app/services/logging.service';
 export class ContactsPage implements OnInit {
   contacts: any[] = [];
   groupedContacts: { letter: string, contacts: any[] }[] = [];
+  globalResults: any[] = [];
   searchQuery: string = '';
+  isSearchingGlobally = false;
 
   constructor(
     private contactsService: ContactsService,
@@ -95,6 +97,28 @@ export class ContactsPage implements OnInit {
   onSearchChange(event: any) {
     this.searchQuery = event.detail.value;
     this.updateGroupedContacts();
+
+    if (this.searchQuery && this.searchQuery.length > 3) {
+      this.globalSearch();
+    } else {
+      this.globalResults = [];
+    }
+  }
+
+  async globalSearch() {
+    this.isSearchingGlobally = true;
+    try {
+      const results: any = await this.contactsService.searchGlobal(this.searchQuery);
+      // Filter out people already in my contacts
+      this.globalResults = results.filter((r: any) =>
+        !this.contacts.some(c => c.user_id === r.user_id) &&
+        r.user_id !== localStorage.getItem('user_id')
+      );
+    } catch (e) {
+      this.logger.error("Global Search Error", e);
+    } finally {
+      this.isSearchingGlobally = false;
+    }
   }
 
   async addContact() {

@@ -87,13 +87,18 @@ export class AuthService {
         }).toPromise();
     }
 
-    setSession(userId: string) {
+    setSession(userId: string, token?: string, isProfileComplete?: boolean) {
         localStorage.setItem('user_id', userId);
+        if (token) {
+            localStorage.setItem('id_token', token);
+        }
+        if (isProfileComplete !== undefined) {
+            localStorage.setItem('is_profile_complete', isProfileComplete ? '1' : '0');
+        }
         this.userIdSource.next(userId);
         this.initBlockedListener(userId);
 
         // Register Device (Phase 2) 
-        // We do this here (fire-and-forget or await if needed) so every login refreshes device active state
         this.registerDevice(userId).catch(e => console.error("Device Reg Failed", e));
 
         // Force Push Registration / Sync
@@ -102,18 +107,16 @@ export class AuthService {
     }
 
     // Phase 17: Email OTP
-    requestOtp(phoneNumber: string, email: string) {
-        if (!/^\+?[0-9]{10,15}$/.test(phoneNumber)) {
-            return throwError(() => new Error('Invalid phone number format'));
-        }
+    requestOtp(email: string) {
         if (!email || !email.includes('@')) {
             return throwError(() => new Error('Invalid email address'));
         }
-        return this.api.post('register.php', { phone_number: phoneNumber, email: email });
+        return this.api.post('register.php', { email: email });
     }
 
     // Phase 17: Verify OTP and Register/Login
-    async verifyOtp(phoneNumber: string, otp: string, email: string) {
+    // Phase 17: Verify OTP and Register/Login
+    async verifyOtp(otp: string, email: string) {
         try {
             // 1. Generate Key Pair (Real)
             const keys = await this.crypto.generateKeyPair();
@@ -127,14 +130,13 @@ export class AuthService {
             // 2. Call API to confirm
             const response: any = await this.api.post('profile.php', {
                 action: 'confirm_otp',
-                phone_number: phoneNumber,
                 email: email,
                 otp: otp,
                 public_key: publicKeyStr
             }).toPromise();
 
             if (response && response.status === 'success') {
-                this.setSession(response.user_id);
+                this.setSession(response.user_id, response.token, !!response.is_profile_complete);
 
                 // CRITICAL: Verify the server actually updated our Public Key
                 // (Addresses the "Stale Key" issue if server schema is improper)
@@ -190,7 +192,8 @@ export class AuthService {
             }).toPromise();
 
             if (response && response.status === 'success') {
-                this.setSession(response.user_id);
+                const token = googleUserAny.authentication?.idToken || googleUserAny.idToken;
+                this.setSession(response.user_id, token, !!response.is_profile_complete);
 
                 // Cache user info
                 if (googleUser.name || googleUser.givenName) {
@@ -225,8 +228,11 @@ export class AuthService {
     logout() {
         this.signOutGoogle();
         localStorage.removeItem('user_id');
+        localStorage.removeItem('id_token');
+        localStorage.removeItem('is_profile_complete');
         localStorage.removeItem('private_key');
         localStorage.removeItem('public_key');
+        localStorage.removeItem('user_first_name');
         this.userIdSource.next(null);
     }
 
@@ -291,7 +297,10 @@ export class AuthService {
         const userId = this.userIdSource.value || localStorage.getItem('user_id');
         if (!userId) return false;
 
-        // Check local storage first (optimization)
+        // Check local storage flag first
+        const isCompleteFlag = localStorage.getItem('is_profile_complete');
+        if (isCompleteFlag === '1') return true;
+
         const cachedName = localStorage.getItem('user_first_name');
         if (cachedName) return true;
 

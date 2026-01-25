@@ -7,29 +7,23 @@
       </div>
 
       <ion-segment [(ngModel)]="mode" (ionChange)="segmentChanged($event)" class="ion-margin-bottom">
-        <ion-segment-button value="phone">
-          <ion-icon name="call"></ion-icon>
+        <ion-segment-button value="email">
+          <ion-icon name="mail"></ion-icon>
         </ion-segment-button>
         <ion-segment-button value="qr">
           <ion-icon name="qr-code"></ion-icon>
         </ion-segment-button>
       </ion-segment>
 
-      <!-- PHONE MODE -->
-      <div *ngIf="mode === 'phone'">
+      <!-- EMAIL MODE -->
+      <div *ngIf="mode === 'email'">
         <div *ngIf="!otpSent" class="input-group">
           <ion-item lines="none" class="custom-input">
-            <ion-icon name="call-outline" slot="start" color="primary"></ion-icon>
-            <ion-input type="tel" [(ngModel)]="phoneNumber" placeholder="Phone Number (+123...)"></ion-input>
+            <ion-icon name="mail-outline" slot="start" color="primary"></ion-icon>
+            <ion-input type="email" [(ngModel)]="email" placeholder="Email Address"></ion-input>
           </ion-item>
 
-          <ion-item lines="none" class="custom-input">
-            <ion-icon name="mail-outline" slot="start" color="tertiary"></ion-icon>
-            <ion-input type="email" [(ngModel)]="email" placeholder="Email (For Verification)"></ion-input>
-          </ion-item>
-
-          <ion-button expand="block" shape="round" class="vibrant-btn" (click)="sendOtp()"
-            [disabled]="!phoneNumber || !email">
+          <ion-button expand="block" shape="round" class="vibrant-btn" (click)="sendOtp()" [disabled]="!email">
             Send OTP to Email <ion-icon name="arrow-forward-outline" slot="end"></ion-icon>
           </ion-button>
 

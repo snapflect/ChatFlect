@@ -18,7 +18,7 @@ export class CallKitService {
     ) { }
 
     async init() {
-        if (!this.platform.is('capacitor')) return;
+        if (!this.platform.is('capacitor') || !this.platform.is('ios')) return;
 
         try {
             this.logger.log("[CallKit] Registering...");

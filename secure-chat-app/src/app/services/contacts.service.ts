@@ -136,6 +136,16 @@ export class ContactsService {
         return unique;
     }
 
+    async searchGlobal(query: string): Promise<any[]> {
+        try {
+            const res: any = await this.api.post('contacts.php', { query }).toPromise();
+            return Array.isArray(res) ? res : [];
+        } catch (e) {
+            this.logger.error("Global search failed", e);
+            return [];
+        }
+    }
+
     /* ================================
        MANUAL CONTACTS
     ================================= */
