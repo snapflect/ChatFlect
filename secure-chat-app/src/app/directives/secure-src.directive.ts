@@ -36,6 +36,7 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
     }
 
     private load(): void {
+        console.log(`[SecureSrcDirective] Loading URL: ${this.src}`);
         this.cancel();
 
         // Reset UI immediately (important for DOM reuse)
@@ -53,9 +54,9 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
 
         this.sub = this.mediaService.getMedia(this.src, this.key, this.iv).subscribe({
             next: (url: string) => {
-                // Revoke previously resolved object URL
+                // Revoke previously resolved object URL usage (v8)
                 if (this.resolvedUrl && this.resolvedUrl !== url) {
-                    this.mediaService.revokeObjectUrl(this.resolvedUrl);
+                    this.mediaService.releaseMedia(this.resolvedUrl);
                 }
 
                 this.resolvedUrl = url;
@@ -88,8 +89,10 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
 
     ngOnDestroy(): void {
         this.cancel();
-        // Do NOT revoke object URL here. 
-        // usage is shared via Service Cache. 
-        // Service manages revocation.
+        // v8 Deep GC: Release usage of the media URL
+        if (this.resolvedUrl) {
+            this.mediaService.releaseMedia(this.resolvedUrl);
+            this.resolvedUrl = null;
+        }
     }
 }
