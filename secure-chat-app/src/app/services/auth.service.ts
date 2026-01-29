@@ -11,6 +11,7 @@ import { initializeApp } from 'firebase/app';
 import { environment } from 'src/environments/environment';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 import { Capacitor } from '@capacitor/core';
+import { SecureMediaService } from './secure-media.service';
 
 @Injectable({
     providedIn: 'root'
@@ -29,7 +30,8 @@ export class AuthService {
         private crypto: CryptoService,
         private pushService: PushService,
         private logger: LoggingService,
-        private callService: CallService
+        private callService: CallService,
+        private mediaService: SecureMediaService
     ) {
         const app = initializeApp(environment.firebase);
         this.db = getFirestore(app);
@@ -51,10 +53,17 @@ export class AuthService {
     }
 
     private initBlockedListener(userId: string) {
-        // Modular SDK onSnapshot
+        // 1. Initial Load from Local Storage (Instant)
+        const cached = localStorage.getItem('blocked_users');
+        if (cached) {
+            this.blockedUsersSubject.next(JSON.parse(cached));
+        }
+
+        // 2. Real-time sync
         const blockedCol = collection(this.db, `users/${userId}/blocked`);
         onSnapshot(blockedCol, (snapshot) => {
             const blocked = snapshot.docs.map(d => d.id);
+            localStorage.setItem('blocked_users', JSON.stringify(blocked));
             this.blockedUsersSubject.next(blocked);
         });
     }
@@ -87,10 +96,13 @@ export class AuthService {
         }).toPromise();
     }
 
-    setSession(userId: string, token?: string, isProfileComplete?: boolean) {
+    setSession(userId: string, token?: string, isProfileComplete?: boolean, refreshToken?: string) {
         localStorage.setItem('user_id', userId);
         if (token) {
             localStorage.setItem('id_token', token);
+        }
+        if (refreshToken) {
+            localStorage.setItem('refresh_token', refreshToken);
         }
         if (isProfileComplete !== undefined) {
             localStorage.setItem('is_profile_complete', isProfileComplete ? '1' : '0');
@@ -104,6 +116,30 @@ export class AuthService {
         // Force Push Registration / Sync
         this.pushService.syncToken();
         this.callService.init();
+    }
+
+    async refreshToken(): Promise<string | null> {
+        const userId = localStorage.getItem('user_id');
+        const refreshToken = localStorage.getItem('refresh_token');
+        const deviceUuid = localStorage.getItem('device_uuid');
+
+        if (!userId || !refreshToken) return null;
+
+        try {
+            const res: any = await this.api.post('refresh_token.php', {
+                user_id: userId,
+                refresh_token: refreshToken,
+                device_uuid: deviceUuid
+            }).toPromise();
+
+            if (res && res.status === 'success') {
+                localStorage.setItem('id_token', res.token);
+                return res.token;
+            }
+        } catch (e) {
+            this.logger.error("Token Refresh Failed", e);
+        }
+        return null;
     }
 
     // Phase 17: Email OTP
@@ -136,7 +172,7 @@ export class AuthService {
             }).toPromise();
 
             if (response && response.status === 'success') {
-                this.setSession(response.user_id, response.token, !!response.is_profile_complete);
+                this.setSession(response.user_id, response.token, !!response.is_profile_complete, response.refresh_token);
 
                 // CRITICAL: Verify the server actually updated our Public Key
                 // (Addresses the "Stale Key" issue if server schema is improper)
@@ -192,8 +228,8 @@ export class AuthService {
             }).toPromise();
 
             if (response && response.status === 'success') {
-                const token = googleUserAny.authentication?.idToken || googleUserAny.idToken;
-                this.setSession(response.user_id, token, !!response.is_profile_complete);
+                const token = response.token || googleUserAny.authentication?.idToken || googleUserAny.idToken;
+                this.setSession(response.user_id, token, !!response.is_profile_complete, response.refresh_token);
 
                 // Cache user info
                 if (googleUser.name || googleUser.givenName) {
@@ -227,12 +263,15 @@ export class AuthService {
 
     logout() {
         this.signOutGoogle();
+        this.mediaService.clearCache('LOGOUT');
         localStorage.removeItem('user_id');
         localStorage.removeItem('id_token');
         localStorage.removeItem('is_profile_complete');
         localStorage.removeItem('private_key');
         localStorage.removeItem('public_key');
         localStorage.removeItem('user_first_name');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('blocked_users');
         this.userIdSource.next(null);
     }
 
