@@ -35,13 +35,26 @@ export class LocationService {
         localStorage.setItem('live_location_expiresAt', String(this.expiresAt));
 
         try {
+            // 1. Check/Request Permissions
+            const perm = await Geolocation.checkPermissions();
+            if (perm.location !== 'granted') {
+                const req = await Geolocation.requestPermissions();
+                if (req.location !== 'granted') {
+                    throw new Error("Location permission denied");
+                }
+            }
+
+            // 2. Start Watching with robust timeout
             this.watchId = await Geolocation.watchPosition({
                 enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 5000
+                timeout: 30000, // Boosted to 30s
+                maximumAge: 3000
             }, (position, err) => {
                 if (position) {
                     this.updateLocation(chatId, myId!, position.coords);
+                }
+                if (err) {
+                    this.logger.error("WatchPosition callback error", err);
                 }
             });
 
@@ -53,8 +66,9 @@ export class LocationService {
                 }
             }, 30000); // Check every 30 seconds
 
-        } catch (e) {
-            this.logger.error("Start Watching Failed", e);
+        } catch (e: any) {
+            this.logger.error("Start Sharing Failed", e);
+            throw e; // Bubble up for UI feedback
         }
     }
 
@@ -116,7 +130,16 @@ export class LocationService {
         return Math.max(0, this.expiresAt - Date.now());
     }
 
+    private lastLocationWriteTime: number = 0;
+    private readonly LOCATION_THROTTLE_MS = 30000; // 30 seconds
+
     private async updateLocation(chatId: string, userId: string, coords: any) {
+        const now = Date.now();
+        // v10 Throttle: Avoid Firestore writes for minor/rapid movement
+        if (now - this.lastLocationWriteTime < this.LOCATION_THROTTLE_MS) {
+            return;
+        }
+
         const ref = doc(this.db, 'chats', chatId, 'locations', userId);
         await setDoc(ref, {
             lat: coords.latitude,
@@ -125,9 +148,16 @@ export class LocationService {
             expiresAt: this.expiresAt,
             userId: userId
         });
+        this.lastLocationWriteTime = now;
     }
 
+    /**
+     * getLocations (v10): Watch locations + Audit the access
+     */
     getLocations(chatId: string): Observable<any[]> {
+        // Audit Access: Trace who viewed whom (Privacy Requirement)
+        this.auditLocationAccess(chatId);
+
         return new Observable(observer => {
             const ref = collection(this.db, 'chats', chatId, 'locations');
             const unsub = onSnapshot(ref, (snapshot) => {
@@ -135,8 +165,6 @@ export class LocationService {
                 const locations = snapshot.docs
                     .map(d => d.data())
                     .filter((loc: any) => {
-                        // Filter out expired locations (expiresAt < now)
-                        // Also filter stale (no update in 5 mins and no expiresAt)
                         if (loc.expiresAt && loc.expiresAt < now) return false;
                         if (!loc.expiresAt && loc.timestamp < now - 300000) return false;
                         return true;
@@ -145,6 +173,26 @@ export class LocationService {
             });
             return () => unsub();
         });
+    }
+
+    /**
+     * auditLocationAccess (v10): Create an immutable trace of location viewing
+     */
+    private async auditLocationAccess(chatId: string) {
+        const myId = localStorage.getItem('user_id');
+        if (!myId) return;
+
+        try {
+            const auditRef = doc(collection(this.db, 'location_audit'));
+            await setDoc(auditRef, {
+                viewerId: myId,
+                chatId: chatId,
+                timestamp: Date.now(),
+                type: 'view_live'
+            });
+        } catch (e) {
+            this.logger.error("Location audit failed", e);
+        }
     }
 }
 
