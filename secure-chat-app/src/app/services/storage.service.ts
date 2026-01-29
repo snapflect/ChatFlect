@@ -40,6 +40,9 @@ export class StorageService {
             this.isInitialized = true;
             console.log('[StorageService][v9] SQLite Database Initialized (Encrypted)');
 
+            // Validate Integrity (v14)
+            await this.runHealthCheck();
+
             // Trigger background maintenance
             this.pruneMessageCache();
         } catch (e) {
@@ -511,6 +514,42 @@ export class StorageService {
             return 'ERROR_IO_FAILURE';
         }
         return `ERROR_UNKNOWN(${code})`;
+    }
+
+    async runHealthCheck() {
+        try {
+            console.log('[StorageService][v14] Running Integrity Check...');
+            const res = await this.db.query('PRAGMA integrity_check');
+            const result = res.values && res.values.length > 0 ? Object.values(res.values[0])[0] : 'unknown';
+
+            if (result !== 'ok') {
+                console.error('[StorageService][v14] CORRUPTION DETECTED:', result);
+                // Attempt VACUUM to rebuild
+                await this.db.execute('VACUUM');
+                console.log('[StorageService][v14] VACUUM completed. Re-checking...');
+
+                const res2 = await this.db.query('PRAGMA integrity_check');
+                const result2 = res2.values && res2.values.length > 0 ? Object.values(res2.values[0])[0] : 'unknown';
+
+                if (result2 !== 'ok') {
+                    console.error('[StorageService][v14] FATAL: VACUUM failed. Database may be unsafe.');
+                    // In a real app, might flag for wipe. 
+                    // For v14: Log and warn.
+                }
+            } else {
+                console.log('[StorageService][v14] Integrity Check Passed (ok)');
+
+                // Optional: Log Size
+                const sizeRes = await this.db.query('PRAGMA page_count');
+                const pageSizeRes = await this.db.query('PRAGMA page_size');
+                if (sizeRes.values && pageSizeRes.values) {
+                    const size = (Object.values(sizeRes.values[0])[0] as number) * (Object.values(pageSizeRes.values[0])[0] as number);
+                    console.log(`[StorageService][v14] DB Size: ${(size / 1024 / 1024).toFixed(2)} MB`);
+                }
+            }
+        } catch (e) {
+            console.error('[StorageService] Integrity Check Exception', e);
+        }
     }
 
     private async waitForInit() {

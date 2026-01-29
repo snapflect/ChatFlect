@@ -46,22 +46,10 @@ export class ChatService {
         this.initFirestore();
         this.initHistorySyncLogic();
         this.presence.initPresenceTracking();
-        this.initOfflineSync();
-    }
-
-    private async initOfflineSync() {
-        Network.addListener('networkStatusChange', status => {
-            if (status.connected) {
-                console.log('[ChatService][v9] Back online. Flushing outbox...');
-                this.flushOutbox();
-            }
-        });
-
-        // Initial check
-        const currentStatus = await Network.getStatus();
-        if (currentStatus.connected) {
-            this.flushOutbox();
-        }
+        this.initFirestore();
+        this.initHistorySyncLogic();
+        this.presence.initPresenceTracking();
+        // initOfflineSync delegated to SyncService (v14)
     }
 
     protected initFirestore() {
@@ -285,36 +273,42 @@ export class ChatService {
     }
 
     /**
-     * flushOutbox (v9): Retries all pending offline actions.
+     * flushOutbox moved to SyncService (v14)
      */
-    public async flushOutbox() {
-        if (this.isSyncing) return;
-        this.isSyncing = true;
+    async retryOfflineAction(chatId: string, action: string, payload: any) {
+        if (action === 'send') {
+            // Re-attempt delivery of pre-encrypted payload
+            await this.addMessageDoc(chatId, payload);
 
-        try {
-            const pending = await this.storage.getOutbox();
-            if (pending.length === 0) return;
+            // Update Chat Metadata (Last Message, Unread)
+            const type = payload.type || 'text';
+            const senderId = payload.senderId;
+            const snippet = type === 'text' ? '🔒 Message' : (type === 'image' ? '📷 Photo' : '🔒 Media');
 
-            console.log(`[ChatService][v9] Flushing ${pending.length} pending actions...`);
-
-            for (const item of pending) {
-                try {
-                    if (item.action === 'send') {
-                        await this.addMessageDoc(item.chat_id, item.payload);
-                    } else if (item.action === 'delete') {
-                        // Implement offline delete sync if needed
+            // We need to fetch participants to increment unread counts correctly
+            // Efficiency: Maybe just increment for everyone except sender? 
+            // Better: Fetch chat doc briefly or optimize. For now, matching distribute logic:
+            const chatDoc = await this.getChatDoc(chatId);
+            if (chatDoc.exists()) {
+                const data = chatDoc.data() as any;
+                const updatePayload: any = {
+                    lastMessage: data.isGroup ? snippet : 'Encrypted Message',
+                    lastTimestamp: Date.now(),
+                    lastSenderId: senderId
+                };
+                (data.participants || []).forEach((p: any) => {
+                    if (String(p) !== String(senderId)) {
+                        updatePayload[`unread_${p}`] = increment(1);
                     }
-
-                    // Success -> Clean up
-                    await this.storage.removeFromOutbox(item.id);
-                } catch (err) {
-                    console.error(`[ChatService][v9] Failed to flush outbox item ${item.id}`, err);
-                    await this.storage.incrementOutboxRetry(item.id);
-                    break; // Stop flushing on first failure to preserve order
-                }
+                });
+                await this.updateChatDoc(chatId, updatePayload);
+                this.sendPushNotification(chatId, senderId, snippet);
             }
-        } finally {
-            this.isSyncing = false;
+
+        } else if (action === 'delete') {
+            await this.deleteMessage(chatId, payload.messageId, payload.forEveryone);
+        } else if (action === 'edit') {
+            // Implement edit logic if supported
         }
     }
 

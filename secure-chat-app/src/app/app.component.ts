@@ -11,6 +11,7 @@ import { AlertController } from '@ionic/angular';
 import { Router } from '@angular/router';
 import { SoundService } from './services/sound.service';
 import { ChatService } from './services/chat.service';
+import { SyncService } from './services/sync.service';
 
 @Component({
   selector: 'app-root',
@@ -27,7 +28,8 @@ export class AppComponent implements OnInit {
     private alertCtrl: AlertController,
     private router: Router,
     private soundService: SoundService,
-    private chatService: ChatService
+    private chatService: ChatService,
+    private syncService: SyncService // Init Sync Listener
   ) { }
 
   async ngOnInit() {
