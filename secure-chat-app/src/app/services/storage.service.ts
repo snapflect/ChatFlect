@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Capacitor } from '@capacitor/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
+import { SecureStoragePlugin } from 'capacitor-secure-storage-plugin';
 
 @Injectable({
     providedIn: 'root'
@@ -10,7 +11,9 @@ export class StorageService {
     private db!: SQLiteDBConnection;
     private isInitialized = false;
     private isProcessing = false;
-    private currentOperationId = 0; // Incremental ID to track & cancel operations (v5)
+    private currentOperationId = 0;
+
+    private readonly DB_NAME = 'chatflect_cache_v9'; // v9: Force reset for encryption migration
 
     constructor() {
         this.initDatabase();
@@ -20,25 +23,41 @@ export class StorageService {
         if (this.isInitialized) return;
 
         try {
-            if (Capacitor.getPlatform() === 'web') {
-                // Web initialization if needed (IndexedDB fallback via the plugin)
-                // For now, focusing on Native Mobile Performance
-            }
+            const passphrase = await this.getOrCreatePassphrase();
 
             this.db = await this.sqlite.createConnection(
-                'chatflect_cache',
-                false,
-                'no-encryption',
+                this.DB_NAME,
+                true, // encrypted (v9)
+                'secret', // mode
                 1,
                 false
             );
 
             await this.db.open();
+            await (this.db as any).setEncryptionSecret(passphrase);
+
             await this.createTables();
             this.isInitialized = true;
-            console.log('SQLite Database Initialized');
+            console.log('[StorageService][v9] SQLite Database Initialized (Encrypted)');
+
+            // Trigger background maintenance
+            this.pruneMessageCache();
         } catch (e) {
-            console.error('SQLite Init Error', e);
+            console.error('[StorageService][v9] SQLite Init Error', e);
+            // Fallback: If encryption fails due to key mismatch (rare), we may need to reset
+            // Strategy: For v9 audit, we transitioned to a new DB_NAME to avoid complex re-encryption logic
+        }
+    }
+
+    private async getOrCreatePassphrase(): Promise<string> {
+        try {
+            const { value } = await SecureStoragePlugin.get({ key: 'sqlite_passphrase' });
+            return value;
+        } catch (e) {
+            // Not found, create new
+            const newPass = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
+            await SecureStoragePlugin.set({ key: 'sqlite_passphrase', value: newPass });
+            return newPass;
         }
     }
 
@@ -75,9 +94,11 @@ export class StorageService {
         type TEXT,
         payload TEXT,
         timestamp INTEGER,
-        expires_at INTEGER
+        expires_at INTEGER,
+        is_starred INTEGER DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages(chat_id);
+      CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(timestamp);
 
       CREATE TABLE IF NOT EXISTS chats (
         id TEXT PRIMARY KEY,
@@ -99,6 +120,17 @@ export class StorageService {
         next_retry INTEGER,
         last_logged INTEGER
       );
+
+      -- Persistent Outbox for Offline Sync (v9)
+      CREATE TABLE IF NOT EXISTS outbox (
+        id TEXT PRIMARY KEY,
+        chat_id TEXT,
+        action TEXT, -- 'send', 'edit', 'delete'
+        payload TEXT,
+        timestamp INTEGER,
+        retry_count INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_outbox_chat ON outbox(chat_id);
     `;
         await this.db.execute(queries);
     }
@@ -261,7 +293,7 @@ export class StorageService {
 
                 for (const row of res.values) {
                     if (this.currentOperationId !== opId) {
-                        console.warn(`[StorageService][v8] Prune (Op ${opId}) canceled by Op ${this.currentOperationId}`);
+                        console.warn(`[StorageService][v9] Prune (Op ${opId}) canceled by Op ${this.currentOperationId}`);
                         await this.db.execute('ROLLBACK');
                         return;
                     }
@@ -297,6 +329,58 @@ export class StorageService {
                 this.isProcessing = false;
             }
         }
+    }
+
+    /**
+     * pruneMessageCache (v9): Delete old messages not marked as starred.
+     */
+    async pruneMessageCache(ttlDays: number = 14) {
+        await this.waitForInit();
+        try {
+            const ttlMs = ttlDays * 24 * 60 * 60 * 1000;
+            const expiry = Date.now() - ttlMs;
+
+            const res = await this.db.run(
+                'DELETE FROM messages WHERE timestamp < ? AND is_starred = 0',
+                [expiry]
+            );
+            if (res.changes && res.changes.changes && res.changes.changes > 0) {
+                console.log(`[StorageService][v9] Pruned ${res.changes.changes} old messages.`);
+            }
+        } catch (e) {
+            console.error('[StorageService][v9] Prune messages failed', e);
+        }
+    }
+
+    // --- Outbox Management (v9) ---
+
+    async addToOutbox(chatId: string, action: 'send' | 'edit' | 'delete', payload: any) {
+        await this.waitForInit();
+        const id = `out_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        await this.db.run(
+            'INSERT INTO outbox (id, chat_id, action, payload, timestamp) VALUES (?, ?, ?, ?, ?)',
+            [id, chatId, action, JSON.stringify(payload), Date.now()]
+        );
+        return id;
+    }
+
+    async getOutbox() {
+        await this.waitForInit();
+        const res = await this.db.query('SELECT * FROM outbox ORDER BY timestamp ASC');
+        return (res.values || []).map(v => ({
+            ...v,
+            payload: JSON.parse(v.payload)
+        }));
+    }
+
+    async removeFromOutbox(id: string) {
+        await this.waitForInit();
+        await this.db.run('DELETE FROM outbox WHERE id = ?', [id]);
+    }
+
+    async incrementOutboxRetry(id: string) {
+        await this.waitForInit();
+        await this.db.run('UPDATE outbox SET retry_count = retry_count + 1 WHERE id = ?', [id]);
     }
 
     async purgeAllMediaCache() {

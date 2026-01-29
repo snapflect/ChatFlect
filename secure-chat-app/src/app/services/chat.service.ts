@@ -1,6 +1,6 @@
 import { Injectable, NgZone } from '@angular/core';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion, arrayRemove, collectionGroup, getDocs, deleteDoc, limit, startAfter } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion, arrayRemove, collectionGroup, getDocs, deleteDoc, limit, startAfter, limitToLast } from 'firebase/firestore';
 import { environment } from 'src/environments/environment';
 import { Observable, BehaviorSubject, Subject } from 'rxjs';
 import { CryptoService } from './crypto.service';
@@ -8,6 +8,11 @@ import { ApiService } from './api.service';
 import { ToastController } from '@ionic/angular';
 import { LoggingService } from './logging.service';
 import { AuthService } from './auth.service';
+import { StorageService } from './storage.service';
+import { PresenceService } from './presence.service';
+import { TransferProgressService } from './transfer-progress.service';
+import { HttpEventType } from '@angular/common/http';
+import { Network } from '@capacitor/network';
 
 @Injectable({
     providedIn: 'root'
@@ -18,9 +23,14 @@ export class ChatService {
 
     // Event emitter for new incoming messages (for sound notifications)
     public newMessage$ = new Subject<{ chatId: string; senderId: string; timestamp: number }>();
+    private pendingMessagesSubject = new BehaviorSubject<{ [chatId: string]: any[] }>({});
+    public pendingMessages$ = this.pendingMessagesSubject.asObservable();
+
     private lastKnownTimestamps: Map<string, number> = new Map();
     private publicKeyCache = new Map<string, string>();
     private decryptedCache = new Map<string, any>();
+
+    private isSyncing = false;
 
     constructor(
         private crypto: CryptoService,
@@ -28,10 +38,30 @@ export class ChatService {
         private toast: ToastController,
         private logger: LoggingService,
         private auth: AuthService,
-        private zone: NgZone
+        private zone: NgZone,
+        private storage: StorageService,
+        private presence: PresenceService,
+        private progressService: TransferProgressService
     ) {
         this.initFirestore();
         this.initHistorySyncLogic();
+        this.presence.initPresenceTracking();
+        this.initOfflineSync();
+    }
+
+    private async initOfflineSync() {
+        Network.addListener('networkStatusChange', status => {
+            if (status.connected) {
+                console.log('[ChatService][v9] Back online. Flushing outbox...');
+                this.flushOutbox();
+            }
+        });
+
+        // Initial check
+        const currentStatus = await Network.getStatus();
+        if (currentStatus.connected) {
+            this.flushOutbox();
+        }
     }
 
     protected initFirestore() {
@@ -143,6 +173,7 @@ export class ChatService {
 
             // 1. Encrypt Session Key for Each Recipient
             const keysMap: any = {};
+            const myId = String(localStorage.getItem('user_id')).trim();
 
             // My Key
             const myPubKey = localStorage.getItem('public_key');
@@ -153,36 +184,19 @@ export class ChatService {
             // Other Participants
             for (const p of participants) {
                 const pid = String(p).trim();
-                // Send to self as well if we have multiple devices (Phase 2), but for now ensuring we have our own entry (handled by myPubKey above for current device).
-                // Actually, for multi-device self-sync, we should also query our own OTHER devices.
-                // But let's stick to standard flow: Query keys for all participants.
-
                 if (pid === String(senderId).trim()) {
-                    // For Sender (Me): We already added current device key above.
-                    // Ideally we should fetch other devices of mine too.
+                    // Logic to handle multiple devices of sender... (keeping existing logic)
                     try {
                         const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
                         if (res && res.devices) {
-                            // Encrypt for my OTHER devices
                             const myCurrentUuid = localStorage.getItem('device_uuid');
                             for (const [devUuid, devKey] of Object.entries(res.devices)) {
                                 if (devUuid !== myCurrentUuid) {
-                                    // Use a composite key for the map: "userId:deviceUuid" or just "userId" if we want to blast?
-                                    // The current structure uses `keysMap[userId] = encKey`. It doesn't support multiple keys per user yet.
-                                    // We need to change `keysMap` structure OR keysMap key format.
-                                    // Proposed: keysMap key = "userId" for primary, or "userId:uuid".
-                                    // BUT, the DECIPHER logic looks for keys[myId].
-                                    // So `keys[myId]` should be an OBJECT of { uuid: encKey } OR we flatten keys to use UUIDs?
-                                    // Flattening is risky if we don't know which UUID is ours easily on receipt.
-                                    // Better: keys[userId] = { default: encKey, [uuid]: encKey, ... }
-
-                                    if (!keysMap[pid]) keysMap[pid] = {}; // Ensure object
-                                    // If keysMap[pid] is string (legacy), convert?
+                                    if (!keysMap[pid]) keysMap[pid] = {};
                                     if (typeof keysMap[pid] === 'string') {
                                         const old = keysMap[pid];
                                         keysMap[pid] = { 'primary': old };
                                     }
-
                                     keysMap[pid][devUuid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, String(devKey));
                                 }
                             }
@@ -192,30 +206,30 @@ export class ChatService {
                 }
 
                 try {
-                    // Fetch Keys (Multiple)
-                    const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
+                    let res: any = null;
+                    const cachedKey = await this.storage.getPublicKey(pid);
+                    if (cachedKey) {
+                        res = { public_key: cachedKey };
+                    } else {
+                        res = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
+                        if (res && res.public_key) {
+                            this.storage.savePublicKey(pid, res.public_key);
+                        }
+                    }
 
                     if (res) {
-                        // keysMap[pid] will be an object: { "dev_xyz": "enc_key_...", "dev_abc": "enc_key_..." }
                         const userKeys: any = {};
-
-                        // 1. Primary/Legacy Key
                         if (res.public_key) {
                             userKeys['primary'] = await this.crypto.encryptAesKeyForRecipient(sessionKey, res.public_key);
                         }
-
-                        // 2. Device Keys
                         if (res.devices) {
                             for (const [devUuid, devKey] of Object.entries(res.devices)) {
                                 userKeys[devUuid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, String(devKey));
                             }
                         }
-
                         keysMap[pid] = userKeys;
                     }
-                } catch (e) {
-                    this.logger.error(`Failed to fetch key for ${pid}`, e);
-                }
+                } catch (e) { }
             }
 
             // 2. Construct Unified Payload
@@ -223,44 +237,104 @@ export class ChatService {
             const payload: any = {
                 id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
                 type: type,
-                ciphertext: cipherText, // Encrypted Text or Caption
-                iv: ivBase64,           // IV for Content (Text) OR Media File
+                ciphertext: cipherText,
+                iv: ivBase64,
                 keys: keysMap,
                 senderId: senderId,
                 timestamp: Date.now(),
                 expiresAt: ttl > 0 ? Date.now() + ttl : null,
-                ...metadata // Spread additional metadata (url, mime, etc.)
+                ...metadata
             };
 
             if (replyTo) {
-                payload['replyTo'] = {
-                    id: replyTo.id,
-                    senderId: replyTo.senderId
-                };
+                payload['replyTo'] = { id: replyTo.id, senderId: replyTo.senderId };
             }
 
-            // 3. Store
-            await this.addMessageDoc(chatId, payload);
+            // 3. Persistent Outbox Entry (v9)
+            // Save to SQLite Outbox first so it survives restarts
+            const outboxId = await this.storage.addToOutbox(chatId, 'send', payload);
 
-            // 4. Update Parent
-            const snippet = type === 'text' ? '🔒 Message' : (type === 'image' ? '📷 Photo' : '🔒 Media');
-            const updatePayload: any = {
-                lastMessage: isGroup ? snippet : 'Encrypted Message',
-                lastTimestamp: Date.now()
-            };
+            // 4. Attempt Firestore Delivery
+            try {
+                await this.addMessageDoc(chatId, payload);
 
-            participants.forEach((p: any) => {
-                if (String(p) !== String(senderId)) {
-                    updatePayload[`unread_${p}`] = increment(1);
-                }
-            });
+                // Update Parent
+                const snippet = type === 'text' ? '🔒 Message' : (type === 'image' ? '📷 Photo' : '🔒 Media');
+                const updatePayload: any = {
+                    lastMessage: isGroup ? snippet : 'Encrypted Message',
+                    lastTimestamp: Date.now(),
+                    lastSenderId: senderId
+                };
+                participants.forEach((p: any) => {
+                    if (String(p) !== String(senderId)) {
+                        updatePayload[`unread_${p}`] = increment(1);
+                    }
+                });
+                await this.updateChatDoc(chatId, updatePayload);
+                this.sendPushNotification(chatId, senderId, snippet);
 
-            await this.updateChatDoc(chatId, updatePayload);
-            this.sendPushNotification(chatId, senderId, snippet);
+                // Successfully delivered -> Remove from outbox
+                await this.storage.removeFromOutbox(outboxId);
+            } catch (fireErr) {
+                console.warn('[ChatService][v9] Firestore delivery failed. Action cached in outbox.', fireErr);
+            }
 
         } catch (e) {
             this.logger.error("Distribute Error", e);
         }
+    }
+
+    /**
+     * flushOutbox (v9): Retries all pending offline actions.
+     */
+    public async flushOutbox() {
+        if (this.isSyncing) return;
+        this.isSyncing = true;
+
+        try {
+            const pending = await this.storage.getOutbox();
+            if (pending.length === 0) return;
+
+            console.log(`[ChatService][v9] Flushing ${pending.length} pending actions...`);
+
+            for (const item of pending) {
+                try {
+                    if (item.action === 'send') {
+                        await this.addMessageDoc(item.chat_id, item.payload);
+                    } else if (item.action === 'delete') {
+                        // Implement offline delete sync if needed
+                    }
+
+                    // Success -> Clean up
+                    await this.storage.removeFromOutbox(item.id);
+                } catch (err) {
+                    console.error(`[ChatService][v9] Failed to flush outbox item ${item.id}`, err);
+                    await this.storage.incrementOutboxRetry(item.id);
+                    break; // Stop flushing on first failure to preserve order
+                }
+            }
+        } finally {
+            this.isSyncing = false;
+        }
+    }
+
+
+    private addPending(chatId: string, msg: any) {
+        const current = this.pendingMessagesSubject.value;
+        const chatPending = current[chatId] || [];
+        this.pendingMessagesSubject.next({
+            ...current,
+            [chatId]: [...chatPending, msg]
+        });
+    }
+
+    private removePending(chatId: string, msgId: string) {
+        const current = this.pendingMessagesSubject.value;
+        if (!current[chatId]) return;
+        this.pendingMessagesSubject.next({
+            ...current,
+            [chatId]: current[chatId].filter(m => m.id !== msgId)
+        });
     }
 
 
@@ -292,21 +366,63 @@ export class ChatService {
             const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(imageBlob);
             const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
 
-            // 2. Upload Encrypted
+            // 2. Upload Encrypted with progress
             const formData = new FormData();
             formData.append('file', encryptedBlob, 'secure_img.bin');
-            const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
-            if (!uploadRes?.url) throw new Error("Upload Failed");
 
-            // 3. Metadata
-            const metadata: any = {
-                file_url: uploadRes.url,
-                caption: caption,
-                mime: 'image/jpeg',
-                viewOnce: viewOnce
-            };
+            const tempId = `up_${Date.now()}`;
+            this.progressService.updateProgress(tempId, 0, 'uploading');
 
-            await this.distributeSecurePayload(chatId, senderId, 'image', '', ivBase64, sessionKey, metadata);
+            // Optimistic Add
+            this.addPending(chatId, {
+                id: tempId,
+                senderId: senderId,
+                timestamp: Date.now(),
+                type: 'image',
+                text: {
+                    type: 'image',
+                    url: URL.createObjectURL(imageBlob),
+                    caption,
+                    viewOnce,
+                    _isOffline: true,
+                    size: imageBlob.size, // Added for signature match
+                    tempId: tempId,
+                    signature: `image_${imageBlob.size}_${caption || 'nc'}`
+                }
+            });
+
+            this.api.post('upload.php', formData, true).subscribe(async (event: any) => {
+                if (event.type === HttpEventType.UploadProgress) {
+                    const percent = Math.round(100 * event.loaded / event.total);
+                    this.progressService.updateProgress(tempId, percent, 'uploading');
+                } else if (event.type === HttpEventType.Response) {
+                    const uploadRes = event.body;
+                    if (!uploadRes?.url) {
+                        this.progressService.updateProgress(tempId, 0, 'failed');
+                        return;
+                    }
+
+                    // 3. Metadata
+                    const signature = `image_${imageBlob.size}_${caption || 'nc'}`;
+                    const metadata: any = {
+                        url: uploadRes.url,
+                        name: uploadRes.name || (imageBlob as any).name || 'image.jpg',
+                        size: uploadRes.size || imageBlob.size || 0,
+                        caption: caption,
+                        mime: 'image/jpeg',
+                        viewOnce: viewOnce,
+                        tempId: tempId,
+                        signature: signature
+                    };
+
+                    await this.distributeSecurePayload(chatId, senderId, 'image', '', ivBase64, sessionKey, metadata);
+                    this.progressService.updateProgress(tempId, 100, 'completed');
+                    this.removePending(chatId, tempId);
+                    setTimeout(() => this.progressService.clearProgress(tempId), 2000);
+                }
+            }, err => {
+                this.progressService.updateProgress(tempId, 0, 'failed');
+            });
 
         } catch (e) {
             this.logger.error("Send Image Failed", e);
@@ -319,30 +435,71 @@ export class ChatService {
             const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(videoBlob);
             const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
 
-            // 2. Upload Video
+            // 2. Upload Video with progress
             const formData = new FormData();
             formData.append('file', encryptedBlob, 'secure_vid.bin');
-            const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
-            if (!uploadRes?.url) throw new Error("Video Upload Failed");
 
-            // 3. Thumbnail (Simplification: No thumb encryption for MVP to avoid IV reuse issues)
-            let thumbUrl = '';
-            if (thumbnailBlob) {
-                const formThumb = new FormData();
-                formThumb.append('file', thumbnailBlob, 'thumb.jpg');
-                const thumbRes: any = await this.api.post('upload.php', formThumb).toPromise();
-                if (thumbRes?.url) thumbUrl = thumbRes.url;
-            }
+            const tempId = `up_${Date.now()}`;
+            this.progressService.updateProgress(tempId, 0, 'uploading');
 
-            const metadata: any = {
-                file_url: uploadRes.url,
-                mime: 'video/mp4',
-                d: duration,
-                thumb: thumbUrl,
-                viewOnce: viewOnce
-            };
+            // Optimistic Add
+            this.addPending(chatId, {
+                id: tempId,
+                senderId: senderId,
+                timestamp: Date.now(),
+                type: 'video',
+                text: {
+                    type: 'video',
+                    url: URL.createObjectURL(videoBlob),
+                    d: duration,
+                    thumb: thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : '',
+                    caption,
+                    viewOnce,
+                    _isOffline: true,
+                    size: videoBlob.size, // Added for signature match
+                    tempId: tempId,
+                    signature: `video_${videoBlob.size}_${caption || 'nc'}`
+                }
+            });
 
-            await this.distributeSecurePayload(chatId, senderId, 'video', '', ivBase64, sessionKey, metadata);
+            this.api.post('upload.php', formData, true).subscribe(async (event: any) => {
+                if (event.type === HttpEventType.UploadProgress) {
+                    const percent = Math.round(100 * event.loaded / event.total);
+                    this.progressService.updateProgress(tempId, percent, 'uploading');
+                } else if (event.type === HttpEventType.Response) {
+                    const uploadRes = event.body;
+                    if (!uploadRes?.url) {
+                        this.progressService.updateProgress(tempId, 0, 'failed');
+                        return;
+                    }
+
+                    // 3. Thumbnail 
+                    let thumbUrl = '';
+                    if (thumbnailBlob) {
+                        const formThumb = new FormData();
+                        formThumb.append('file', thumbnailBlob, 'thumb.jpg');
+                        const thumbRes: any = await this.api.post('upload.php', formThumb).toPromise();
+                        if (thumbRes?.url) thumbUrl = thumbRes.url;
+                    }
+
+                    const metadata: any = {
+                        url: uploadRes.url,
+                        name: uploadRes.name || (videoBlob as any).name || 'video.mp4',
+                        size: uploadRes.size || videoBlob.size || 0,
+                        mime: 'video/mp4',
+                        d: duration,
+                        thumb: thumbUrl,
+                        viewOnce: viewOnce,
+                        _tempId: tempId,
+                        signature: `video_${videoBlob.size}_${caption || 'nc'}`
+                    };
+
+                    await this.distributeSecurePayload(chatId, senderId, 'video', '', ivBase64, sessionKey, metadata);
+                    this.progressService.updateProgress(tempId, 100, 'completed');
+                    this.removePending(chatId, tempId);
+                    setTimeout(() => this.progressService.clearProgress(tempId), 2000);
+                }
+            }, err => this.progressService.updateProgress(tempId, 0, 'failed'));
         } catch (e) {
             this.logger.error("Video Send Failed", e);
         }
@@ -360,16 +517,53 @@ export class ChatService {
 
             const formData = new FormData();
             formData.append('file', encryptedBlob, 'doc.bin');
-            const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
 
-            const metadata = {
-                file_url: uploadRes.url,
-                mime: file.type || 'application/octet-stream',
-                name: file.name,
-                size: file.size
-            };
+            const tempId = `up_${Date.now()}`;
+            this.progressService.updateProgress(tempId, 0, 'uploading');
 
-            await this.distributeSecurePayload(chatId, senderId, 'document', '', ivBase64, sessionKey, metadata);
+            // Optimistic Add
+            this.addPending(chatId, {
+                id: tempId,
+                senderId: senderId,
+                timestamp: Date.now(),
+                type: 'document',
+                text: {
+                    type: 'document',
+                    url: URL.createObjectURL(file), // Instantly visible
+                    mime: file.type || 'application/octet-stream',
+                    name: file.name,
+                    size: file.size,
+                    _isOffline: true,
+                    tempId: tempId
+                }
+            });
+
+            this.api.post('upload.php', formData, true).subscribe(async (event: any) => {
+                if (event.type === HttpEventType.UploadProgress) {
+                    const percent = Math.round(100 * event.loaded / event.total);
+                    this.progressService.updateProgress(tempId, percent, 'uploading');
+                } else if (event.type === HttpEventType.Response) {
+                    const uploadRes = event.body;
+                    if (!uploadRes?.url) {
+                        this.progressService.updateProgress(tempId, 0, 'failed');
+                        return;
+                    }
+
+                    const metadata = {
+                        url: uploadRes.url,
+                        mime: file.type || 'application/octet-stream',
+                        name: file.name,
+                        size: file.size,
+                        tempId: tempId,
+                        signature: `doc_${file.name}_${file.size}`
+                    };
+
+                    await this.distributeSecurePayload(chatId, senderId, 'document', '', ivBase64, sessionKey, metadata);
+                    this.progressService.updateProgress(tempId, 100, 'completed');
+                    this.removePending(chatId, tempId);
+                    setTimeout(() => this.progressService.clearProgress(tempId), 2000);
+                }
+            }, err => this.progressService.updateProgress(tempId, 0, 'failed'));
         } catch (e) {
             this.logger.error("Doc Send Failed", e);
         }
@@ -378,12 +572,29 @@ export class ChatService {
 
     // --- Read & Decrypt ---
 
-    getMessages(chatId: string): Observable<any[]> {
-        const messagesRef = this.fsCollection('chats', chatId, 'messages');
-        const q = this.fsQuery(messagesRef, orderBy('timestamp', 'asc'));
+    // 4. Update getMessages to support limiting (and optionally startAfter but standard listener usually just does LimitToLast)
+    // Actually, for "Lazy Loading" on scroll UP, we usually keep the listener for NEW messages, 
+    // and use a separate ONE-TIME fetch for older messages.
+    // BUT, commonly we want the listener to "expand" or we just fetch older and merge manually.
+    // EASIEST PARITY: Listener for "Last 20" + "New".
+    // Manual Fetch for "Older than X".
 
+    getMessages(chatId: string, limitCount: number = 20): Observable<any[]> {
         return new Observable(observer => {
-            let messages: any[] = [];
+            // 1. Try to load from local cache first (Only if limit is small/default)
+            if (limitCount <= 20) {
+                this.storage.getCachedMessages(chatId).then(cached => {
+                    if (cached && cached.length > 0) {
+                        console.log(`[ChatService] Loaded ${cached.length} messages from cache for ${chatId}`);
+                        this.zone.run(() => observer.next(cached));
+                    }
+                });
+            }
+
+            // 2. Real-time listener (Limit to last N)
+            const messagesRef = this.fsCollection('chats', chatId, 'messages');
+            // We use 'asc' for logical ordering, but limitToLast gets the *latest* N.
+            const q = this.fsQuery(messagesRef, orderBy('timestamp', 'asc'), limitToLast(limitCount));
 
             const unsubMsg = this.fsOnSnapshot(q, (snapshot: any) => {
                 const privateKeyStr = localStorage.getItem('private_key');
@@ -393,16 +604,8 @@ export class ChatService {
                     const data = d.data();
                     const msgId = d.id;
 
-                    if (this.decryptedCache.has(msgId)) {
-                        return this.decryptedCache.get(msgId);
-                    }
-
                     if (data['deletedFor'] && data['deletedFor'].includes(myId)) return null;
-
-                    // Filter Expired Messages (Disappearing Messages)
-                    if (data['expiresAt'] && data['expiresAt'] < Date.now()) {
-                        return null;
-                    }
+                    if (data['expiresAt'] && data['expiresAt'] < Date.now()) return null;
 
                     const senderId = String(data['senderId']).trim();
                     let decrypted: any = "🔒 Decrypting...";
@@ -410,9 +613,7 @@ export class ChatService {
                     if (data['isDeleted']) {
                         decrypted = { type: 'revoked' };
                     } else if (data['type'] === 'system_signal') {
-                        const sysMsg = { id: msgId, ...data };
-                        this.decryptedCache.set(msgId, sysMsg);
-                        return sysMsg;
+                        decrypted = { type: 'system' };
                     } else if (data['type'] === 'live_location') {
                         decrypted = {
                             type: 'live_location',
@@ -421,95 +622,177 @@ export class ChatService {
                             expiresAt: data['expiresAt']
                         };
                     } else if (privateKeyStr) {
+                        // DEBUG: Log keys to verify "url" presence
+                        // if (data['type'] === 'image' || data['type'] === 'video' || data['type'] === 'document') {
+                        //    console.log(`[ChatService Debug] ${data['type']} ${msgId}:`, 
+                        //      'url:', data['url'], 
+                        //      'file_url:', data['file_url'],
+                        //      'name:', data['name']
+                        //    );
+                        // }
+
                         try {
                             if (data['keys'] && data['keys'][myId]) {
                                 let encKey = data['keys'][myId];
-
-                                // Phase 2: Check if encKey is an object (multi-device)
                                 if (typeof encKey === 'object') {
-                                    const devUuid = localStorage.getItem('device_uuid');
-                                    // Try specific device key, else 'primary', else first available
-                                    if (devUuid && encKey[devUuid]) {
-                                        encKey = encKey[devUuid];
-                                    } else if (encKey['primary']) {
-                                        encKey = encKey['primary'];
-                                    } else {
-                                        // Pick first
-                                        encKey = Object.values(encKey)[0];
-                                    }
+                                    const devUuid = localStorage.getItem('device_uuid') || 'unknown';
+                                    encKey = encKey[devUuid] || encKey['primary'] || Object.values(encKey)[0];
                                 }
 
                                 const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
-
                                 if (data['type'] === 'text') {
                                     decrypted = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
                                 } else if (data['type'] === 'contact' || data['type'] === 'location') {
                                     const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
-                                    try {
-                                        decrypted = JSON.parse(jsonStr);
-                                        decrypted.type = data['type'];
-                                    } catch (e) { decrypted = jsonStr; }
+                                    decrypted = JSON.parse(jsonStr);
+                                    decrypted.type = data['type'];
                                 } else {
                                     const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
-                                    const rawKeyBase64 = "RAW:" + this.crypto.arrayBufferToBase64(rawKey);
                                     decrypted = {
                                         type: data['type'],
                                         url: data['file_url'] || data['url'],
-                                        k: rawKeyBase64,
+                                        k: (data['k'] || data['ks']) ? (data['k'] || data['ks']) : (this.crypto.arrayBufferToBase64(rawKey)),
                                         i: data['iv'],
                                         caption: data['caption'] || '',
                                         mime: data['mime'] || '',
-                                        d: data['d'] || 0,
-                                        thumb: data['thumb'] || '',
-                                        name: data['name'] || '',
-                                        size: data['size'] || 0,
-                                        viewOnce: data['viewOnce']
+                                        viewOnce: data['viewOnce'],
+                                        tempId: data['tempId'] || data['_tempId'],
+                                        name: data['name'],
+                                        size: data['size'],
+                                        d: data['d'],
+                                        thumb: data['thumb']
                                     };
                                 }
-                            } else {
-                                const isMe = senderId === myId;
-                                let cipherText = '';
-                                if (isMe) cipherText = data['content_self'];
-                                else if (data['content'] && data['content'][myId]) cipherText = data['content'][myId];
-
-                                if (cipherText) decrypted = "🔒 Legacy Message";
                             }
                         } catch (e) {
-                            console.error("Decrypt Fail", e);
                             decrypted = "🔒 Decryption Failed";
                         }
                     }
 
-                    if (typeof decrypted === 'string') {
-                        const match = decrypted.match(/https?:\/\/[^\s]+/);
-                        if (match) {
-                            (data as any)['linkMeta'] = {
-                                url: match[0],
-                                domain: new URL(match[0]).hostname,
-                                title: match[0],
-                                image: 'https://www.google.com/s2/favicons?domain=' + new URL(match[0]).hostname
-                            };
-                        }
+                    const finalMsg = { id: msgId, ...data, text: decrypted };
+
+                    // ACTIVE CLEANUP: If we see a tempId from server, kill the local pending copy.
+                    if (decrypted && (decrypted.tempId || decrypted._tempId)) {
+                        const tId = decrypted.tempId || decrypted._tempId;
+                        // Avoid triggering change detection loop if possible, or just fire and forget
+                        this.removePending(chatId, tId);
                     }
 
-                    const finalMsg = { id: msgId, ...data, text: decrypted };
-                    this.decryptedCache.set(msgId, finalMsg);
                     return finalMsg;
                 });
 
                 Promise.all(promises).then(msgs => {
                     const validMsgs = msgs.filter(m => m !== null);
-                    this.zone.run(() => {
-                        observer.next(validMsgs);
-                    });
-                }).catch(err => {
-                    console.error("Critical msg processing error", err);
+                    // 3. Save fully decrypted messages back to cache for next time
+                    // Update cache if this is a "latest" fetch
+                    if (limitCount <= 50) this.storage.saveMessages(chatId, validMsgs);
+
+                    this.zone.run(() => observer.next(validMsgs));
+
+                    // Check for new messages sound
+                    const lastMsg = validMsgs[validMsgs.length - 1];
+                    if (lastMsg) {
+                        const lastTs = lastMsg.timestamp?.seconds ? lastMsg.timestamp.seconds * 1000 : lastMsg.timestamp;
+                        const prevTs = this.lastKnownTimestamps.get(chatId) || 0;
+                        if (lastTs > prevTs && lastMsg.senderId !== myId) {
+                            this.newMessage$.next({
+                                chatId,
+                                senderId: lastMsg.senderId,
+                                timestamp: lastTs
+                            });
+                        }
+                        this.lastKnownTimestamps.set(chatId, lastTs);
+                    }
                 });
             });
             return () => unsubMsg();
         });
     }
 
+    async getOlderMessages(chatId: string, lastTimestamp: any, limitCount: number = 20): Promise<any[]> {
+        const messagesRef = this.fsCollection('chats', chatId, 'messages');
+        // Fetch older: timestamp < lastTimestamp. Order by desc to get "nearest" older ones, then reverse.
+        // wait, we want "End Before" or "Start After" logic?
+        // Query: Order By Timestamp DESC (newest first). Start After "last known oldest". 
+        // Then reverse to ASC.
+        // Actually, if we have the "oldest" message currently shown, we want messages with timestamp < oldest.
+        // So: orderBy('timestamp', 'desc'), startAfter(oldestTimestamp), limit(limitCount)
+
+        // Ensure timestamp is compatible (Firestore Timestamp vs number)
+        // We assume lastTimestamp is the raw firestore value OR number.
+        // Best to use the document snapshot if possible, but timestamp field works usually.
+
+        const q = this.fsQuery(messagesRef, orderBy('timestamp', 'desc'), startAfter(lastTimestamp), limit(limitCount));
+        const snapshot = await getDocs(q);
+
+        const privateKeyStr = localStorage.getItem('private_key');
+        const myId = String(localStorage.getItem('user_id')).trim();
+
+        const promises = snapshot.docs.map(async (d: any) => {
+            const data = d.data();
+            const msgId = d.id;
+
+            // ... Reuse decryption logic (Refactor into helper ideally, keeping inline for now)
+            const senderId = String(data['senderId']).trim();
+            let decrypted: any = "🔒 Old Msg"; // Default
+
+            // Fast Decrypt Copy-Paste (Minimal)
+            if (data['isDeleted']) {
+                decrypted = { type: 'revoked' };
+            } else if (data['type'] === 'system_signal') {
+                decrypted = { type: 'system' };
+            } else if (privateKeyStr) {
+                try {
+                    if (data['keys'] && data['keys'][myId]) {
+                        let encKey = data['keys'][myId];
+                        if (typeof encKey === 'object') {
+                            const devUuid = localStorage.getItem('device_uuid') || 'unknown';
+                            encKey = encKey[devUuid] || encKey['primary'] || Object.values(encKey)[0];
+                        }
+                        const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
+                        if (data['type'] === 'text') {
+                            decrypted = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                        } else if (data['type'] === 'contact') {
+                            const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                            decrypted = JSON.parse(jsonStr);
+                            decrypted.type = 'contact';
+                        } else if (data['type'] === 'live_location') {
+                            decrypted = {
+                                type: 'live_location',
+                                lat: data['lat'],
+                                lng: data['lng'],
+                                expiresAt: data['expiresAt']
+                            };
+                        } else {
+                            const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
+                            decrypted = {
+                                type: data['type'],
+                                url: data['file_url'] || data['url'],
+                                k: (data['k'] || data['ks']) ? (data['k'] || data['ks']) : (this.crypto.arrayBufferToBase64(rawKey)),
+                                i: data['iv'],
+                                caption: data['caption'] || '',
+                                mime: data['mime'] || '',
+                                thumb: data['thumb'] || '',
+                                _tempId: data['_tempId'],
+                                name: data['name'],
+                                size: data['size'],
+                                d: data['d']
+                            };
+                        }
+                    }
+                } catch (e) {
+                    decrypted = "🔒 Decryption Failed";
+                }
+            }
+
+            const finalMsg = { id: msgId, ...data, text: decrypted };
+            return finalMsg;
+        });
+
+        const results = await Promise.all(promises);
+        // Reverse to return in ASC order (Oldest -> Newer)
+        return results.filter(m => m !== null).reverse();
+    }
     async sendAudioMessage(chatId: string, audioBlob: Blob, senderId: string, duration: number) {
         try {
             const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(audioBlob);
@@ -524,7 +807,8 @@ export class ChatService {
             const metadata = {
                 type: 'audio',
                 url: uploadRes.url,
-                d: duration
+                d: duration,
+                mime: audioBlob.type || 'audio/mp4' // Default to mp4/aac if missing
             };
 
             await this.distributeSecurePayload(chatId, senderId, 'audio', '', ivBase64, sessionKey, metadata);
@@ -589,7 +873,13 @@ export class ChatService {
                 lng: lng,
                 expiresAt: expiresAt,
                 senderId: senderId,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                text: {
+                    type: 'live_location',
+                    lat: lat,
+                    lng: lng,
+                    expiresAt: expiresAt
+                }
             };
 
             await this.addMessageDoc(chatId, payload);
@@ -710,6 +1000,14 @@ export class ChatService {
         const q = this.fsQuery(chatsRef, where('participants', 'array-contains', myId));
 
         return new Observable(observer => {
+            // 1. Load from cache first for instant UI
+            this.storage.getCachedChats().then(cached => {
+                if (cached && cached.length > 0) {
+                    this.zone.run(() => observer.next(cached));
+                }
+            });
+
+            // 2. Real-time listener
             const unsubscribe = this.fsOnSnapshot(q, (snapshot: any) => {
                 const chats = snapshot.docs
                     .map((d: any) => ({ id: d.id, ...d.data() }))
@@ -717,7 +1015,11 @@ export class ChatService {
 
                 // Client-side sort by lastTimestamp descending
                 chats.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
-                observer.next(chats);
+
+                // 3. Save updated list to cache
+                this.storage.saveChats(chats);
+
+                this.zone.run(() => observer.next(chats));
             });
             return () => unsubscribe();
         });
@@ -802,6 +1104,27 @@ export class ChatService {
         await this.fsUpdateDoc(msgRef, {
             starredBy: star ? arrayUnion(myId) : arrayRemove(myId)
         });
+    }
+
+    async setTyping(chatId: string, status: string | boolean) {
+        const myId = String(localStorage.getItem('user_id'));
+        if (!chatId || !myId) return;
+
+        // Structure: chats/{chatId}/typing/{userId}
+        // If status is false => delete doc
+        // If status is string/true => set doc with timestamp
+
+        const typeRef = this.fsDoc('chats', chatId, 'typing', myId);
+
+        if (status === false) {
+            await this.fsDeleteDoc(typeRef);
+        } else {
+            await this.fsSetDoc(typeRef, {
+                userId: myId,
+                isTyping: true,
+                timestamp: Date.now()
+            });
+        }
     }
 
     getStarredMessages(): Observable<any[]> {
