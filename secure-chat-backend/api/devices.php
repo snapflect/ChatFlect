@@ -51,6 +51,45 @@ if ($method === 'POST') {
             exit;
         }
 
+        // --- Multi-Device Session Hardening (v8.1) ---
+        $MAX_DEVICES = 5;
+        $countStmt = $conn->prepare("SELECT COUNT(*) as count FROM user_devices WHERE user_id = ?");
+        $countStmt->bind_param("s", $userId);
+        $countStmt->execute();
+        $countRes = $countStmt->get_result()->fetch_assoc();
+
+        // Check if device already exists (update doesn't count towards limit)
+        $existsStmt = $conn->prepare("SELECT 1 FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+        $existsStmt->bind_param("ss", $userId, $deviceUuid);
+        $existsStmt->execute();
+        $isUpdate = $existsStmt->get_result()->num_rows > 0;
+
+        if (!$isUpdate && $countRes['count'] >= $MAX_DEVICES) {
+            // Find the oldest device
+            $oldestStmt = $conn->prepare("SELECT device_uuid FROM user_devices WHERE user_id = ? ORDER BY last_active ASC LIMIT 1");
+            $oldestStmt->bind_param("s", $userId);
+            $oldestStmt->execute();
+            $oldest = $oldestStmt->get_result()->fetch_assoc();
+
+            if ($oldest) {
+                // Evict oldest device
+                $evictStmt = $conn->prepare("DELETE FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+                $evictStmt->bind_param("ss", $userId, $oldest['device_uuid']);
+                $evictStmt->execute();
+
+                // Clear sessions associated with evicted device
+                $sessStmt = $conn->prepare("DELETE FROM user_sessions WHERE user_id = ? AND device_uuid = ?");
+                $sessStmt->bind_param("ss", $userId, $oldest['device_uuid']);
+                $sessStmt->execute();
+
+                auditLog('DEVICE_EVICTED_MAX_LIMIT', $userId, [
+                    'evicted_device' => $oldest['device_uuid'],
+                    'new_device' => $deviceUuid,
+                    'reason' => 'max_limit_reached'
+                ]);
+            }
+        }
+
         // Upsert device
         $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token) VALUES (?, ?, ?, ?, ?) 
                                 ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, last_active = NOW()");

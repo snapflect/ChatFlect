@@ -134,9 +134,18 @@ export class AuthService {
 
             if (res && res.status === 'success') {
                 localStorage.setItem('id_token', res.token);
+                // v8.1: Store the new rotated refresh token
+                if (res.refresh_token) {
+                    localStorage.setItem('refresh_token', res.refresh_token);
+                }
                 return res.token;
             }
-        } catch (e) {
+        } catch (e: any) {
+            // v8.1: If 403 Forbidden, the account is blocked
+            if (e?.status === 403) {
+                this.logout();
+                alert("This account has been blocked. Please contact support.");
+            }
             this.logger.error("Token Refresh Failed", e);
         }
         return null;

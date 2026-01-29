@@ -145,23 +145,65 @@ function getXUserIdHeader()
  */
 function authenticateRequest()
 {
-    // 1. Try primary Authorization header
-    $authHeader = getAuthorizationHeader();
-    if ($authHeader) {
-        $userId = validateFirebaseToken($authHeader);
-        if ($userId)
-            return $userId;
+    // 1. Get header
+    $authHeader = getAuthorizationHeader() ?: getXUserIdHeader();
+    if (!$authHeader)
+        return null;
+
+    // 2. Remove 'Bearer ' prefix
+    if (stripos($authHeader, 'Bearer ') === 0) {
+        $token = substr($authHeader, 7);
+    } else {
+        $token = $authHeader;
+    }
+    $token = trim($token);
+
+    // 3. PRIORITY CACHE CHECK (Fast Path)
+    $cached = CacheService::getSession($token);
+    if ($cached && isset($cached['user_id'])) {
+        return $cached['user_id'];
     }
 
-    // 2. Try fallback X-User-ID header
-    $xUserId = getXUserIdHeader();
-    if ($xUserId) {
-        $userId = validateFirebaseToken($xUserId);
-        if ($userId)
-            return $userId;
+    // 4. Fallback: Full JWT/DB Validation (Slow Path)
+    $userId = validateFirebaseToken($token);
+
+    // 5. If successful, cache it for next time
+    if ($userId) {
+        CacheService::cacheSession($token, $userId);
     }
 
-    return null;
+    return $userId;
+}
+
+/**
+ * Check if the user is blocked (v8.1)
+ * Uses lightweight caching to prevent DB hammer while maintaining security.
+ */
+function isUserBlocked($userId)
+{
+    if (!$userId)
+        return false;
+
+    // Check Cache (5 min TTL for block status)
+    $cachedStatus = CacheService::get("user_blocked:$userId");
+    if ($cachedStatus !== null)
+        return (bool) $cachedStatus;
+
+    global $conn;
+    $stmt = $conn->prepare("SELECT is_blocked FROM users WHERE user_id = ?");
+    $stmt->bind_param("s", $userId);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    $isBlocked = false;
+    if ($row = $res->fetch_assoc()) {
+        $isBlocked = (int) $row['is_blocked'] === 1;
+    }
+    $stmt->close();
+
+    // Cache the status for 5 minutes
+    CacheService::set("user_blocked:$userId", $isBlocked ? 1 : 0, 300);
+
+    return $isBlocked;
 }
 
 /**
@@ -183,6 +225,17 @@ function requireAuth($requestUserId = null)
         auditLog(AUDIT_AUTH_FAILED, null, ['reason' => 'missing_or_invalid_token', 'debug' => $debugInfo]);
         http_response_code(401);
         echo json_encode($debugInfo);
+        exit;
+    }
+
+    // --- Server-Side Block Enforcement (v8.1) ---
+    if (isUserBlocked($authUserId)) {
+        auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'account_blocked']);
+        http_response_code(403);
+        echo json_encode([
+            "error" => "Account Blocked - Please contact support.",
+            "status" => "blocked"
+        ]);
         exit;
     }
 
