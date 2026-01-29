@@ -1,5 +1,5 @@
 import { Component, Input, OnInit, OnDestroy, ViewChild, ElementRef, ChangeDetectorRef } from '@angular/core';
-import { ModalController, ActionSheetController, ToastController } from '@ionic/angular';
+import { ModalController, ActionSheetController, ToastController, AlertController } from '@ionic/angular';
 import { StatusService } from 'src/app/services/status.service';
 import { ApiService } from 'src/app/services/api.service';
 import { DomSanitizer } from '@angular/platform-browser';
@@ -40,8 +40,11 @@ export class StatusViewerPage implements OnInit, OnDestroy {
     private toast: ToastController,
     private api: ApiService,
     private sanitizer: DomSanitizer,
-    private cdr: ChangeDetectorRef
+    private cdr: ChangeDetectorRef,
+    private alertCtrl: AlertController // Needed for Viewed By
   ) { }
+  // NOTE: io.AlertController logic below needs import correction or I use 'any' if lazy. 
+  // Better to import AlertController properly.
 
   ngOnInit() {
     this.loadMedia(); // Initial load
@@ -87,7 +90,7 @@ export class StatusViewerPage implements OnInit, OnDestroy {
 
     this.api.getBlob(url).subscribe(blob => {
       if (blob) {
-        this.currentObjectUrl = URL.createObjectURL(blob);
+        this.currentObjectUrl = URL.createObjectURL(blob as any as Blob);
         this.currentMediaUrl = this.sanitizer.bypassSecurityTrustUrl(this.currentObjectUrl);
 
         this.isLoading = false;
@@ -266,6 +269,12 @@ export class StatusViewerPage implements OnInit, OnDestroy {
 
     if (this.isOwnStatus) {
       buttons.push({
+        text: `Viewed By (${this.currentStatus.view_count || 0})`,
+        icon: 'eye',
+        handler: () => this.showViewers()
+      });
+
+      buttons.push({
         text: 'Delete Status',
         role: 'destructive',
         icon: 'trash',
@@ -420,6 +429,51 @@ export class StatusViewerPage implements OnInit, OnDestroy {
       this.showReplyInput = false;
       this.resume();
     }
+  }
+
+  // --- Swipe / Gestures ---
+  private touchStartY = 0;
+
+  onTouchStart(event: TouchEvent) {
+    this.touchStartY = event.touches[0].clientY;
+  }
+
+  onTouchEnd(event: TouchEvent) {
+    const touchEndY = event.changedTouches[0].clientY;
+    const diff = touchEndY - this.touchStartY;
+
+    if (diff > 100) { // Swipe Down > 100px
+      this.close();
+    }
+  }
+
+  async showViewers() {
+    this.pause();
+    const statusId = this.currentStatus.id;
+
+    const viewers: any = await this.statusService.getViewers(statusId).toPromise();
+
+    if (!viewers || viewers.length === 0) {
+      const t = await this.toast.create({ message: 'No views yet', duration: 1000 });
+      t.present();
+      this.resume();
+      return;
+    }
+
+    const alert = await this.alertCtrl.create({
+      header: 'Viewed By',
+      inputs: viewers.map((v: any) => ({
+        type: 'radio',
+        label: `${v.first_name} ${v.last_name} (${new Date(v.viewed_at).toLocaleTimeString()})`,
+        value: v.viewer_id,
+        disabled: true
+      })),
+      buttons: [{
+        text: 'Close',
+        handler: () => this.resume()
+      }]
+    });
+    await alert.present();
   }
 }
 

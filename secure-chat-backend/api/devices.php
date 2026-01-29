@@ -143,6 +143,11 @@ if ($method === 'POST') {
     $stmt = $conn->prepare("DELETE FROM user_devices WHERE user_id = ? AND device_uuid = ?");
     $stmt->bind_param("ss", $userId, $deviceUuid);
 
+    // v13: Immediate Session Invalidation (Revoke & Wipe)
+    $sessStmt = $conn->prepare("DELETE FROM user_sessions WHERE user_id = ? AND device_uuid = ?");
+    $sessStmt->bind_param("ss", $userId, $deviceUuid);
+    $sessStmt->execute();
+
     if ($stmt->execute()) {
         auditLog('device_revoked', $userId, ['device_uuid' => $deviceUuid]);
         echo json_encode(["status" => "success", "message" => "Device revoked"]);

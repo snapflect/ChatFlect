@@ -147,3 +147,29 @@ ion-skeleton-text {
         font-size: 0.9rem;
     }
 }
+
+/* New Enhancements */
+.preview-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    overflow: hidden;
+    margin-right: 8px;
+}
+
+.status-icon {
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.3);
+    min-width: 15px;
+
+    &.read {
+        color: var(--ion-color-secondary);
+    }
+}
+
+.typing-text {
+    color: var(--ion-color-success) !important;
+    font-weight: 500;
+    font-style: italic;
+}

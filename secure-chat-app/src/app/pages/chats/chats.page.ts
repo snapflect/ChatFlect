@@ -67,6 +67,16 @@ export class ChatsPage implements OnInit, OnDestroy {
     this.chatSubscription?.unsubscribe();
   }
 
+  /* ---------------- REFRESH ---------------- */
+
+  doRefresh(event: any) {
+    this.loadChats();
+    // Timeout to ensure it spins a bit if load is instant
+    setTimeout(() => {
+      event.target.complete();
+    }, 1000);
+  }
+
   /* ---------------- LOAD CHATS ---------------- */
 
   private cleanupPresence(): void {
@@ -155,8 +165,6 @@ export class ChatsPage implements OnInit, OnDestroy {
             ).length;
 
             this.chats = this.chats.filter(c =>
-              c.lastMessage &&
-              c.lastMessage.trim() !== '' &&
               !this.chatSettings.isArchived(c.id)
             );
 
@@ -222,6 +230,62 @@ export class ChatsPage implements OnInit, OnDestroy {
     this.filteredChats = this.chats.filter(c =>
       c.name?.toLowerCase().includes(term)
     );
+  }
+
+  /* ---------------- TYPING & STATUS HELPERS ---------------- */
+
+  getTypingString(chat: any): string | null {
+    if (!chat.typing) return null;
+
+    const myId = String(this.myId);
+    const activeTypers: string[] = [];
+    const now = Date.now();
+
+    // typing = { userId: timestamp }
+    for (const [uid, ts] of Object.entries(chat.typing)) {
+      if (uid !== myId && (now - (ts as number) < 5000)) {
+        // Resolve name
+        if (chat.isGroup) {
+          // Ideally we have a participants map or we look up
+          const name = this.getUserName(uid);
+          activeTypers.push(name); // Short name
+        } else {
+          activeTypers.push('typing');
+        }
+      }
+    }
+
+    if (activeTypers.length === 0) return null;
+
+    if (!chat.isGroup) return 'typing...';
+
+    if (activeTypers.length === 1) return `${activeTypers[0]} is typing...`;
+    if (activeTypers.length === 2) return `${activeTypers[0]} and ${activeTypers[1]} are typing...`;
+    return 'Several people are typing...';
+  }
+
+  getUserName(userId: string): string {
+    const cached = this.resolvedUsers.get(userId);
+    return cached ? cached.name.split(' ')[0] : 'Member';
+  }
+
+  isMyLastMsg(chat: any): boolean {
+    // Requires ChatService to save lastSenderId on chat doc
+    return String(chat.lastSenderId) === String(this.myId);
+  }
+
+  isRead(chat: any): boolean {
+    if (chat.isGroup) return false; // Simple logic for groups: mostly 'delivered'
+    if (!chat.otherUserId) return false;
+
+    const lastRead = chat[`last_read_${chat.otherUserId}`] || 0;
+    const msgTs = chat.lastTimestamp?.seconds ? chat.lastTimestamp.seconds * 1000 : chat.lastTimestamp;
+    return lastRead >= msgTs;
+  }
+
+  getDeliveryIcon(chat: any): string {
+    // In future: Check sent/delivered status if we track packets
+    return this.isRead(chat) ? 'checkmark-done' : 'checkmark';
   }
 
   /* ---------------- PIN / MUTE / ARCHIVE ---------------- */

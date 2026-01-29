@@ -33,6 +33,7 @@ CREATE TABLE `users` (
   `public_key` text DEFAULT NULL,
   `google_profile_data` JSON DEFAULT NULL,
   `fcm_token` text DEFAULT NULL,
+  `role` enum('user','admin') DEFAULT 'user',
   `is_blocked` tinyint(1) DEFAULT 0,
   `is_profile_complete` tinyint(1) DEFAULT 0,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),

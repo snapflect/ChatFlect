@@ -8,13 +8,16 @@ import { CallsPageRoutingModule } from './calls-routing.module';
 
 import { CallsPage } from './calls.page';
 
+import { SharedModule } from 'src/app/shared/shared.module';
+
 @NgModule({
   imports: [
     CommonModule,
     FormsModule,
     IonicModule,
-    CallsPageRoutingModule
+    CallsPageRoutingModule,
+    SharedModule
   ],
   declarations: [CallsPage]
 })
-export class CallsPageModule {}
+export class CallsPageModule { }

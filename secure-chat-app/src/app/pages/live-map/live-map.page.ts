@@ -67,25 +67,16 @@ export class LiveMapPage implements OnInit, OnDestroy {
     }).addTo(this.map);
 
     // Fix leaf icon path issues in Angular/Webpack
-    const iconRetinaUrl = 'assets/marker-icon-2x.png';
-    const iconUrl = 'assets/marker-icon.png';
-    const shadowUrl = 'assets/marker-shadow.png';
-    // We need to ensure these assets exist or use CDN. 
-    // Usually leaflet assets are not copied by default unless configured.
-    // For MVP, if icons fail, we might see broken images.
-    // Let's use CDN for icons to be safe without asset config.
-    /*
     const DefaultIcon = L.icon({
-        iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-        iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
-        iconSize: [25, 41],
-        iconAnchor: [12, 41],
-        popupAnchor: [1, -34],
-        shadowSize: [41, 41]
+      iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+      iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+      shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+      iconSize: [25, 41],
+      iconAnchor: [12, 41],
+      popupAnchor: [1, -34],
+      shadowSize: [41, 41]
     });
     L.Marker.prototype.options.icon = DefaultIcon;
-    */
   }
 
   subscribeToLocations() {

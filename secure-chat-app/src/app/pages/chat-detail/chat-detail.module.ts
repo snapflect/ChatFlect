@@ -10,6 +10,7 @@ import { ImageModalPageModule } from '../image-modal/image-modal.module';
 import { FormatTextPipe } from 'src/app/pipes/format-text-pipe';
 import { StickerPickerComponent } from 'src/app/components/sticker-picker/sticker-picker.component';
 import { SharedModule } from 'src/app/shared/shared.module';
+import { SwipeToReplyDirective } from 'src/app/directives/swipe-to-reply.directive';
 
 @NgModule({
   imports: [
@@ -19,7 +20,8 @@ import { SharedModule } from 'src/app/shared/shared.module';
     ChatDetailPageRoutingModule,
     ImageModalPageModule,
     FormatTextPipe,
-    SharedModule
+    SharedModule,
+    SwipeToReplyDirective
   ],
   declarations: [ChatDetailPage, StickerPickerComponent]
   // Wait, if FormatTextPipe IS standalone, I should import it. 

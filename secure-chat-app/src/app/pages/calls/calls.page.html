@@ -5,24 +5,39 @@
 </ion-header>
 
 <ion-content [fullscreen]="true">
+  <ion-refresher slot="fixed" (ionRefresh)="doRefresh($event)">
+    <ion-refresher-content></ion-refresher-content>
+  </ion-refresher>
+
   <ion-list lines="none" class="bg-transparent ion-padding-top">
-    <ion-item *ngFor="let call of calls" class="call-item glass-item">
-      <div slot="start" class="call-icon-wrapper">
-        <ion-icon [name]="getCallIcon(call)" class="main-icon"></ion-icon>
-      </div>
+    <ion-item-sliding *ngFor="let call of calls" class="call-slider">
+      <ion-item class="call-item glass-item" (click)="makeCall(call)">
+        <ion-avatar slot="start">
+          <img [secureSrc]="getAvatar(call) || 'assets/user-placeholder.png'" />
+        </ion-avatar>
 
-      <ion-label>
-        <h2>{{ getStatusLabel(call) }}</h2>
-        <div class="call-details">
-          <ion-icon [name]="getCallStatusIcon(call)" [color]="getColor(call)"></ion-icon>
-          <p>{{ call.created_at | date:'short' }}</p>
-        </div>
-      </ion-label>
+        <ion-label>
+          <h2 class="contact-name">{{ getDisplayName(call) }}</h2>
+          <div class="call-details">
+            <ion-icon [name]="getCallStatusIcon(call)" [color]="getColor(call)" class="status-icon"></ion-icon>
+            <p>{{ call.created_at | date:'shortTime' }}</p>
+          </div>
+        </ion-label>
 
-      <ion-icon name="information-circle-outline" slot="end" color="primary"></ion-icon>
-    </ion-item>
+        <ion-button fill="clear" slot="end" (click)="makeCall(call); $event.stopPropagation()">
+          <ion-icon [name]="getCallIcon(call)" color="primary"></ion-icon>
+        </ion-button>
+      </ion-item>
+
+      <ion-item-options side="end">
+        <ion-item-option color="danger" (click)="deleteCall(call)">
+          <ion-icon slot="icon-only" name="trash"></ion-icon>
+        </ion-item-option>
+      </ion-item-options>
+    </ion-item-sliding>
 
     <div *ngIf="calls.length === 0" class="empty-state">
+      <ion-icon name="call-outline"></ion-icon>
       <p>No recent calls</p>
     </div>
   </ion-list>

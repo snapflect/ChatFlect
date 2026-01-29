@@ -10,7 +10,8 @@
     align-items: center;
 }
 
-.image-container img {
+.image-container img,
+.image-container video {
     max-width: 100%;
     max-height: 80vh;
     object-fit: contain;

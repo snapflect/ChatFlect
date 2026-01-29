@@ -10,7 +10,8 @@
 
 <ion-content [fullscreen]="true" class="preview-content">
   <div class="image-container">
-    <img [src]="previewUrl" *ngIf="previewUrl" />
+    <img [src]="previewUrl" *ngIf="isImage" />
+    <video [src]="previewUrl" *ngIf="isVideo" autoplay loop muted playsinline></video>
   </div>
 </ion-content>
 

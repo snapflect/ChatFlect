@@ -820,6 +820,16 @@ export class CallService {
         this.signalUnsub = null;
     }
 
+    async deleteCallLog(callId: string) {
+        try {
+            const callRef = this.firestoreDoc(this.db, 'calls', callId);
+            const { deleteDoc } = require('firebase/firestore');
+            await deleteDoc(callRef);
+        } catch (e) {
+            this.logger.error("Failed to delete call log", e);
+        }
+    }
+
     getCallHistory(): any {
         const myId = localStorage.getItem('user_id');
         if (!myId) return Promise.resolve([]);

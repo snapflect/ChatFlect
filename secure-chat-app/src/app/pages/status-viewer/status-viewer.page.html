@@ -1,4 +1,4 @@
-<ion-content color="black" [fullscreen]="true">
+<ion-content color="black" [fullscreen]="true" (touchstart)="onTouchStart($event)" (touchend)="onTouchEnd($event)">
   <!-- Progress Bars -->
   <div class="progress-container">
     <div *ngFor="let s of userStatuses; let i = index" class="progress-bar-bg">

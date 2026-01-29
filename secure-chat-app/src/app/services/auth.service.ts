@@ -12,6 +12,7 @@ import { environment } from 'src/environments/environment';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 import { Capacitor } from '@capacitor/core';
 import { SecureMediaService } from './secure-media.service';
+import { SecureStorageService } from './secure-storage.service';
 
 @Injectable({
     providedIn: 'root'
@@ -31,7 +32,8 @@ export class AuthService {
         private pushService: PushService,
         private logger: LoggingService,
         private callService: CallService,
-        private mediaService: SecureMediaService
+        private mediaService: SecureMediaService,
+        private secureStorage: SecureStorageService // v13
     ) {
         const app = initializeApp(environment.firebase);
         this.db = getFirestore(app);
@@ -363,5 +365,22 @@ export class AuthService {
         } catch (e) {
             return false;
         }
+    }
+
+    async rotateKeys() {
+        const userId = this.userIdSource.value;
+        if (!userId) throw new Error("Not logged in");
+
+        // 1. Generate New Keys
+        const keys = await this.crypto.generateKeyPair();
+        const pub = await this.crypto.exportKey(keys.publicKey);
+        const priv = await this.crypto.exportKey(keys.privateKey);
+
+        // 2. Update Local Storage
+        localStorage.setItem('public_key', pub);
+        localStorage.setItem('private_key', priv);
+
+        // 3. Sync with Server (Update Device Record)
+        await this.registerDevice(userId);
     }
 }

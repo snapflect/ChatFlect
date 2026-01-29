@@ -12,7 +12,7 @@ const config: CapacitorConfig = {
     SplashScreen: {
       launchShowDuration: 3000,
       launchAutoHide: true,
-      backgroundColor: "#ffffffff",
+      backgroundColor: "#16161a",
       androidSplashResourceName: "splash",
       showSpinner: true,
       androidSpinnerStyle: "large",
@@ -33,6 +33,14 @@ const config: CapacitorConfig = {
       scopes: ['profile', 'email'],
       serverClientId: '1036135506512-1fj8d144k2i3k9aikpn34lu27ut1bhht.apps.googleusercontent.com',
       forceCodeForRefreshToken: true
+    },
+    Keyboard: {
+      resize: 'ionic' as any,
+      style: 'DARK' as any,
+      resizeOnFullScreen: false
+    },
+    CapacitorHttp: {
+      enabled: true
     }
   }
 };

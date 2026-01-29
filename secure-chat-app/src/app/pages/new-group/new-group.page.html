@@ -19,7 +19,7 @@
     <div class="avatar-picker" (click)="triggerFile()">
       <ion-avatar class="group-avatar">
         <img [secureSrc]="groupIconUrl || 'assets/group-placeholder.png'"
-          (error)="$event.target.src = 'assets/group-placeholder.png'" />
+          (error)="$any($event).target.src = 'assets/group-placeholder.png'" />
       </ion-avatar>
       <div class="camera-badge">
         <ion-icon name="camera" color="light"></ion-icon>
@@ -42,7 +42,7 @@
     <ion-item *ngFor="let c of contacts" lines="none" class="contact-item">
       <ion-avatar slot="start">
         <img [secureSrc]="c.photo_url || 'assets/placeholder_user.png'"
-          (error)="$event.target.src = 'assets/placeholder_user.png'" />
+          (error)="$any($event).target.src = 'assets/placeholder_user.png'" />
       </ion-avatar>
       <ion-label>
         <h2>{{ c.first_name }} {{ c.last_name }}</h2>

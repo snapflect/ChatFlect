@@ -10,6 +10,75 @@ ion-content.chat-content {
     box-sizing: content-box;
 }
 
+/* Search Toolbar */
+.search-toolbar {
+    --background: rgba(30, 30, 35, 0.95);
+    --border-width: 0;
+
+    ion-searchbar {
+        --background: rgba(255, 255, 255, 0.05);
+        --color: white;
+        --icon-color: rgba(255, 255, 255, 0.5);
+        --placeholder-color: rgba(255, 255, 255, 0.4);
+        border-radius: 8px;
+        padding-top: 0;
+        padding-bottom: 0;
+        height: 36px;
+    }
+}
+
+/* Mention Picker */
+.mention-picker {
+    position: absolute;
+    bottom: 100%;
+    left: 10px;
+    right: 10px;
+    background: rgba(40, 40, 45, 0.95);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    overflow: hidden;
+    max-height: 200px;
+    box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.3);
+    z-index: 20;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: slideUp 0.2s ease-out;
+
+    ion-list {
+        background: transparent;
+        padding: 0;
+    }
+
+    ion-item {
+        --background: transparent;
+        --color: white;
+        --border-color: rgba(255, 255, 255, 0.05);
+        --padding-start: 10px;
+
+        ion-avatar {
+            width: 32px;
+            height: 32px;
+            margin-right: 12px;
+        }
+
+        h2 {
+            font-size: 14px;
+            font-weight: 500;
+        }
+    }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(10px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
 /* Date Separator */
 .date-separator {
     display: flex;
@@ -51,6 +120,24 @@ ion-content.chat-content {
 
 .msg-them {
     align-items: flex-start;
+
+    /* Group Avatar Layout */
+    flex-direction: row;
+    gap: 8px;
+}
+
+/* Avatar in Group Chat */
+.msg-avatar-container {
+    align-self: flex-end;
+    /* Align to bottom of message */
+    margin-bottom: 2px;
+    flex-shrink: 0;
+}
+
+.msg-avatar {
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* Bubbles - Uses Global Vars */
@@ -59,11 +146,27 @@ ion-content.chat-content {
     padding: 10px 14px;
     border-radius: 18px;
     max-width: 80%;
+    /* Adjusted for avatar space if needed, but flex handles it */
     min-width: 80px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.bubble .text-content {
+    margin-bottom: 4px;
     font-size: 15px;
     line-height: 1.4;
-    word-wrap: break-word;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    white-space: pre-wrap !important;
+    word-break: break-word;
+}
+
+/* Ensure bubble doesn't break flex in .msg-them row */
+.msg-them .bubble {
+    background: var(--chat-bubble-them-bg);
+    color: var(--chat-bubble-them-text);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom-left-radius: 4px;
 }
 
 .msg-me .bubble {
@@ -72,13 +175,13 @@ ion-content.chat-content {
     border-bottom-right-radius: 4px;
 }
 
-.msg-them .bubble {
-    background: var(--chat-bubble-them-bg);
-    color: var(--chat-bubble-them-text);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-bottom-left-radius: 4px;
+/* Mentions in Text */
+.chat-mention {
+    color: var(--ion-color-secondary);
+    font-weight: 600;
+    background: rgba(var(--ion-color-secondary-rgb), 0.1);
+    padding: 0 4px;
+    border-radius: 4px;
 }
 
 /* Links */
@@ -729,8 +832,142 @@ ion-content.chat-content {
     }
 }
 
+/* Media Progress Overlay */
+.media-progress-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    backdrop-filter: blur(4px);
+    transition: all 0.3s ease;
+
+    .progress-ring-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        color: white;
+
+        ion-spinner {
+            --color: white;
+            width: 40px;
+            height: 40px;
+        }
+
+        .progress-text {
+            font-size: 18px;
+            font-weight: 700;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .progress-status {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            opacity: 0.8;
+        }
+    }
+}
+
 .msg-me .reaction-badge {
     background: rgba(40, 40, 45, 0.9);
     left: 8px;
     right: auto;
+}
+
+/* E2E Encryption Banner */
+.encryption-banner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    margin: 10px 20px 20px;
+    background: rgba(255, 215, 0, 0.1);
+    border-radius: 12px;
+    text-align: center;
+    border: 1px solid rgba(255, 215, 0, 0.2);
+
+    .lock-icon {
+        font-size: 14px;
+        color: #FFD700;
+        margin-bottom: 6px;
+    }
+
+    .encryption-text {
+        font-size: 11px;
+        color: #FFD700;
+        line-height: 1.4;
+        font-weight: 500;
+    }
+}
+
+/* Offline Banner */
+.offline-banner {
+    background: #333333;
+    color: white;
+    font-size: 13px;
+    padding: 8px;
+    text-align: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    opacity: 0.9;
+
+    ion-icon {
+        font-size: 16px;
+    }
+}
+
+/* Header Shadow */
+ion-header.header-shadow {
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1) !important;
+    background: var(--ion-background-color) !important;
+    transition: box-shadow 0.2s ease;
+
+    ion-toolbar {
+        --border-style: none;
+        /* Hide default border */
+    }
+}
+
+/* Emoji Picker Container */
+.emoji-picker-container {
+    display: none;
+    background: #1e1e23;
+    width: 100%;
+}
+
+.emoji-picker-container.visible {
+    display: block;
+    height: 300px;
+}
+
+
+.emoji-toggle-btn ion-icon {
+    color: white !important;
+}
+
+/* FIX: Header Avatar Dimensions */
+.header-avatar {
+    width: 40px !important;
+    height: 40px !important;
+    overflow: hidden;
+    display: block;
+}
+
+.header-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }

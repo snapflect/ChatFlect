@@ -3,6 +3,7 @@ import { ApiService } from './api.service';
 import { Capacitor } from '@capacitor/core';
 import { Contacts } from '@capacitor-community/contacts';
 import { LoggingService } from './logging.service';
+import { StorageService } from './storage.service';
 import { getFirestore, doc, setDoc, getDocs, collection } from 'firebase/firestore';
 
 @Injectable({ providedIn: 'root' })
@@ -13,7 +14,8 @@ export class ContactsService {
 
     constructor(
         private api: ApiService,
-        private logger: LoggingService
+        private logger: LoggingService,
+        private storage: StorageService
     ) {
         try {
             this.db = getFirestore();
@@ -27,28 +29,49 @@ export class ContactsService {
     async getAllContacts(): Promise<any[]> {
         const myId = localStorage.getItem('user_id');
 
-        const devicePhones = await this.getDevicePhones();
-        const serverUsers = await this.syncPhone(devicePhones);
+        // 1. Try to load from Cache first for instant UI
+        const cached = await this.storage.getCachedContacts();
+        if (cached && cached.length > 0) {
+            console.log('[ContactsService] Loaded from cache:', cached.length);
+            this.localContacts = this.normalizeContacts(cached, myId);
 
-        // Exclude self
-        const filtered = serverUsers.filter(u => u.user_id !== myId);
+            // Trigger background sync only if needed (e.g. every 1 hour)
+            const lastSync = parseInt(localStorage.getItem('last_contacts_sync') || '0');
+            if (Date.now() - lastSync > 3600000) {
+                this.syncInBackground(myId);
+            }
 
-        // Normalize display name
+            return this.localContacts;
+        }
+
+        // 2. Fallback to full sync if cache is empty
+        return await this.syncInBackground(myId);
+    }
+
+    private async syncInBackground(myId: string | null) {
+        try {
+            const devicePhones = await this.getDevicePhones();
+            const serverUsers = await this.syncPhone(devicePhones);
+
+            // Save to Cache
+            localStorage.setItem('last_contacts_sync', Date.now().toString());
+            await this.storage.saveContacts(serverUsers);
+
+            this.localContacts = this.normalizeContacts(serverUsers, myId);
+            return this.localContacts;
+        } catch (e) {
+            this.logger.error("Sync in background failed", e);
+            return this.localContacts;
+        }
+    }
+
+    private normalizeContacts(contacts: any[], myId: string | null) {
+        const filtered = contacts.filter(u => u.user_id !== myId);
         const normalized = filtered.map(u => ({
             ...u,
-            displayName:
-                u.first_name ||
-                u.last_name ||
-                u.phone_number ||
-                'Unknown'
+            displayName: u.first_name || u.last_name || u.phone_number || 'Unknown'
         }));
-
-        // Sort alphabetically
-        normalized.sort((a, b) =>
-            a.displayName.localeCompare(b.displayName)
-        );
-
-        this.localContacts = normalized;
+        normalized.sort((a, b) => a.displayName.localeCompare(b.displayName));
         return normalized;
     }
 
@@ -137,9 +160,22 @@ export class ContactsService {
     }
 
     async searchGlobal(query: string): Promise<any[]> {
+        if (!query || query.length < 2) return [];
+
         try {
+            // 1. Try Cache
+            const cached = await this.storage.getMeta(`search:${query}`);
+            if (cached) return cached;
+
             const res: any = await this.api.post('contacts.php', { query }).toPromise();
-            return Array.isArray(res) ? res : [];
+            const results = Array.isArray(res) ? res : [];
+
+            // 2. Save Cache (5 mins)
+            if (results.length > 0) {
+                this.storage.setMeta(`search:${query}`, results);
+            }
+
+            return results;
         } catch (e) {
             this.logger.error("Global search failed", e);
             return [];

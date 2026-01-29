@@ -1,0 +1,94 @@
+﻿ M secure-chat-app/android/app/capacitor.build.gradle
+ M secure-chat-app/android/app/src/main/AndroidManifest.xml
+ M secure-chat-app/android/build.gradle
+ D secure-chat-app/android/build_error_final.txt
+ D secure-chat-app/android/build_error_final_8_13.txt
+ D secure-chat-app/android/build_error_final_sdk_36.txt
+ D secure-chat-app/android/build_error_utf8.txt
+ D secure-chat-app/android/build_error_utf8_8_13.txt
+ D secure-chat-app/android/build_error_utf8_sdk_36.txt
+ D secure-chat-app/android/build_log.txt
+ D secure-chat-app/android/build_log2.txt
+ D secure-chat-app/android/build_log3.txt
+ D secure-chat-app/android/build_log4.txt
+ D secure-chat-app/android/build_log5.txt
+ D secure-chat-app/android/build_log_deploy.txt
+ D secure-chat-app/android/build_log_final.txt
+ D secure-chat-app/android/build_log_utf8.txt
+ D secure-chat-app/android/build_security_error.txt
+ D secure-chat-app/android/build_security_error2.txt
+ D secure-chat-app/android/build_security_error3.txt
+ M secure-chat-app/android/capacitor.settings.gradle
+ M secure-chat-app/android/variables.gradle
+ M secure-chat-app/angular.json
+ M secure-chat-app/build_log.txt
+ M secure-chat-app/capacitor.config.ts
+ M secure-chat-app/package-lock.json
+ M secure-chat-app/package.json
+ M secure-chat-app/src/app/directives/secure-src.directive.ts
+ M secure-chat-app/src/app/interceptors/auth.interceptor.ts
+ M secure-chat-app/src/app/pages/calls/calls.module.ts
+ M secure-chat-app/src/app/pages/calls/calls.page.html
+ M secure-chat-app/src/app/pages/calls/calls.page.scss
+ M secure-chat-app/src/app/pages/calls/calls.page.ts
+ M secure-chat-app/src/app/pages/chat-detail/chat-detail.module.ts
+ M secure-chat-app/src/app/pages/chat-detail/chat-detail.page.html
+ M secure-chat-app/src/app/pages/chat-detail/chat-detail.page.scss
+ M secure-chat-app/src/app/pages/chat-detail/chat-detail.page.spec.ts
+ M secure-chat-app/src/app/pages/chat-detail/chat-detail.page.ts
+ M secure-chat-app/src/app/pages/chats/chats.page.html
+ M secure-chat-app/src/app/pages/chats/chats.page.scss
+ M secure-chat-app/src/app/pages/chats/chats.page.ts
+ M secure-chat-app/src/app/pages/forward-modal/forward-modal.page.html
+ M secure-chat-app/src/app/pages/forward-modal/forward-modal.page.ts
+ M secure-chat-app/src/app/pages/image-preview-modal/image-preview-modal.page.html
+ M secure-chat-app/src/app/pages/image-preview-modal/image-preview-modal.page.scss
+ M secure-chat-app/src/app/pages/image-preview-modal/image-preview-modal.page.ts
+ M secure-chat-app/src/app/pages/live-map/live-map.page.ts
+ M secure-chat-app/src/app/pages/new-group/new-group.page.html
+ M secure-chat-app/src/app/pages/profile/profile.page.html
+ M secure-chat-app/src/app/pages/profile/profile.page.ts
+ M secure-chat-app/src/app/pages/status-viewer/status-viewer.page.html
+ M secure-chat-app/src/app/pages/status-viewer/status-viewer.page.ts
+ M secure-chat-app/src/app/pages/status/status.page.html
+ M secure-chat-app/src/app/pages/status/status.page.ts
+ M secure-chat-app/src/app/services/api.service.ts
+ M secure-chat-app/src/app/services/auth.service.ts
+ M secure-chat-app/src/app/services/call.service.ts
+ M secure-chat-app/src/app/services/chat.service.ts
+ M secure-chat-app/src/app/services/contacts.service.ts
+ M secure-chat-app/src/app/services/location.service.ts
+ M secure-chat-app/src/app/services/presence.service.ts
+ M secure-chat-app/src/app/services/profile.service.ts
+ M secure-chat-app/src/app/services/secure-media.service.ts
+ M secure-chat-app/src/app/services/status.service.ts
+ M secure-chat-app/src/app/shared/audio-waveform/audio-waveform.component.ts
+ M secure-chat-app/src/global.scss
+ M secure-chat-app/src/main.ts
+ M secure-chat-backend/.htaccess
+ M secure-chat-backend/api/.htaccess
+ M secure-chat-backend/api/auth_middleware.php
+ M secure-chat-backend/api/contacts.php
+ M secure-chat-backend/api/db.php
+ M secure-chat-backend/api/oauth.php
+ M secure-chat-backend/api/profile.php
+ M secure-chat-backend/api/rate_limiter.php
+ M secure-chat-backend/api/register.php
+?? secure-chat-app/android/gradle_v.txt
+?? secure-chat-app/android/gradle_v_utf8.txt
+?? secure-chat-app/android/reinstall_log.txt
+?? secure-chat-app/build_log_2.txt
+?? secure-chat-app/build_log_2_utf8.txt
+?? secure-chat-app/devices.json
+?? secure-chat-app/devices.txt
+?? secure-chat-app/devices_current.json
+?? secure-chat-app/src/app/directives/swipe-to-reply.directive.ts
+?? secure-chat-app/src/app/services/storage.service.ts
+?? secure-chat-app/src/app/services/transfer-progress.service.ts
+?? secure-chat-backend/alter_schema_v5_caching.sql
+?? secure-chat-backend/api/cache_service.php
+?? secure-chat-backend/api/debug_user.php
+?? secure-chat-backend/api/refresh_token.php
+?? secure-chat-backend/full_schema_v5_final.sql
+?? status.txt
+?? status_utf8.txt

@@ -15,6 +15,8 @@ export class ImagePreviewModalPage implements OnInit {
   previewUrl: any;
   caption: string = '';
   isViewOnce: boolean = false;
+  isVideo: boolean = false;
+  isImage: boolean = false;
 
   constructor(
     private modalCtrl: ModalController,
@@ -23,6 +25,9 @@ export class ImagePreviewModalPage implements OnInit {
 
   ngOnInit() {
     if (this.file) {
+      this.isVideo = this.file.type?.startsWith('video/');
+      this.isImage = this.file.type?.startsWith('image/') || !this.file.type; // Fallback to image
+
       const url = URL.createObjectURL(this.file);
       this.previewUrl = this.sanitizer.bypassSecurityTrustUrl(url);
     }

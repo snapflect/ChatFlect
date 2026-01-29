@@ -65,6 +65,7 @@ export class AudioWaveformComponent implements OnChanges, OnDestroy {
     @Input() audioUrl: string = '';
     @Input() audioKey: string = ''; // For decryption if needed
     @Input() audioIv: string = '';
+    @Input() audioMime: string = '';
 
     @ViewChild('waveformCanvas', { static: true }) canvasRef!: ElementRef<HTMLCanvasElement>;
 
@@ -94,7 +95,7 @@ export class AudioWaveformComponent implements OnChanges, OnDestroy {
         }
 
         // Use SecureMediaService to decrypt/resolve URL
-        this.sub = this.secureMedia.getMedia(this.audioUrl, this.audioKey, this.audioIv).subscribe(
+        this.sub = this.secureMedia.getMedia(this.audioUrl, this.audioKey, this.audioIv, this.audioMime).subscribe(
             (blobUrl) => {
                 if (this.audio) {
                     this.audio.pause();

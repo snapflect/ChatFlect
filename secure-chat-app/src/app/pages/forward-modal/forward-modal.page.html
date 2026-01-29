@@ -13,11 +13,10 @@
     <ion-list class="bg-transparent">
         <ion-item *ngFor="let chat of chats" (click)="selectChat(chat)" detail lines="none" class="contact-item">
             <ion-avatar slot="start">
-                <img [secureSrc]="chat.isGroup ? chat.icon : chat.otherUser?.photo_url" />
+                <img [secureSrc]="chat.avatar" (error)="$any($event).target.src = 'assets/user.png'" />
             </ion-avatar>
             <ion-label>
-                <h2>{{ chat.isGroup ? chat.groupName : (chat.otherUser?.first_name + ' ' + (chat.otherUser?.last_name ||
-                    '')) }}</h2>
+                <h2>{{ chat.name }}</h2>
                 <p>{{ chat.isGroup ? 'Group' : 'Personal Chat' }}</p>
             </ion-label>
         </ion-item>

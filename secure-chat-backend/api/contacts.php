@@ -26,7 +26,16 @@ $data = json_decode(file_get_contents("php://input"));
 
 // Email Discovery Support
 if (isset($data->query) && !empty($data->query)) {
-    $search = "%" . sanitizeString($data->query) . "%";
+    $queryString = sanitizeString($data->query);
+    $cacheKey = "contact_search:" . md5($queryString);
+
+    $cached = CacheService::get($cacheKey);
+    if ($cached) {
+        echo json_encode($cached);
+        exit;
+    }
+
+    $search = "%" . $queryString . "%";
     $stmt = $conn->prepare("SELECT user_id, email, phone_number, first_name, last_name, photo_url FROM users WHERE email LIKE ? OR first_name LIKE ? OR last_name LIKE ? LIMIT 20");
     $stmt->bind_param("sss", $search, $search, $search);
     $stmt->execute();
@@ -35,6 +44,8 @@ if (isset($data->query) && !empty($data->query)) {
     while ($user = $result->fetch_assoc()) {
         $matches[] = $user;
     }
+
+    CacheService::set($cacheKey, $matches, 300); // Cache for 5 mins
     echo json_encode($matches);
     exit;
 }

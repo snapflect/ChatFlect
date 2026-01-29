@@ -154,12 +154,29 @@ if ($existingUser) {
     auditLog('oauth_register', $userId, ['provider' => $provider, 'email' => $verifiedEmail]);
 }
 
+// 1. Create Session (Architectural Caching & Session Management)
+$jti = 'U' . strtoupper(bin2hex(random_bytes(12)));
+$refreshToken = bin2hex(random_bytes(32));
+$deviceUuid = $data['device_uuid'] ?? 'unknown';
+$expires = date('Y-m-d H:i:s', strtotime('+24 hours'));
+
+$sess = $conn->prepare("INSERT INTO user_sessions (user_id, device_uuid, id_token_jti, refresh_token, expires_at) 
+                        VALUES (?, ?, ?, ?, ?) 
+                        ON DUPLICATE KEY UPDATE id_token_jti = ?, refresh_token = ?, expires_at = ?");
+$sess->bind_param("ssssssss", $userId, $deviceUuid, $jti, $refreshToken, $expires, $jti, $refreshToken, $expires);
+$sess->execute();
+$sess->close();
+
+// 2. Cache Session for instant auth
+CacheService::cacheSession($jti, $userId, ['device' => $deviceUuid]);
+
 // Return success
 echo json_encode([
     "status" => "success",
     "message" => $isNewUser ? "Account created" : "Login successful",
     "user_id" => $userId,
-    "token" => $idToken, // Session token for header auth
+    "token" => $jti,
+    "refresh_token" => $refreshToken,
     "is_new_user" => $isNewUser,
     "is_profile_complete" => $isProfileComplete
 ]);

@@ -8,17 +8,26 @@ import { environment } from 'src/environments/environment';
 export class ApiService {
     constructor(private http: HttpClient) { }
 
-    post(endpoint: string, data: any) {
-        return this.http.post(`${environment.apiUrl}/${endpoint}`, data);
+    post(endpoint: string, data: any, reportProgress: boolean = false) {
+        const options: any = {
+            reportProgress: reportProgress,
+            observe: reportProgress ? 'events' : 'body'
+        };
+        return this.http.post(`${environment.apiUrl}/${endpoint}`, data, options);
     }
 
     get(endpoint: string) {
         return this.http.get(`${environment.apiUrl}/${endpoint}`);
     }
 
-    getBlob(url: string) {
+    getBlob(url: string, reportProgress: boolean = false) {
         // Handle full URL or relative
         const fullUrl = url.startsWith('http') ? url : `${environment.apiUrl}/${url}`;
-        return this.http.get(fullUrl, { responseType: 'blob' });
+        const options: any = {
+            responseType: 'blob',
+            reportProgress: reportProgress,
+            observe: reportProgress ? 'events' : 'body'
+        };
+        return this.http.get(fullUrl, options);
     }
 }

@@ -12,7 +12,9 @@ import { RecordingService } from 'src/app/services/recording.service';
 import { Geolocation } from '@capacitor/geolocation';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Keyboard } from '@capacitor/keyboard';
+import { FileOpener } from '@capacitor-community/file-opener';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { Network } from '@capacitor/network';
 import { CallService } from 'src/app/services/call.service';
 import { ForwardModalPage } from '../forward-modal/forward-modal.page';
 import { PopoverController } from '@ionic/angular';
@@ -24,6 +26,8 @@ import { LocationService } from 'src/app/services/location.service';
 import { SoundService } from 'src/app/services/sound.service';
 import { ContactPickerModalPage } from '../contact-picker-modal/contact-picker-modal.page';
 import { SecureMediaService } from 'src/app/services/secure-media.service';
+import { TransferProgressService } from 'src/app/services/transfer-progress.service';
+import { combineLatest } from 'rxjs';
 
 // ... 
 
@@ -37,6 +41,7 @@ import { SecureMediaService } from 'src/app/services/secure-media.service';
 
 export class ChatDetailPage implements OnInit, OnDestroy {
   @ViewChild(IonContent, { static: false }) content!: IonContent;
+  @ViewChild('chatInput') chatInput!: ElementRef;
 
   chatId: string | null = null;
   messages: any[] = [];
@@ -53,16 +58,39 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   otherUserId: string | null = null;
 
   // Presence
-  otherUserPresence: any = null; // { state: 'online' | 'offline', last_changed... }
-  typingUsers: string[] = []; // List of names/ids typing
+  otherUserPresence: any = null;
+  typingUsers: string[] = [];
 
-  // Scroll to Bottom FAB (WhatsApp Parity)
+  // Header Shadow
+  isScrolled: boolean = false;
+
+  // Offline State
+  isOnline: boolean = true;
+  private networkListener: any;
+
+  // Search State
+  isSearchActive: boolean = false;
+  searchTerm: string = '';
+
+  // Group Participants Cache
+  participantsMap = new Map<string, any>();
+
+  // Mention State
+  showMentionPicker: boolean = false;
+  mentionFilteredParticipants: any[] = [];
+  mentionSearchTerm: string = '';
+
+  // Scroll to Bottom FAB
   showScrollFab: boolean = false;
-  private scrollThreshold: number = 200; // Show FAB when scrolled 200px from bottom
+  private scrollThreshold: number = 200;
 
-  // Selection Mode (Priority 2)
+  // Selection Mode
   isSelectionMode: boolean = false;
-  selectedMessages = new Set<string>(); // Set of message IDs
+  selectedMessages = new Set<string>();
+
+  // Lazy Loading State
+  messagesMap = new Map<string, any>();
+  isLoadingOlder = false;
 
   constructor(
     private route: ActivatedRoute,
@@ -85,24 +113,50 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     private locationService: LocationService,
     private soundService: SoundService,
     private secureMedia: SecureMediaService,
+    public progressService: TransferProgressService,
     private zone: NgZone
   ) {
     this.auth.currentUserId.subscribe(id => this.currentUserId = String(id));
   }
 
   ngOnDestroy() {
-    // Clear active chat so sounds resume on other screens
     this.soundService.clearActiveChat();
+    if (this.networkListener) this.networkListener.remove();
+    this.chatPic = null;
+    this.chatName = '';
+    this.otherUserPresence = null;
+  }
+
+  ionViewWillEnter() {
+    // START WITH CLEAN SLATE - Fixes "First File Missing" bug
+    this.messages = [];
+    this.messagesMap.clear();
+    this.filteredMessages = [];
+
+    // Reset Header State
+    this.chatPic = null;
+    this.chatName = '';
+    this.otherUserPresence = null;
+
+    this.chatId = this.route.snapshot.paramMap.get('id');
+    if (this.chatId) {
+      this.chatService.markAsRead(this.chatId);
+    }
+  }
+
+  async initNetwork() {
+    const status = await Network.getStatus();
+    this.isOnline = status.connected;
+    this.networkListener = Network.addListener('networkStatusChange', status => {
+      this.zone.run(() => { this.isOnline = status.connected; });
+    });
   }
 
   async ngOnInit() {
+    this.initNetwork();
     this.chatId = this.route.snapshot.paramMap.get('id');
     if (this.chatId) {
-      // Set active chat to prevent message sounds while viewing
       this.soundService.setActiveChat(this.chatId);
-
-      // Fetch Chat Metadata (Includes Typing Info)
-      // Fetch Chat Metadata (Includes Typing Info)
       this.chatService.getChatDetails(this.chatId).subscribe(async (chat: any) => {
         if (chat) {
           this.chatDetails = chat;
@@ -118,20 +172,12 @@ export class ChatDetailPage implements OnInit, OnDestroy {
             this.otherUserId = otherId;
 
             if (otherId) {
-              // Determine name (Try cache/contact list first, then API)
-              // For now, simpler: check locally or hit API
-              // Assuming we might have it in a separate contact service, but let's query Auth/Profile
               try {
-                // Use (cacheable/central) getProfile from Auth logic which uses GET
                 const profile: any = await this.auth.getProfile(otherId);
-
                 if (profile) {
                   this.chatName = profile.first_name || profile.username || 'User';
                   if (profile.last_name) this.chatName += ' ' + profile.last_name;
-
-                  // Backend (profile.php) now returns absolute URLs - no normalization needed
                   const pUrl = profile.photo_url || profile.img || profile.avatar_url;
-
                   this.chatPic = pUrl || 'assets/user.png';
                 } else {
                   this.chatName = 'User';
@@ -140,63 +186,378 @@ export class ChatDetailPage implements OnInit, OnDestroy {
                 console.error("Profile Fetch Error", e);
                 this.chatName = 'User';
               }
-
-              // Presence
               this.presence.getPresence(otherId).subscribe(p => {
                 this.otherUserPresence = p;
               });
             }
           }
 
+          if (this.participants.length > 0) {
+            this.participants.forEach(async (uid) => {
+              if (String(uid) === String(this.currentUserId)) return;
+              if (!this.participantsMap.has(String(uid))) {
+                try {
+                  const p: any = await this.auth.getProfile(String(uid));
+                  if (p) {
+                    const pUrl = p.photo_url || p.img || p.avatar_url;
+                    this.participantsMap.set(String(uid), {
+                      name: (p.first_name || p.username),
+                      photo: pUrl || 'assets/user.png'
+                    });
+                  }
+                } catch (e) { console.warn("Failed to load profile for", uid); }
+              }
+            });
+          }
 
-          // 2. Typing Indicator Logic
-
-          // 2. Typing Indicator Logic
           if (chat.typing) {
             const now = Date.now();
             const typingIds = Object.keys(chat.typing).filter(uid => {
               const ts = chat.typing[uid];
-              return (now - ts < 5000) && (String(uid) !== String(this.currentUserId)); // < 5s ago and not me
+              return (now - ts < 5000) && (String(uid) !== String(this.currentUserId));
             });
-
-            // For now just show "Typing..." if > 0. Refine to show names later.
             this.typingUsers = typingIds;
           } else {
             this.typingUsers = [];
           }
+
+          const unreadKey = `unread_${this.currentUserId}`;
+          if (chat[unreadKey] && chat[unreadKey] > 0) {
+            this.chatService.markAsRead(this.chatId!);
+          }
         }
-      });
 
-      // ... (Existing Message Logic) ...
-      this.chatService.getMessages(this.chatId).subscribe(msgs => {
-        this.messages = msgs;
-        this.filterMessages(); // Update view
-        if (!this.isSearchActive) this.scrollToBottom(); // Only scroll if not searching history
-
-        // Logic moved to ChatService to prevent UI thread blocking
-        // this.messages.forEach(async msg => { ... });
-
-        // Temporarily disabled to rule out infinite loop crash
-        // this.chatService.markAsRead(this.chatId!);
+        combineLatest([
+          this.chatService.getMessages(this.chatId || ''),
+          this.chatService.pendingMessages$
+        ]).subscribe(([msgs, pendingMap]) => {
+          const pending = pendingMap[this.chatId!] || [];
+          this.mergeMessages(msgs, pending);
+        });
       });
     }
   }
+
+
+
+
+
+
+  // --- Lazy Loading Logic ---
+
+  mergeMessages(realMsgs: any[], pendingMsgs: any[]) {
+    // 1. Add/Update Real Messages
+    realMsgs.forEach(m => this.messagesMap.set(m.id, m));
+
+    // 2. Prepare Matchers for Deduplication
+    // We create a robust index of "Real" messages to check against.
+    const realMsgIndex = realMsgs.map(m => {
+      const t = m.text || {};
+      return {
+        id: m.id,
+        // Check all possible locations for tempId
+        tempId: m.tempId || t.tempId || t._tempId,
+        // Create a content signature for fuzzy matching
+        // usage: type + name + size (params that shouldn't change between local and server)
+        // For images/video: type + caption + approx_timestamp? 
+        // Timestamp is risky due to server time drift.
+        // Size is good for docs/video. Name is good for docs.
+        signature: this.createSignature(m)
+      };
+    });
+
+    const filteredPending = pendingMsgs.filter(p => {
+      // If the pending msg is already in the map as a real message ID (unlikely but possible if IDs collide)
+      if (this.messagesMap.has(p.id)) return false;
+
+      const pTempId = p.id;
+      const pSignature = this.createSignature(p);
+
+      // Layer 1: Strict ID Match
+      // Check multiple locations for tempId (root, text, _tempId)
+      const strictMatch = realMsgIndex.find(r => {
+        const anyR = r as any; // Cast to access text prop
+        const rTemp = anyR.tempId || anyR.text?.tempId || anyR.text?._tempId;
+        return rTemp == pTempId;
+      });
+
+      if (strictMatch) {
+        // console.log(`[Dedup] Strict Match Found: ${pTempId}`);
+        return false;
+      }
+
+      // Layer 2: Fuzzy Content Match (Only for my own messages)
+      if (String(p.senderId) === String(this.currentUserId)) {
+        if (pSignature && pSignature.length > 5) {
+          const fuzzyMatch = realMsgIndex.find(r => {
+            // Check root signature OR text signature
+            const anyR = r as any;
+            const rSig = anyR.signature || anyR.text?.signature;
+            return rSig === pSignature;
+          });
+
+          if (fuzzyMatch) {
+            // console.log(`[Dedup] Fuzzy Match Found: ${pSignature}`);
+            return false;
+          }
+        }
+      }
+
+      return true; // Keep pending
+    });
+
+    // 3. Add Verified Pending Messages to Map
+    filteredPending.forEach(p => this.messagesMap.set(p.id, p));
+
+    // 4. Convert Map to Array & Sort
+    const allMsgs = Array.from(this.messagesMap.values());
+
+    // Sort: Ascending Timestamp
+    allMsgs.sort((a, b) => {
+      const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : a.timestamp;
+      const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : b.timestamp;
+      return tA - tB;
+    });
+
+    this.messages = allMsgs;
+    this.removeDuplicates(); // NUCLEAR OPTION: Final sweep
+    this.filterMessages();
+  }
+
+  // Aggressive Post-Processing to kill duplicates
+  removeDuplicates() {
+    const realTempIds = new Set<string>();
+    const realSignatures = new Set<string>();
+
+    // 1. Index Real Messages
+    this.messages.forEach(m => {
+      // If it's a real message (from Firestore)
+      if (m.id && (m.id.startsWith('msg_') || !m.id.startsWith('up_'))) {
+        // Index TempID
+        const t = m.tempId || m.text?.tempId || m.text?._tempId;
+        if (t) realTempIds.add(t);
+
+        // Index Signature
+        const anyM = m as any;
+        const s = anyM.signature || anyM.text?.signature;
+        if (s && s.length > 5) realSignatures.add(s);
+      }
+    });
+
+    // 2. Filter Pending Messages
+    this.messages = this.messages.filter(m => {
+      // If it's a pending message
+      if (m.id && m.id.startsWith('up_')) {
+        // Check ID Match
+        if (realTempIds.has(m.id)) {
+          // console.log(`[Nuclear] Killed Pending via ID: ${m.id}`);
+          return false;
+        }
+
+        // Check Signature Match
+        const sig = this.createSignature(m);
+        if (sig && realSignatures.has(sig)) {
+          // console.log(`[Nuclear] Killed Pending via Sig: ${sig}`);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // Only scroll to bottom on INITIAL load (small size) or if user was at bottom
+    if (!this.isLoadingOlder && this.messages.length <= 25 && !this.isSearchActive) {
+      this.scrollToBottom();
+    }
+  }
+
+  createSignature(msg: any): string {
+    const t = msg.text || {};
+    // 3. Last Resort: Type-based content signature
+    const type = msg.type;
+    if (type === 'document') {
+      if (t.name && t.size) return `doc_${this.chatId}_${t.name}_${t.size}`;
+    } else if (type === 'image') {
+      return `image_${this.chatId}_${t.size || 0}_${t.caption || 'nc'}`;
+    } else if (type === 'video') {
+      return `video_${this.chatId}_${t.size || 0}_${t.caption || 'nc'}`;
+    }
+    return '';
+  }
+
+  filterMessages() {
+    if (!this.searchTerm || this.searchTerm.trim() === '') {
+      this.filteredMessages = [...this.messages];
+    } else {
+      const term = this.searchTerm.toLowerCase();
+      this.filteredMessages = this.messages.filter(msg => {
+        // Text messages
+        if (msg.type === 'text' && typeof msg.text === 'string') {
+          return msg.text.toLowerCase().includes(term);
+        }
+        // Caption in media
+        if (msg.text && msg.text.caption) {
+          return msg.text.caption.toLowerCase().includes(term);
+        }
+        return false;
+      });
+    }
+  }
+
+  toggleSearch() {
+    this.isSearchActive = !this.isSearchActive;
+    if (!this.isSearchActive) {
+      this.searchTerm = '';
+      this.filterMessages();
+    } else {
+      // Focus input? 
+      setTimeout(() => {
+        // logic to focus searchbar id
+      }, 100);
+    }
+  }
+
+  // --- Helpers ---
+
+  getSenderProfile(userId: string) {
+    if (String(userId) === String(this.currentUserId)) return { name: 'You', photo: null };
+    return this.participantsMap.get(String(userId)) || { name: 'Unknown', photo: 'assets/user.png' };
+  }
+
+
+
+  async loadMoreMessages(event: any) {
+    if (this.isLoadingOlder || !this.chatId || this.messages.length === 0) {
+      event.target.complete();
+      return;
+    }
+
+    this.isLoadingOlder = true;
+
+    // Oldest message (first in ASC sorted list)
+    const oldestMsg = this.messages[0];
+    const oldestTs = oldestMsg.timestamp; // Pass the whole object or timestamp depending on Service Implementation
+    // Service expects: timestamp or snapshot. 
+    // Firestore `startAfter` needs the value matching the `orderBy` field.
+    // We order by `timestamp` DESC in `getOlderMessages`.
+    // Wait, `getOlderMessages` queries DESC so `startAfter` means "older than".
+    // Correct.
+
+    try {
+      // Capture current scroll height to maintain position
+      const scrollElement = await this.content.getScrollElement();
+      const oldScrollHeight = scrollElement.scrollHeight;
+      const oldScrollTop = scrollElement.scrollTop;
+
+      const olderMsgs = await this.chatService.getOlderMessages(this.chatId, oldestTs);
+
+      if (olderMsgs && olderMsgs.length > 0) {
+        olderMsgs.forEach(m => this.messagesMap.set(m.id, m));
+        // Re-sort
+        this.mergeMessages([], []); // Re-trigger sort using existing map.
+        // Wait, mergeMessages expects args. Let's make args optional or refactor.
+        // Refactor mergeMessages to use internal map + args.
+
+        // Just manually trigger sort assignment:
+        const allMsgs = Array.from(this.messagesMap.values());
+        allMsgs.sort((a, b) => {
+          const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : a.timestamp;
+          const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : b.timestamp;
+          return tA - tB;
+        });
+        this.messages = allMsgs;
+        this.filterMessages();
+
+        // Restore Scroll Position
+        // Angular change detection needs to run first
+        this.cdr.detectChanges();
+
+        const newScrollHeight = scrollElement.scrollHeight;
+        const heightDiff = newScrollHeight - oldScrollHeight;
+
+        // Scroll to new position (which is conceptually the same place visually)
+        // top = prevTop + diff
+        // If we were at 0 (top), we want to be at `heightDiff`.
+        // `scrollByPoint(0, heightDiff, 0)` could work.
+        // or `scrollToPoint(0, heightDiff + oldScrollTop, 0)`.
+        // `scrollToPoint` is safer (no animation: 0 duration).
+
+        // console.log(`Restoring scroll: OldH=${oldScrollHeight}, NewH=${newScrollHeight}, Diff=${heightDiff}`);
+        await this.content.scrollToPoint(0, heightDiff + (oldScrollTop || 0), 0);
+
+      }
+    } catch (e) {
+      console.error("Load Older Failed", e);
+    } finally {
+      this.isLoadingOlder = false;
+      event.target.complete();
+    }
+  }
+
 
   // Typing Handler
   onTyping() {
-    if (this.chatId) {
-      this.presence.setTyping(this.chatId, true);
-      // Debounce handled by checking last keystroke? 
-      // Or just send every keystroke (Firestored handles overwrites cheapish)
-      // Ideally debounce. For MVP, we send update.
-
-      // Clear after 3s of no typing?
-      clearTimeout((this as any).typingTimer);
-      (this as any).typingTimer = setTimeout(() => {
-        this.presence.setTyping(this.chatId!, false);
-      }, 3000);
+    if (this.chatId && this.currentUserId) {
+      this.chatService.setTyping(this.chatId, this.currentUserId);
     }
+
+    // Clear after 3s of no typing (Debounce)
+    if ((this as any).typingTimer) clearTimeout((this as any).typingTimer);
+    (this as any).typingTimer = setTimeout(() => {
+      if (this.chatId) this.chatService.setTyping(this.chatId, false);
+    }, 3000);
+
+
+    // Check for Mention
+    if (this.isGroup) {
+      const cursorPosition = this.chatInput?.nativeElement?.selectionStart || this.newMessage.length;
+      const textUpToCursor = this.newMessage.substring(0, cursorPosition);
+      const lastAt = textUpToCursor.lastIndexOf('@');
+
+      if (lastAt !== -1 && (lastAt === 0 || textUpToCursor[lastAt - 1] === ' ')) {
+        const term = textUpToCursor.substring(lastAt + 1);
+        // If term has space, we might stop searching or allow simple names. 
+        // WhatsApp stops if newline. Let's allow spaces for names up to a limit or until next symbol.
+        if (!term.includes('\n')) {
+          this.mentionSearchTerm = term;
+          this.filterMentions(term);
+          return;
+        }
+      }
+    }
+    this.showMentionPicker = false;
   }
+
+  filterMentions(term: string) {
+    const allParts = Array.from(this.participantsMap.values());
+    if (!term.trim()) {
+      this.mentionFilteredParticipants = allParts;
+    } else {
+      const lower = term.toLowerCase();
+      this.mentionFilteredParticipants = allParts.filter(p => p.name.toLowerCase().includes(lower));
+    }
+    this.showMentionPicker = this.mentionFilteredParticipants.length > 0;
+  }
+
+  addMention(user: any) {
+    const cursorPosition = this.chatInput?.nativeElement?.selectionStart || this.newMessage.length;
+    const textUpToCursor = this.newMessage.substring(0, cursorPosition);
+    const lastAt = textUpToCursor.lastIndexOf('@');
+    const textAfterCursor = this.newMessage.substring(cursorPosition);
+
+    const prefix = textUpToCursor.substring(0, lastAt);
+    // Insert Name + Space
+    const inserted = `@${user.name} `;
+
+    this.newMessage = prefix + inserted + textAfterCursor;
+    this.showMentionPicker = false;
+
+    // Restore focus and cursor? 
+    setTimeout(() => {
+      this.chatInput?.nativeElement?.focus();
+      // Attempt to set cursor end of inserted
+    }, 50);
+  }
+
 
   // ... rest of class remains similar
 
@@ -254,6 +615,12 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   /**
    * Handles scroll events to show/hide scroll-to-bottom FAB
    */
+  getMediaProgress(msg: any) {
+    const id = msg.text?._tempId || msg.text?.url;
+    if (!id) return null;
+    return this.progressService.getProgress(id);
+  }
+
   async onScroll(event: any) {
     const scrollElement = await this.content.getScrollElement();
     const scrollTop = scrollElement.scrollTop;
@@ -265,6 +632,9 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
     // Show FAB if scrolled up more than threshold
     this.showScrollFab = distanceFromBottom > this.scrollThreshold;
+
+    // Header Shadow
+    this.isScrolled = scrollTop > 10;
   }
 
   async sendMessage() {
@@ -294,6 +664,13 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     this.replyingTo = null; // Clear reply context
     this.presence.setTyping(this.chatId, false); // Stop typing immediately
     this.scrollToBottom();
+
+    // Refocus for persistent "notepad" feel
+    setTimeout(() => {
+      if (this.chatInput && this.chatInput.nativeElement) {
+        this.chatInput.nativeElement.focus();
+      }
+    }, 50);
   }
 
   // ... (Reactions, ActionSheet, Media Logic preserved) ... 
@@ -554,19 +931,56 @@ export class ChatDetailPage implements OnInit, OnDestroy {
    */
   private async processForward(msg: any, targetChatId: string) {
     const type = this.getMsgType(msg.text);
+
+    // 1. Forward Text
     if (type === 'text') {
-      await this.chatService.sendMessage(targetChatId, msg.text, this.currentUserId);
-    } else {
-      // Media Handling
+      // Use distributeSecurePayload for text to include metadata (forwarded: true)
+      // Or just standard sendMessage if metadata not supported.
+      // Standard sendMessage doesn't support metadata easily without changing signature.
+      // Let's use distributeSecurePayload with 'text' type.
+
+      const sessionKey = await this.crypto.generateSessionKey();
+      const iv = window.crypto.getRandomValues(new Uint8Array(12));
+      const ciphertext = await this.crypto.encryptPayload(msg.text, sessionKey, iv);
+      const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer);
+
+      await this.chatService.distributeSecurePayload(
+        targetChatId,
+        this.currentUserId,
+        'text',
+        ciphertext,
+        ivBase64,
+        sessionKey,
+        { forwarded: true }
+      );
+    }
+    // 2. Forward Media (Image, Video, Audio, Document, Location)
+    else {
       let sessionKey: CryptoKey | null = null;
-      let ivBase64 = msg.iv || '';
-      const metadata = {
-        file_url: msg.file_url,
-        mime: msg.mime,
-        d: msg.d || 0,
-        thumb: msg.thumb || ''
+      let ivBase64 = msg.iv || msg.text?.i || ''; // Check both locations
+
+      // Metadata construction
+      const metadata: any = {
+        forwarded: true,
+        type: type // Explicit type
       };
 
+      // Extract specific fields based on type
+      if (msg.text) {
+        if (msg.text.url || msg.text.file_url) metadata.url = msg.text.url || msg.text.file_url;
+        if (msg.text.mime) metadata.mime = msg.text.mime;
+        if (msg.text.name) metadata.name = msg.text.name;
+        if (msg.text.size) metadata.size = msg.text.size;
+        if (msg.text.d) metadata.d = msg.text.d; // Duration
+        if (msg.text.caption) metadata.caption = msg.text.caption;
+        if (msg.text.thumb) metadata.thumb = msg.text.thumb;
+        if (msg.text.lat) metadata.lat = msg.text.lat;
+        if (msg.text.lng) metadata.lng = msg.text.lng;
+        if (msg.text.viewOnce) metadata.viewOnce = msg.text.viewOnce; // Preserve logic? Or strip? WhatsApp strips viewOnce on forward usually. Let's strip it for safety/logic.
+        delete metadata.viewOnce;
+      }
+
+      // Key recovery
       if (msg._decryptedKey) {
         sessionKey = await window.crypto.subtle.importKey(
           "raw",
@@ -575,20 +989,28 @@ export class ChatDetailPage implements OnInit, OnDestroy {
           true,
           ["encrypt", "decrypt"]
         );
-      } else if (msg.text && (typeof msg.text === 'object' || this.isJson(msg.text))) {
-        // Legacy Fallback (assuming msg.text is metadata with 'k')
-        // We'll skip legacy complex logic here to avoid code bloat.
-        this.showToast('Cannot forward legacy media.');
-        return;
+      } else if (msg.text && (msg.text.k || msg.text.ks)) {
+        // Attempt to use the key from metadata if we can't get the decrypted key directly?
+        // This is tricky without re-decrypting using private key.
+        // BUT, if the user is viewing the message, it SHOULD have been decrypted and cached in _decryptedKey or similar service cache.
+        // If not detailed, we warn.
+        // For now, assume _decryptedKey is populated by the UI/Service when loading messages.
+        // If null, we might be forwarding a message we haven't successfully decrypted yet.
       }
 
-      if (!sessionKey) return;
+      if (!sessionKey) {
+        this.showToast('Wait for media to load before forwarding.');
+        return;
+      }
 
       await this.chatService.distributeSecurePayload(
         targetChatId,
         this.currentUserId,
         type,
-        '',
+        '', // No new ciphertext for media usually, or re-encrypt? 
+        // Wait, DistributeSecurePayload expects ciphertext for TEXT, but for MEDIA it might expect it in metadata or empty?
+        // See sendImageMessage: passes '' as ciphertext, but relies on metadata.url which is the encrypted file.
+        // AND it passes 'ivBase64'.
         ivBase64,
         sessionKey,
         metadata
@@ -818,9 +1240,11 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     this.showEmojiPicker = !this.showEmojiPicker;
 
     if (this.showEmojiPicker) {
-      // Opening emoji picker -> Hide keyboard
+      // Opening emoji picker -> Blur input & Hide keyboard
+      const textarea = document.querySelector('.chat-input') as HTMLTextAreaElement;
+      if (textarea) textarea.blur();
+
       Keyboard.hide().catch(() => { });
-      setTimeout(() => this.content.scrollToBottom(300), 100);
     } else if (wasOpen) {
       // Closing emoji picker -> Focus textarea to show keyboard
       setTimeout(() => {
@@ -928,7 +1352,8 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   sendSticker(url: string) {
     if (!this.chatId) return;
     this.chatService.sendStickerMessage(this.chatId, url, this.currentUserId);
-    this.showEmojiPicker = false;
+    // WhatsApp parity: Keep picker open after sending sticker
+    // this.showEmojiPicker = false; 
   }
 
   isSticker(msg: any): boolean {
@@ -967,28 +1392,30 @@ export class ChatDetailPage implements OnInit, OnDestroy {
         reader.readAsDataURL(blob);
       });
 
-      // 4. Save to device
-      const fileName = docData.name || 'document_' + Date.now();
+      // 4. Save to device (Persistent Cache)
+      // Use original name or timestamp
+      const fileName = docData.name || 'doc_' + Date.now();
       const savedFile = await Filesystem.writeFile({
         path: fileName,
         data: base64Data,
         directory: Directory.Cache
       });
 
-      // 5. Get the file URI and share/open it
-      const fileUri = savedFile.uri;
-
-      // Use Share plugin to open with system viewer
-      const { Share } = await import('@capacitor/share');
-      await Share.share({
-        title: docData.name || 'Document',
-        url: fileUri,
-        dialogTitle: 'Open document with...'
+      // 5. Open with FileOpener (Directly in correct app)
+      await FileOpener.open({
+        filePath: savedFile.uri,
+        contentType: docData.mime || 'application/octet-stream'
       });
 
     } catch (e) {
       this.logger.error('Open document failed', e);
-      this.showToast('Failed to open document');
+      // Fallback: system share sheet if opener fails
+      try {
+        const { Share } = await import('@capacitor/share');
+        await Share.share({ title: docData.name || 'Document', url: docData.url });
+      } catch (inner) {
+        this.showToast('Could not open file');
+      }
     }
   }
 
@@ -1118,16 +1545,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   get isMe(): boolean {
-    return true; // The template logic uses isMe for the CURRENT MESSAGE loop, typically `isMyMsg(msg)`. 
-    // Wait, the template says `[pymKey]="isMe ? ...` inside `*ngFor`.
-    // The `isMe` in template refers to `isMyMsg(msg)` which IS available.
-    // BUT I used `isMe` variable in the `[pymKey]` expression: `isMe ? ...`
-    // Ah, I see. In the HTML I wrote: `[pymKey]="isMe ? (msg.text.ks || msg.text.k) : msg.text.k"`
-    // This `isMe` refers to a component property, OR I meant `isMyMsg(msg)`.
-    // Reviewing HTML: `*ngFor="let msg ..."`
-    // `[class.msg-me]="isMyMsg(msg)"` <-- This function exists.
-    // So I should have used `isMyMsg(msg)` in the `[pymKey]` expression instead of `isMe`.
-    // CORRECT FIX: Update HTML to use `isMyMsg(msg)`.
+    return false; // Deprecated. Use isMyMsg(msg) in loops.
   }
 
   // openDocument moved to line ~853
@@ -1135,11 +1553,44 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   // retryDecrypt removed - directives handle retries now
 
 
-  openVideo(vidData: any) {
-    if (vidData._blobUrl) {
-      let url = vidData._blobUrl;
-      if (typeof url === 'object' && url.changingThisBreaksApplicationSecurity) url = url.changingThisBreaksApplicationSecurity;
-      window.open(url, '_blank');
+  async openVideo(vidData: any) {
+    try {
+      // Videos are already decrypted via Directive for preview.
+      // But for full-screen external opening, we decrypt again to a local file.
+      const blobUrl = await this.secureMedia.getMedia(
+        vidData.url,
+        vidData.k,
+        vidData.i
+      ).toPromise();
+
+      if (!blobUrl) return;
+
+      const response = await fetch(blobUrl);
+      const blob = await response.blob();
+
+      const reader = new FileReader();
+      const base64Data = await new Promise<string>((resolve) => {
+        reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+        reader.readAsDataURL(blob);
+      });
+
+      const fileName = 'video_' + Date.now() + '.mp4';
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: base64Data,
+        directory: Directory.Cache
+      });
+
+      await FileOpener.open({
+        filePath: savedFile.uri,
+        contentType: 'video/mp4'
+      });
+    } catch (e) {
+      this.logger.error("Video Open Error", e);
+      // Fallback: window.open as before
+      if (vidData._blobUrl) {
+        window.open(vidData._blobUrl, '_system');
+      }
     }
   }
 
@@ -1194,6 +1645,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     }
   }
 
+
   async reverseGeocode(lat: number, lng: number): Promise<string> {
     try {
       const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`;
@@ -1247,16 +1699,25 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   // --- Live Location Methods ---
 
   async shareLiveLocation() {
-    const actionSheet = await this.actionSheetCtrl.create({
+    const alert = await this.alertCtrl.create({
       header: 'Share Live Location',
+      message: 'Choose how long to share your live location',
+      inputs: [
+        { type: 'radio', label: '15 minutes', value: 15 },
+        { type: 'radio', label: '1 hour', value: 60, checked: true },
+        { type: 'radio', label: '8 hours', value: 480 }
+      ],
       buttons: [
-        { text: '15 minutes', handler: () => this.startLiveShare(15) },
-        { text: '1 hour', handler: () => this.startLiveShare(60) },
-        { text: '8 hours', handler: () => this.startLiveShare(480) },
-        { text: 'Cancel', role: 'cancel' }
+        { text: 'Cancel', role: 'cancel' },
+        {
+          text: 'Share',
+          handler: (duration) => {
+            if (duration) this.startLiveShare(duration);
+          }
+        }
       ]
     });
-    await actionSheet.present();
+    await alert.present();
   }
 
   private async startLiveShare(durationMinutes: number) {
@@ -1383,15 +1844,25 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   getMsgType(text: any): string {
-    if (typeof text === 'object' && text !== null) return text.type || 'unknown';
-    if (typeof text === 'string' && text.startsWith('{')) {
-      try {
-        let parsed = JSON.parse(text);
-        if (typeof parsed === 'string' && parsed.startsWith('{')) {
-          try { parsed = JSON.parse(parsed); } catch (e) { }
-        }
-        if (parsed.type) return parsed.type;
-      } catch (e) { }
+    if (typeof text === 'object' && text !== null) {
+      if (text.type) return text.type;
+      if (text.lat && text.lng) return text.expiresAt ? 'live_location' : 'location';
+      if (text.url || text.file_url) return 'image';
+      return 'unknown';
+    }
+    if (typeof text === 'string') {
+      if (text === 'live_location') return 'live_location';
+      if (text === 'location') return 'location';
+      if (text.startsWith('{')) {
+        try {
+          let parsed = JSON.parse(text);
+          if (typeof parsed === 'string' && parsed.startsWith('{')) {
+            try { parsed = JSON.parse(parsed); } catch (e) { }
+          }
+          if (parsed.type) return parsed.type;
+          if (parsed.lat && parsed.lng) return parsed.expiresAt ? 'live_location' : 'location';
+        } catch (e) { }
+      }
     }
     return 'text';
   }
@@ -1451,34 +1922,41 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
 
   getMsgContent(msg: any): string {
+    if (!msg || !msg.text) return '';
     if (typeof msg.text === 'string') {
       if (msg.text.startsWith('{')) {
         try {
           let parsed = JSON.parse(msg.text);
-          // Handle double-encoded JSON
-          if (typeof parsed === 'string' && parsed.startsWith('{')) {
-            try { parsed = JSON.parse(parsed); } catch (e) { }
-          }
-          if (parsed.type) {
-            // It is a media object, but stored as string.
-            // Be careful to update the reference if possible so we don't re-parse constantly, 
-            // OR just return empty string so the Media UI handles it (via getMsgType check)
-            msg.text = parsed; // Auto-convert for next cycle
-            return '';
-          }
+          if (parsed.type || (parsed.lat && parsed.lng)) return '';
         } catch (e) { }
       }
+      // Fallback for service-level strings
+      if (msg.text === 'live_location' || msg.text === 'location') return '';
       return msg.text;
     }
     if (typeof msg.text === 'object') {
-      // If it's a media object, we shouldn't be calling this for text display anyway, 
-      // but as a fallback:
-      if (msg.text.type) return ''; // Handled by specific media UI
-
-      // If it's pure JSON metadata (failed decryption?)
-      return '[Encrypted Message]';
+      return ''; // Handled by specific UI
     }
     return '';
+  }
+
+  getReplyText(replyTo: any): string {
+    if (!replyTo || !replyTo.text) return '';
+    const type = this.getMsgType(replyTo.text);
+    if (type !== 'text') {
+      const typeLabels: any = {
+        'image': '📷 Photo',
+        'video': '🎥 Video',
+        'audio': '🎤 Audio',
+        'location': '📍 Location',
+        'live_location': '📍 Live Location',
+        'contact': '👤 Contact',
+        'document': '📄 Document'
+      };
+      return typeLabels[type] || 'Media';
+    }
+    const txt = typeof replyTo.text === 'string' ? replyTo.text : '';
+    return txt.length > 50 ? txt.substring(0, 50) + '...' : txt;
   }
 
   // --- Audio Logic ---
@@ -1568,46 +2046,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     }
   }
 
-  // --- Search Logic ---
-  isSearchActive = false;
-  searchTerm = '';
-  // filteredMessages initialized at top
 
-  toggleSearch() {
-    this.isSearchActive = !this.isSearchActive;
-    if (!this.isSearchActive) {
-      this.searchTerm = '';
-      this.filterMessages();
-    }
-  }
-
-  onSearch(event: any) {
-    this.searchTerm = event.target.value;
-    this.filterMessages();
-  }
-
-  filterMessages() {
-    let filtered = this.messages.filter(msg => {
-      // 1. Filter out "Delete for Me"
-      if (msg.deletedFor && msg.deletedFor.includes(this.currentUserId)) {
-        return false;
-      }
-      return true;
-    });
-
-    // 2. Search Filter
-    if (this.searchTerm && this.searchTerm.trim() !== '') {
-      filtered = filtered.filter(msg => {
-        if (this.getMsgType(msg.text) === 'text') {
-          const content = typeof msg.text === 'string' ? msg.text : '';
-          return content.toLowerCase().includes(this.searchTerm.toLowerCase());
-        }
-        return false;
-      });
-    }
-
-    this.filteredMessages = filtered;
-  }
 
   // --- Date Separator Logic (WhatsApp Parity) ---
 
@@ -1791,7 +2230,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
           userId: this.otherUserId,
           chatId: this.chatId
         }
-      });
+      } as any);
     }
   }
 
@@ -1837,10 +2276,22 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
   linkify(text: any): string {
     if (!text || typeof text !== 'string') return '';
+
+    // 1. Linkify URLs
     const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
-    return text.replace(urlRegex, (url) => {
+    let html = text.replace(urlRegex, (url) => {
       return `<a href="${url}" target="_blank" class="chat-link">${url}</a>`;
     });
+
+    // 2. Linkify Mentions (@Name)
+    // Simple regex: @ followed by word chars. 
+    // Capturing complex names is hard without known list, but visually highlighting @Words is a start.
+    const mentionRegex = /(@\w+(\s\w+)?)/g;
+    html = html.replace(mentionRegex, (match) => {
+      return `<span class="chat-mention">${match}</span>`;
+    });
+
+    return html;
   }
 
   getSenderColor(userId: string): string {
@@ -1854,13 +2305,18 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   scrollToMessage(msgId: string) {
-    const el = document.getElementById(msgId); // Need to add [id] to loop?
-    // Actually I didn't add id="{{msg.id}}" in HTML. Let's assume general scroll or I should update HTML.
-    // For now, simplified:
-    const index = this.messages.findIndex(m => m.id === msgId);
-    if (index > -1) {
-      // Calculation? Or just highlight
-      this.showToast("Jump to message not fully implemented yet");
+    const el = document.getElementById(msgId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('highlight-msg');
+      setTimeout(() => el.classList.remove('highlight-msg'), 2000);
+    } else {
+      const index = this.messages.findIndex(m => m.id === msgId);
+      if (index > -1) {
+        // If virtual scroll or not rendered yet, manual calc might be needed
+        this.showToast("Message loaded but not in view");
+      }
     }
   }
+
 }

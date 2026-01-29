@@ -53,6 +53,8 @@
 body {
     font-family: 'Outfit', sans-serif !important;
     background: var(--ion-background-color);
+    background-color: #16161a;
+    /* Force dark bg for native resize */
 }
 
 /* Background Mesh Effect (Pseudo) */

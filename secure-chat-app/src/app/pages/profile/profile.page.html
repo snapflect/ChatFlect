@@ -13,8 +13,7 @@
   <div class="profile-header ion-text-center">
     <div class="avatar-container">
       <ion-avatar class="profile-avatar" (click)="viewPhoto()">
-        <img [secureSrc]="profile.photo_url || 'assets/placeholder_user.png'"
-          (error)="$event.target.src = 'assets/placeholder_user.png'" />
+        <img [secureSrc]="profile.photo_url || 'assets/placeholder_user.png'" (error)="onImageError($event)" />
       </ion-avatar>
       <ion-button fill="clear" class="change-photo-btn" (click)="changePhoto()">
         <ion-icon name="camera" slot="icon-only"></ion-icon>
@@ -70,6 +69,13 @@
       <ion-button expand="block" shape="round" class="vibrant-btn ion-margin-top" (click)="saveProfile()"
         [disabled]="!profile.phone_number || showPhoneOtpInput">
         Save Profile
+      </ion-button>
+
+      <!-- v13: Key Rotation -->
+      <ion-button expand="block" shape="round" fill="outline" color="medium" class="ion-margin-top"
+        (click)="rotateEncryptionKeys()">
+        <ion-icon name="key-outline" slot="start"></ion-icon>
+        Rotate Encryption Keys
       </ion-button>
     </div>
   </div>

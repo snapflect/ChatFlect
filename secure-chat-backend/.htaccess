@@ -3,35 +3,42 @@
 # ================================
 
 # ----------------
-# AUTHORIZATION HEADER FIX (CRITICAL for 401 Unauthorized fix)
+# GLOBAL CORS & PREFLIGHT (CRITICAL for Mobile/Capacitor)
 # ----------------
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteCond %{HTTP:Authorization} ^(.*)
-    RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
+<IfModule mod_headers.c>
+    # Using 'always' ensures headers remain even on error responses (401, 404, 500)
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-User-ID, If-None-Match, Cache-Control, Range"
+    Header always set Access-Control-Expose-Headers "Content-Length, Content-Range, ETag"
 </IfModule>
 
-# ----------------
-# UPLOADS DIRECTORY SAFETY
-# ----------------
-# Ensure uploaded files are served directly (no rewrite interference)
+# Handle preflight OPTIONS requests immediately
 <IfModule mod_rewrite.c>
-    # Note: RewriteEngine On is already declared above
+    RewriteEngine On
+    RewriteCond %{REQUEST_METHOD} OPTIONS
+    RewriteRule ^(.*)$ $1 [R=200,L]
+
+    # ----------------
+    # AUTHORIZATION HEADER FIX
+    # ----------------
+    RewriteCond %{HTTP:Authorization} ^(.*)
+    RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
+
+    # ----------------
+    # UPLOADS DIRECTORY SAFETY
+    # ----------------
+    # Ensure uploaded files are served directly
     RewriteCond %{REQUEST_URI} ^/api/uploads/
     RewriteCond %{REQUEST_FILENAME} -f
     RewriteRule ^(.*)$ - [L]
 </IfModule>
 
 # ----------------
-# STATIC ASSETS CORS (Best Practice)
+# CACHING & RANGE HEADERS
 # ----------------
-# Only apply Apache-level headers to static files (images, video).
-# PHP files (.php) are handled by db.php to prevent "Duplicate Header" errors.
 <FilesMatch "\.(jpg|jpeg|png|gif|webp|mp4|mp3|ogg|pdf)$">
     <IfModule mod_headers.c>
-        Header set Access-Control-Allow-Origin "*"
-        Header set Access-Control-Allow-Methods "GET, OPTIONS"
-        Header set Access-Control-Allow-Headers "Range"
         Header set Accept-Ranges bytes
         Header set Cache-Control "public, max-age=31536000, immutable"
     </IfModule>

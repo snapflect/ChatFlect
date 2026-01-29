@@ -18,6 +18,35 @@ export class StatusService {
         this.loadMutedUsers();
     }
 
+    // Reactive Status Feed
+    private statusSubject = new BehaviorSubject<any[]>([]);
+    public statuses$ = this.statusSubject.asObservable();
+    private pollingInterval: any;
+
+    refreshFeed() {
+        const uid = localStorage.getItem('user_id') || '';
+        this.api.get(`status.php?action=feed&user_id=${uid}`).subscribe((res: any) => {
+            if (Array.isArray(res)) {
+                this.statusSubject.next(res);
+            }
+        });
+    }
+
+    startPolling(intervalMs: number = 30000) {
+        this.refreshFeed(); // Immediate
+        this.stopPolling();
+        this.pollingInterval = setInterval(() => {
+            this.refreshFeed();
+        }, intervalMs);
+    }
+
+    stopPolling() {
+        if (this.pollingInterval) {
+            clearInterval(this.pollingInterval);
+            this.pollingInterval = null;
+        }
+    }
+
     // Load muted users from server
     loadMutedUsers() {
         const userId = localStorage.getItem('user_id');
@@ -44,7 +73,16 @@ export class StatusService {
         formData.append('privacy', privacy);
         formData.append('user_id', localStorage.getItem('user_id') || '');
 
-        return this.api.post('status.php', formData);
+        return new Observable(observer => {
+            this.api.post('status.php', formData).subscribe({
+                next: (res) => {
+                    this.refreshFeed(); // Auto-refresh
+                    observer.next(res);
+                    observer.complete();
+                },
+                error: (err) => observer.error(err)
+            });
+        });
     }
 
     // Upload Text Status
@@ -57,7 +95,16 @@ export class StatusService {
         formData.append('privacy', privacy);
         formData.append('user_id', localStorage.getItem('user_id') || '');
 
-        return this.api.post('status.php', formData);
+        return new Observable(observer => {
+            this.api.post('status.php', formData).subscribe({
+                next: (res) => {
+                    this.refreshFeed(); // Auto-refresh
+                    observer.next(res);
+                    observer.complete();
+                },
+                error: (err) => observer.error(err)
+            });
+        });
     }
 
     // Record View
@@ -75,9 +122,32 @@ export class StatusService {
 
     // Delete Status
     deleteStatus(statusId: string) {
-        return this.api.post('status.php?action=delete', {
-            status_id: statusId,
-            user_id: localStorage.getItem('user_id')
+        return new Observable(observer => {
+            this.api.post('status.php?action=delete', {
+                status_id: statusId,
+                user_id: localStorage.getItem('user_id')
+            }).subscribe({
+                next: (res) => {
+                    // Optimistic update
+                    const current = this.statusSubject.value;
+                    // Note: Flat list or grouped? The feed returns a flat list of User objects with updates?
+                    // Actually the feed returns a list of USERS with 'updates' array usually.
+                    // Wait, let's check the API response format in status.php.
+                    // status.php 'feed' action returns flat list of status_updates rows joined with users.
+                    // It returns `echo json_encode($feed);` where $feed is array of rows.
+                    // StatusPage `loadStatus` formats this into `StatusUser` objects.
+                    // So `statusSubject` holds raw rows or processed?
+                    // My `refreshFeed` implementation above does strictly `this.statusSubject.next(res)`.
+                    // So it holds RAW rows.
+                    // Optimistic update for raw rows:
+                    // const filtered = current.filter((s: any) => s.id != statusId);
+                    // this.statusSubject.next(filtered);
+                    this.refreshFeed(); // Safe fallback
+                    observer.next(res);
+                    observer.complete();
+                },
+                error: (err) => observer.error(err)
+            });
         });
     }
 

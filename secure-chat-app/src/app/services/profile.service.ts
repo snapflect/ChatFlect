@@ -3,6 +3,7 @@ import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
 import { LoggingService } from './logging.service';
 import { SecureMediaService } from './secure-media.service';
+import { StorageService } from './storage.service';
 import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
 
 @Injectable({
@@ -14,7 +15,8 @@ export class ProfileService {
         private api: ApiService,
         private auth: AuthService,
         private logger: LoggingService,
-        private secureMedia: SecureMediaService
+        private secureMedia: SecureMediaService,
+        private storage: StorageService
     ) { }
 
     async getProfile() {
@@ -22,6 +24,23 @@ export class ProfileService {
         const id = localStorage.getItem('user_id');
         if (!id) return null;
 
+        // 1. Try Cache First for instant UI
+        const cached = await this.storage.getMeta('profile_data');
+        if (cached && cached.user_id === id) {
+            console.log('[Profile] Loaded from cache');
+            // Background sync
+            this.syncProfileInBackground(id);
+            return cached;
+        }
+
+        return await this.syncProfileInBackground(id);
+    }
+
+    getUserProfile(userId: string) {
+        return this.api.get(`profile.php?user_id=${userId}`);
+    }
+
+    private async syncProfileInBackground(id: string) {
         try {
             const apiRes: any = await this.api.get(`profile.php?user_id=${id}`).toPromise();
 
@@ -33,29 +52,39 @@ export class ProfileService {
                 if (docSnap.exists()) {
                     const firestoreData = docSnap.data() as any;
                     this.logger.log("[Profile] Found in Firestore:", firestoreData);
+                    this.logger.log("[Profile] API photo_url:", apiRes.photo_url);
+                    this.logger.log("[Profile] Firestore photo_url:", firestoreData.photo_url);
 
-                    // Merge logic: Favor Firestore but keep API photo if Firestore is empty
-                    const merged = { ...apiRes, ...firestoreData };
-                    if (!firestoreData.photo_url && apiRes.photo_url) {
+                    // Merge logic: Favor non-empty photo_url from either source
+                    const merged = { ...apiRes, ...firestoreData, user_id: id };
+
+                    if (apiRes.photo_url && (!firestoreData.photo_url || firestoreData.photo_url === '')) {
                         merged.photo_url = apiRes.photo_url;
+                    } else if (!apiRes.photo_url && firestoreData.photo_url) {
+                        merged.photo_url = firestoreData.photo_url;
+                    } else if (apiRes.photo_url && firestoreData.photo_url && apiRes.photo_url !== firestoreData.photo_url) {
+                        // Favor Google URL if it's there
+                        if (apiRes.photo_url.includes('googleusercontent.com')) {
+                            merged.photo_url = apiRes.photo_url;
+                        }
                     }
+
+                    await this.storage.setMeta('profile_data', merged);
                     return merged;
                 }
             }
-            this.logger.log("[Profile] Final Profile:", apiRes);
+
+            if (apiRes) {
+                this.logger.log(`[ProfileService] Sync result photo_url: ${apiRes.photo_url}`);
+                apiRes.user_id = id;
+                await this.storage.setMeta('profile_data', apiRes);
+            }
+
+            this.logger.log("[Profile] Final Profile synced");
             return apiRes;
         } catch (e) {
-            this.logger.error("[Profile] Get Error", e);
-            try {
-                const db = this.firestoreGetInstance();
-                const docSnap = await this.firestoreGetDoc(this.firestoreDoc(db, 'users', id));
-                if (docSnap.exists()) {
-                    return docSnap.data();
-                }
-            } catch (inner) {
-                this.logger.error("[Profile] Firestore Fallback Error", inner);
-            }
-            return null;
+            this.logger.error("[Profile] Sync Error", e);
+            return await this.storage.getMeta('profile_data');
         }
     }
 

@@ -38,12 +38,18 @@ export class StatusPage implements OnInit {
 
   ionViewWillEnter() {
     this.myUserId = localStorage.getItem('user_id') || '';
-    this.loadStatus();
     this.loadProfile();
+    this.statusService.startPolling(15000); // Poll every 15s
   }
 
   ngOnInit() {
-    // Initial setup handled in ionViewWillEnter
+    this.statusService.statuses$.subscribe((rawFeed: any[]) => {
+      this.processFeed(rawFeed);
+    });
+  }
+
+  ionViewWillLeave() {
+    this.statusService.stopPolling();
   }
 
   async loadProfile() {
@@ -53,59 +59,108 @@ export class StatusPage implements OnInit {
     }
   }
 
-  loadStatus() {
-    this.statusService.getFeed(this.myUserId).subscribe((res: any) => {
-      // Ensure res is an array
-      const feedData = Array.isArray(res) ? res : [];
-      // Group by user
-      const userMap = new Map<string, StatusUser>();
 
-      feedData.forEach((status: any) => {
-        const userId = status.user_id;
-        if (!userMap.has(userId)) {
-          userMap.set(userId, {
-            user_id: userId,
-            name: `${status.first_name || ''} ${status.last_name || ''}`.trim() || 'Unknown',
-            avatar: status.user_photo || '',
-            updates: [],
-            view_count: 0,
-            is_muted: status.is_muted || false
-          });
-        }
-        const user = userMap.get(userId)!;
-        user.updates.push({
-          id: status.id,
-          type: status.type,
-          media_url: status.media_url,
-          content_url: status.media_url, // Alias for compatibility
-          text_content: status.text_content,
-          background_color: status.background_color,
-          font: status.font,
-          caption: status.caption,
-          created_at: status.created_at,
-          view_count: status.view_count
-        });
-        user.view_count = (user.view_count || 0) + parseInt(status.view_count || '0');
+  doRefresh(event: any) {
+    this.statusService.refreshFeed();
+    // Timeout for UI spinner
+    setTimeout(() => event.target.complete(), 2000);
+  }
+
+  /**
+   * Generates a Conic Gradient string for segmented status rings.
+   * Green for recent, Grey for viewed through.
+   */
+  getRingStyle(status: StatusUser): string {
+    const total = status.updates.length;
+    if (total === 0) return 'none';
+
+    const viewedCount = status.updates.filter(u => this.statusService.isViewed(u.id)).length;
+    const isAllViewed = viewedCount === total;
+
+    // Colors
+    const colorRecent = '#25D366'; // WhatsApp Green
+    const colorViewed = '#8e8e93'; // System Grey
+    const gapDegree = 3; // Gap between segments
+
+    // Simple cases
+    if (total === 1) {
+      return isAllViewed
+        ? `conic-gradient(${colorViewed} 0deg 360deg)`
+        : `conic-gradient(${colorRecent} 0deg 360deg)`;
+    }
+
+    let gradient = 'conic-gradient(';
+    const segmentSize = 360 / total;
+
+    for (let i = 0; i < total; i++) {
+      const start = i * segmentSize + (gapDegree / 2);
+      const end = (i + 1) * segmentSize - (gapDegree / 2);
+
+      // Determine color for this segment
+      // Logic: Segments are ordered chronological. 
+      // If i < viewedCount, it's viewed.
+      const color = (i < viewedCount) ? colorViewed : colorRecent;
+
+      gradient += `${color} ${start}deg ${end}deg`;
+      if (i < total - 1) gradient += ', ';
+    }
+
+    gradient += ')';
+    return gradient;
+  }
+
+  processFeed(res: any[]) {
+    if (!res) return;
+    // Group by user
+    const usersMap = new Map<string, StatusUser>();
+
+    res.forEach((item: any) => {
+      if (!usersMap.has(item.user_id)) {
+        usersMap.set(item.user_id, {
+          user_id: item.user_id,
+          name: item.user_id === this.myUserId ? 'My Status' : `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Unknown',
+          avatar: item.user_photo,
+          updates: [],
+          // timestamp property added to interface or ignored if not required by interface (TS might complain if interface expects it, but interface definition didn't have it in view 4006. Wait, view 4006 line 7-14 logic. 
+          // If I use it in sort, I need to cast or add to interface.
+          // I'll add 'lastTimestamp' or similar to the object, cast as any if needs be for sort.
+        } as any);
+      }
+
+      const user = usersMap.get(item.user_id)!;
+      user.updates.push({
+        id: item.id,
+        type: item.type,
+        media_url: item.media_url,
+        text_content: item.text_content,
+        background_color: item.background_color,
+        font: item.font,
+        caption: item.caption,
+        created_at: item.created_at,
+        view_count: item.view_count
       });
 
-      // Separate into categories
-      this.myStatus = userMap.get(this.myUserId) || null;
-      userMap.delete(this.myUserId);
-
-      const others = Array.from(userMap.values());
-
-      // Separate muted, viewed, and recent
-      this.mutedUpdates = others.filter(u => u.is_muted);
-      const notMuted = others.filter(u => !u.is_muted);
-
-      // Check which users have been fully viewed
-      this.viewedUpdates = notMuted.filter(u =>
-        u.updates.every(update => this.statusService.isViewed(update.id))
-      );
-      this.recentUpdates = notMuted.filter(u =>
-        u.updates.some(update => !this.statusService.isViewed(update.id))
-      );
+      // Dynamic property for sorting
+      if (item.created_at > (user as any).timestamp) {
+        (user as any).timestamp = item.created_at;
+      }
     });
+
+    const allUsers = Array.from(usersMap.values());
+
+    // Separate Mine vs Others
+    this.myStatus = allUsers.find(u => u.user_id === this.myUserId) || null;
+    let others = allUsers.filter(u => u.user_id !== this.myUserId);
+
+    // Sort others by latest timestamp
+    others.sort((a, b) => new Date((b as any).timestamp || 0).getTime() - new Date((a as any).timestamp || 0).getTime());
+
+    this.recentUpdates = others.filter(u => this.hasUnviewedUpdates(u));
+    this.viewedUpdates = others.filter(u => !this.hasUnviewedUpdates(u));
+  }
+
+  loadStatus() {
+    this.statusService.refreshFeed();
   }
 
   async uploadStatus(event: any) {

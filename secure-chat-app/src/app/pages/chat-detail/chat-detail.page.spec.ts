@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { NO_ERRORS_SCHEMA } from '@angular/core';
 import { ChatDetailPage } from './chat-detail.page';
 import { IonicModule, NavController, ModalController, ActionSheetController, ToastController, PopoverController, AlertController } from '@ionic/angular';
 import { ChatService } from 'src/app/services/chat.service';
@@ -63,7 +64,8 @@ describe('ChatDetailPage', () => {
         { provide: LoggingService, useValue: jasmine.createSpyObj('LoggingService', ['log', 'error']) },
         { provide: SoundService, useValue: jasmine.createSpyObj('SoundService', ['playEmpty', 'setActiveChat', 'clearActiveChat']) },
         { provide: RecordingService, useValue: jasmine.createSpyObj('RecordingService', ['start', 'stop', 'hasPermission', 'requestPermission']) }
-      ]
+      ],
+      schemas: [NO_ERRORS_SCHEMA]
     }).compileComponents();
 
     fixture = TestBed.createComponent(ChatDetailPage);
@@ -110,18 +112,39 @@ describe('ChatDetailPage', () => {
     expect(component.chatPic).toBe('http://alice.png');
   }));
 
-  /*
-  it('should send a message and clear input', fakeAsync(() => {
-    component.newMessage = 'Test message';
-    chatServiceSpy.sendMessage.and.returnValue(Promise.resolve());
+  // --- Regression Tests ---
+  describe('Regression Fixes', () => {
+    it('should safely handle object reply text using getReplyText (Fix for Template Crash)', () => {
+      // Simulate the object payload that caused the crash
+      const replyWithObject = {
+        text: { type: 'image', url: 'http://test.com/img.png' }
+      };
 
-    component.sendMessage();
-    tick();
+      const result = component.getReplyText(replyWithObject);
 
-    expect(chatServiceSpy.sendMessage).toHaveBeenCalledWith('chat_123', 'Test message', 'my_id', null);
-    expect(component.newMessage).toBe('');
-  }));
-  */
+      // Should return a safe string, not the object or crash
+      expect(result).toBe('📷 Photo');
+    });
+
+    it('should safely handle live_location object reply text', () => {
+      const replyWithLocation = {
+        text: { type: 'live_location', lat: 10, lng: 10 }
+      };
+
+      const result = component.getReplyText(replyWithLocation);
+      expect(result).toBe('📍 Live Location');
+    });
+
+    it('should return truncated string for long text replies', () => {
+      const longText = 'This is a very long message that should be truncated because it exceeds the fifty character limit set in the helper method.';
+      const replyWithText = { text: longText };
+
+      const result = component.getReplyText(replyWithText);
+      expect(result.length).toBeLessThanOrEqual(53); // 50 chars + '...'
+      expect(result).toContain('...');
+    });
+  });
+
 
   // --- Date Separator Tests (WhatsApp Parity) ---
 

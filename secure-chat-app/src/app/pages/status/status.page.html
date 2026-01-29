@@ -5,6 +5,12 @@
 </ion-header>
 
 <ion-content class="ion-padding-top">
+  <!-- Pull to Refresh -->
+  <ion-refresher slot="fixed" (ionRefresh)="doRefresh($event)">
+    <ion-refresher-content pullingIcon="chevron-down-circle-outline" pullingText="Pull to refresh"
+      refreshingSpinner="crescent" refreshingText="Syncing...">
+    </ion-refresher-content>
+  </ion-refresher>
   <!-- My Status -->
   <ion-item lines="none" class="bg-transparent status-item" (click)="myStatus ? viewStatus(myStatus, true) : null">
     <div slot="start" class="avatar-wrapper">
@@ -39,13 +45,11 @@
     <h5 class="section-title">Recent updates</h5>
     <ion-list class="bg-transparent">
       <ion-item *ngFor="let s of recentUpdates" (click)="viewStatus(s)" lines="none" class="status-item">
-        <div slot="start" class="ring-container ring-active">
-          <ion-avatar class="status-ring">
-            <img [secureSrc]="s.avatar" />
-          </ion-avatar>
-          <!-- Segment indicator for multiple updates -->
-          <div class="segment-indicator" *ngIf="s.updates.length > 1">
-            {{ getViewedSegments(s).viewed }}/{{ getViewedSegments(s).total }}
+        <div slot="start" class="ring-container" [style.background]="getRingStyle(s)">
+          <div class="inner-ring-bg">
+            <ion-avatar class="status-ring">
+              <img [secureSrc]="s.avatar" />
+            </ion-avatar>
           </div>
         </div>
         <ion-label>
@@ -64,10 +68,12 @@
     <h5 class="section-title">Viewed updates</h5>
     <ion-list class="bg-transparent">
       <ion-item *ngFor="let s of viewedUpdates" (click)="viewStatus(s)" lines="none" class="status-item viewed">
-        <div slot="start" class="ring-container ring-viewed">
-          <ion-avatar class="status-ring">
-            <img [secureSrc]="s.avatar" />
-          </ion-avatar>
+        <div slot="start" class="ring-container" [style.background]="getRingStyle(s)">
+          <div class="inner-ring-bg">
+            <ion-avatar class="status-ring">
+              <img [secureSrc]="s.avatar" />
+            </ion-avatar>
+          </div>
         </div>
         <ion-label>
           <h2>{{ s.name }}</h2>

@@ -111,6 +111,10 @@ const routes: Routes = [
     path: 'linked-devices',
     loadChildren: () => import('./pages/linked-devices/linked-devices.module').then( m => m.LinkedDevicesPageModule)
   },
+  {
+    path: 'admin-dashboard',
+    loadChildren: () => import('./pages/admin-dashboard/admin-dashboard.module').then( m => m.AdminDashboardPageModule)
+  },
 
 ];
 

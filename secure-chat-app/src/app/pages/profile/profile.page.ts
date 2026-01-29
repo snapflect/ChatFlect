@@ -1,6 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { ProfileService } from 'src/app/services/profile.service';
+import { AuthService } from 'src/app/services/auth.service';
 import { ToastController, NavController, ModalController } from '@ionic/angular';
 import { LoggingService } from 'src/app/services/logging.service';
 import { ImagePreviewModalPage } from '../image-preview-modal/image-preview-modal.page';
@@ -31,7 +32,8 @@ export class ProfilePage implements OnInit {
     private toast: ToastController,
     private nav: NavController,
     private logger: LoggingService,
-    private modalCtrl: ModalController
+    private modalCtrl: ModalController,
+    private auth: AuthService // v13
   ) { }
 
   ngOnInit() {
@@ -40,10 +42,22 @@ export class ProfilePage implements OnInit {
 
   async loadProfile() {
     try {
+      this.logger.log("[ProfilePage] Loading initial profile...");
       const res: any = await this.profileService.getProfile();
       if (res) {
         this.profile = { ...this.profile, ...res };
+        this.logger.log(`[ProfilePage] Initial photo_url: ${this.profile.photo_url}`);
       }
+
+      // Important: Background sync might finish later. Re-check after 3s.
+      setTimeout(async () => {
+        const updatedRes: any = await this.profileService.getProfile();
+        if (updatedRes && updatedRes.photo_url !== this.profile.photo_url) {
+          this.logger.log(`[ProfilePage] Late sync detected new photo_url: ${updatedRes.photo_url}`);
+          this.profile = { ...this.profile, ...updatedRes };
+        }
+      }, 3000);
+
     } catch (e) {
       this.logger.error("Profile Load Error", e);
     }
@@ -128,6 +142,16 @@ export class ProfilePage implements OnInit {
     }
   }
 
+  async rotateEncryptionKeys() {
+    try {
+      await this.auth.rotateKeys();
+      this.showToast("Keys Rotated Successfully!");
+    } catch (e) {
+      this.logger.error("Key Rotation Failed", e);
+      this.showToast("Failed to rotate keys.");
+    }
+  }
+
   private async showToast(msg: string) {
     const t = await this.toast.create({ message: msg, duration: 1500 });
     t.present();
@@ -183,6 +207,14 @@ export class ProfilePage implements OnInit {
       this.logger.error("Upload Error", e);
       await this.toast.create({ message: 'Upload Failed', duration: 1500 }).then(t => t.present());
     }
+  }
+
+  onImageError(event: any) {
+    this.logger.error("[ProfilePage] Image failed to load!", {
+      src: event.target.src,
+      photo_url: this.profile.photo_url
+    });
+    event.target.src = 'assets/placeholder_user.png';
   }
 
   async viewPhoto() {

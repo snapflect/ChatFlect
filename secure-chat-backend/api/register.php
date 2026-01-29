@@ -66,10 +66,18 @@ try {
 
 // 6. Security Check for Phone Update
 if ($action === 'phone_update') {
+    $cachedExists = CacheService::checkUserExists($phone);
+    if ($cachedExists === true) {
+        http_response_code(409);
+        echo json_encode(["error" => "This phone number is already linked to another account"]);
+        exit;
+    }
+
     $stmt = $conn->prepare("SELECT user_id FROM users WHERE phone_number = ?");
     $stmt->bind_param("s", $phone);
     $stmt->execute();
     if ($stmt->get_result()->num_rows > 0) {
+        CacheService::cacheUserExistence($phone, true);
         http_response_code(409);
         echo json_encode(["error" => "This phone number is already linked to another account"]);
         exit;

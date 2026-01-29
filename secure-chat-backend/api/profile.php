@@ -57,10 +57,22 @@ if ($method === 'POST') {
         }
 
         // 2. Check/Create User
-        $check = $conn->prepare("SELECT user_id, is_profile_complete FROM users WHERE email = ?");
-        $check->bind_param("s", $email);
-        $check->execute();
-        $userRes = $check->get_result();
+        $cachedExists = CacheService::checkUserExists($email);
+        $userRes = null;
+        if ($cachedExists === true) {
+            $check = $conn->prepare("SELECT user_id, is_profile_complete FROM users WHERE email = ?");
+            $check->bind_param("s", $email);
+            $check->execute();
+            $userRes = $check->get_result();
+        } else {
+            $check = $conn->prepare("SELECT user_id, is_profile_complete FROM users WHERE email = ?");
+            $check->bind_param("s", $email);
+            $check->execute();
+            $userRes = $check->get_result();
+            if ($userRes->num_rows > 0) {
+                CacheService::cacheUserExistence($email, true);
+            }
+        }
 
         $userId = null;
         $isNewUser = false;
@@ -98,6 +110,21 @@ if ($method === 'POST') {
         $del->bind_param("s", $email);
         $del->execute();
 
+        // 4. Create Session (Architectural Caching & Session Management)
+        $jti = 'U' . strtoupper(bin2hex(random_bytes(12)));
+        $refreshToken = bin2hex(random_bytes(32));
+        $deviceUuid = $data->device_uuid ?? 'unknown';
+        $expires = date('Y-m-d H:i:s', strtotime('+24 hours'));
+
+        $sess = $conn->prepare("INSERT INTO user_sessions (user_id, device_uuid, id_token_jti, refresh_token, expires_at) 
+                                VALUES (?, ?, ?, ?, ?) 
+                                ON DUPLICATE KEY UPDATE id_token_jti = ?, refresh_token = ?, expires_at = ?");
+        $sess->bind_param("ssssssss", $userId, $deviceUuid, $jti, $refreshToken, $expires, $jti, $refreshToken, $expires);
+        $sess->execute();
+
+        // 5. Cache Session for instant auth
+        CacheService::cacheSession($jti, $userId, ['device' => $deviceUuid]);
+
         // Audit log successful login
         auditLog(AUDIT_LOGIN_SUCCESS, $userId, ['method' => 'email_otp', 'is_new_user' => $isNewUser]);
 
@@ -105,7 +132,8 @@ if ($method === 'POST') {
             "status" => "success",
             "message" => "Login Successful",
             "user_id" => $userId,
-            "token" => $userId, // Session token for 401 fix
+            "token" => $jti,
+            "refresh_token" => $refreshToken,
             "is_new_user" => $isNewUser,
             "is_profile_complete" => $isProfileComplete
         ]);

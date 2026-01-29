@@ -1,0 +1,20 @@
+﻿
+{
+	"devices": [
+		{
+			"platform": "android",
+			"model": "samsung SM-F936B",
+			"sdkVersion": "36",
+			"id": "R3CT80SHLSR"
+		}
+	],
+	"virtualDevices": [
+		{
+			"platform": "android",
+			"name": "Pixel 7 - API 35",
+			"sdkVersion": "35",
+			"id": "pixel_7_-_api_35"
+		}
+	],
+	"errors": []
+}

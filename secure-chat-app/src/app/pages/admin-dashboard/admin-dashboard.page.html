@@ -1,0 +1,68 @@
+<ion-header>
+  <ion-toolbar color="primary">
+    <ion-buttons slot="start">
+      <ion-back-button defaultHref="/chats"></ion-back-button>
+    </ion-buttons>
+    <ion-title>Security Dashboard</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="loadData()">
+        <ion-icon name="refresh-outline"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content class="ion-padding">
+  <ion-refresher slot="fixed" (ionRefresh)="doRefresh($event)">
+    <ion-refresher-content></ion-refresher-content>
+  </ion-refresher>
+
+  <!-- Stats Cards -->
+  <div *ngIf="stats" class="stats-grid">
+    <ion-card color="danger">
+      <ion-card-header>
+        <ion-card-subtitle>Failed Logins (24h)</ion-card-subtitle>
+        <ion-card-title>{{ stats.failed_logins_24h }}</ion-card-title>
+      </ion-card-header>
+    </ion-card>
+
+    <ion-card color="warning">
+      <ion-card-header>
+        <ion-card-subtitle>Blocked Users</ion-card-subtitle>
+        <ion-card-title>{{ stats.blocked_users_total }}</ion-card-title>
+      </ion-card-header>
+    </ion-card>
+
+    <ion-card color="success">
+      <ion-card-header>
+        <ion-card-subtitle>Active Sessions (1h)</ion-card-subtitle>
+        <ion-card-title>{{ stats.active_sessions_1h }}</ion-card-title>
+      </ion-card-header>
+    </ion-card>
+  </div>
+
+  <ion-list-header>
+    <ion-label>Security Audit Logs</ion-label>
+  </ion-list-header>
+
+  <ion-list>
+    <ion-item *ngFor="let log of logs">
+      <ion-label>
+        <h3>
+          <ion-text [color]="getLogColor(log.action)">{{ log.action }}</ion-text>
+        </h3>
+        <p>{{ log.details }}</p>
+        <p class="meta">{{ log.created_at }} • {{ log.ip_address }}</p>
+      </ion-label>
+    </ion-item>
+    <ion-item *ngIf="logs.length === 0 && !isLoading">
+      <ion-label class="ion-text-center">No logs found.</ion-label>
+    </ion-item>
+  </ion-list>
+
+  <div *ngIf="isLoading" class="ion-text-center ion-padding">
+    <ion-spinner></ion-spinner>
+    <p>Loading security data...</p>
+  </div>
+
+</ion-content>

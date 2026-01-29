@@ -1,8 +1,6 @@
 <?php
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-User-ID");
-
+// CORS is handled by .htaccess for better performance and error handling.
+// OPTIONS requests are intercepted by .htaccess, but we keep this as a secondary safety.
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
@@ -24,6 +22,29 @@ if ($conn->connect_error) {
 // Include security middleware
 require_once __DIR__ . '/sanitizer.php';
 require_once __DIR__ . '/audit_log.php';
+require_once __DIR__ . '/cache_service.php';
+
+/**
+ * Enhanced Response Helper with ETag Caching
+ */
+function sendResponse($data, $httpCode = 200)
+{
+    $content = json_encode($data);
+    $etag = md5($content);
+
+    header("ETag: \"$etag\"");
+    header("Cache-Control: public, max-age=60"); // 1 min buffer for client
+
+    if (isset($_SERVER['HTTP_IF_NONE_MATCH']) && trim($_SERVER['HTTP_IF_NONE_MATCH'], '"') === $etag) {
+        http_response_code(304);
+        exit;
+    }
+
+    http_response_code($httpCode);
+    header('Content-Type: application/json');
+    echo $content;
+    exit;
+}
 
 // Note: Rate limiter and auth_middleware should be included by individual API files
 // as they need the $conn variable to be initialized first

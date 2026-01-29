@@ -22,6 +22,12 @@
 
 <ion-content [fullscreen]="true">
   <div class="ion-padding-top">
+    <!-- Pull to Refresh -->
+    <ion-refresher slot="fixed" (ionRefresh)="doRefresh($event)">
+      <ion-refresher-content pullingIcon="chevron-down-circle-outline" pullingText="Pull to refresh"
+        refreshingSpinner="crescent" refreshingText="Syncing...">
+      </ion-refresher-content>
+    </ion-refresher>
 
     <!-- Skeleton Loading State -->
     <ion-list *ngIf="isLoading" lines="none" class="bg-transparent">
@@ -78,9 +84,25 @@
             </div>
 
             <div class="chat-footer">
-              <p [class.unread-msg]="getUnreadCount(chat) > 0" class="chat-preview">
-                {{ chat.lastMessage || 'Start conversation' }}
+              <!-- Typing Indicator -->
+              <p *ngIf="getTypingString(chat); else msgPreview" class="chat-preview typing-text">
+                {{ getTypingString(chat) }}
               </p>
+
+              <!-- Message Preview -->
+              <ng-template #msgPreview>
+                <div class="preview-row">
+                  <!-- Delivery Icon (If my message) -->
+                  <ion-icon *ngIf="isMyLastMsg(chat)" [name]="getDeliveryIcon(chat)" class="status-icon"
+                    [class.read]="isRead(chat)"></ion-icon>
+
+                  <p [class.unread-msg]="getUnreadCount(chat) > 0" class="chat-preview">
+                    {{ chat.lastMessage || (chat.isGroup ? (chat.participants?.length + ' participants') : 'Start
+                    conversation') }}
+                  </p>
+                </div>
+              </ng-template>
+
               <ion-badge color="secondary" *ngIf="getUnreadCount(chat) > 0" class="unread-badge">
                 {{ getUnreadCount(chat) }}
               </ion-badge>
