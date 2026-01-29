@@ -43,6 +43,40 @@ export class SecureMediaService implements OnDestroy {
 
         // Periodically check for expired keys
         this.expiryCheckInterval = setInterval(() => this.checkExpirations(), 5 * 60 * 1000);
+
+        // v15: Cleanup old partial downloads
+        this.cleanupPartialDownloads();
+    }
+
+    private async cleanupPartialDownloads() {
+        try {
+            const { Filesystem, Directory } = await import('@capacitor/filesystem');
+            const res = await Filesystem.readdir({ path: '', directory: Directory.Cache });
+            const now = Date.now();
+
+            for (const file of res.files) {
+                if (file.name.endsWith('.part')) {
+                    // Stat to check age
+                    // Note: Readdir might provide stat in some versions, but let's be safe
+                    const stat = await Filesystem.stat({ path: file.name, directory: Directory.Cache });
+                    const mtime = stat.mtime; // ms
+                    if (now - mtime > 24 * 60 * 60 * 1000) {
+                        await Filesystem.deleteFile({ path: file.name, directory: Directory.Cache });
+                        console.log(`[SecureMedia][v15] Cleaned up orphan: ${file.name}`);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('[SecureMedia] Cleanup warning', e);
+        }
+    }
+
+    // Helper for deterministic part filenames
+    private getPartPath(url: string): string {
+        // Simple hash or b64 to make it filesystem safe
+        // Using btoa might result in "/" which breaks paths. Replace chars.
+        const safe = btoa(url).replace(/\//g, '_').replace(/\+/g, '-').substring(0, 64);
+        return `partial_${safe}.part`;
     }
 
     ngOnDestroy(): void {
@@ -125,21 +159,45 @@ export class SecureMediaService implements OnDestroy {
                     return;
                 }
 
-                this.api.getBlob(url, true).subscribe({
+                // v15: Resumable Download
+                const partPath = this.getPartPath(url);
+                let startByte = 0;
+
+                try {
+                    const stat = await Filesystem.stat({ path: partPath, directory: Directory.Cache });
+                    startByte = stat.size;
+                } catch (e) { } // No part file
+
+                const headers = startByte > 0 ? { 'Range': `bytes=${startByte}-` } : {};
+                if (startByte > 0) this.logger.log(`[SecureMedia][v15] Resuming ${url} from ${startByte}`);
+
+                this.api.getBlob(url, true, headers).subscribe({
                     next: async (event: any) => {
                         if (event.type === HttpEventType.DownloadProgress) {
-                            const percent = Math.round(100 * event.loaded / event.total);
+                            const total = event.total ? event.total + startByte : 0;
+                            const loaded = event.loaded + startByte;
+                            const percent = total > 0 ? Math.round(100 * loaded / total) : 0;
                             this.progressService.updateProgress(url, percent, 'downloading');
                         } else if (event.type === HttpEventType.Response) {
                             try {
-                                const blob = event.body;
-                                if (!blob || blob.size === 0) throw new Error('Empty blob');
+                                const chunkBlob = event.body;
+                                if (!chunkBlob) throw new Error('Empty blob');
 
-                                this.saveToDisk(url, blob);
+                                // Append to disk
+                                await this.appendPart(partPath, chunkBlob, event.status === 206);
 
-                                let finalBlob = blob;
+                                // Finalize
+                                const finalFilename = `media_${Date.now()}_${Math.floor(Math.random() * 1000)}.bin`;
+                                await Filesystem.rename({ from: partPath, to: finalFilename, directory: Directory.Cache });
+                                await this.storage.saveMediaCache(url, finalFilename, chunkBlob.type); // chunk type might be wrong if partial? Usually OK.
+
+                                // Read FULL file for Decrypt
+                                const fullFile = await Filesystem.readFile({ path: finalFilename, directory: Directory.Cache });
+                                const byteArray = Uint8Array.from(atob(fullFile.data as string), c => c.charCodeAt(0));
+                                let finalBlob = new Blob([byteArray], { type: chunkBlob.type });
+
                                 if (key && iv) {
-                                    finalBlob = await this.decryptMedia(blob, key, iv);
+                                    finalBlob = await this.decryptMedia(finalBlob, key, iv);
                                 }
 
                                 if (mimeType) {
@@ -155,13 +213,18 @@ export class SecureMediaService implements OnDestroy {
                                 setTimeout(() => this.progressService.clearProgress(url), 2000);
                                 this.zoneRun(() => { observer.next(objectUrl); observer.complete(); });
                             } catch (err) {
+                                this.logger.error("Download processing failed", err);
                                 this.progressService.updateProgress(url, 0, 'failed');
                                 observer.next('assets/placeholder_broken.png');
                                 observer.complete();
                             }
                         }
                     },
-                    error: () => {
+                    error: (err) => {
+                        // Keep .part file for retry (unless 4xx)
+                        if (err.status && err.status >= 400 && err.status < 500) {
+                            Filesystem.deleteFile({ path: partPath, directory: Directory.Cache }).catch(() => { });
+                        }
                         this.progressService.updateProgress(url, 0, 'failed');
                         this.zoneRun(() => { observer.next(isExternal ? url : 'assets/placeholder_broken.png'); observer.complete(); });
                     }
@@ -336,18 +399,26 @@ export class SecureMediaService implements OnDestroy {
         }
     }
 
-    private async saveToDisk(url: string, blob: Blob) {
-        if (!Capacitor.isNativePlatform()) return;
-        try {
+    private async appendPart(path: string, blob: Blob, isAppend: boolean) {
+        if (!Capacitor.isNativePlatform()) return; // Web: Memory only (handled by browser cache usually, or not supported)
+
+        return new Promise<void>((resolve, reject) => {
             const reader = new FileReader();
             reader.readAsDataURL(blob);
             reader.onloadend = async () => {
                 const base64data = (reader.result as string).split(',')[1];
-                const fileName = `media_${Date.now()}_${Math.floor(Math.random() * 1000)}.bin`;
-                await Filesystem.writeFile({ path: fileName, data: base64data, directory: Directory.Cache });
-                await this.storage.saveMediaCache(url, fileName, blob.type);
+                try {
+                    if (isAppend) {
+                        await Filesystem.appendFile({ path, data: base64data, directory: Directory.Cache });
+                    } else {
+                        // Overwrite/Create
+                        await Filesystem.writeFile({ path, data: base64data, directory: Directory.Cache });
+                    }
+                    resolve();
+                } catch (e) { reject(e); }
             };
-        } catch (e) { this.logger.error("Save to disk failed", e); }
+            reader.onerror = reject;
+        });
     }
 
     private zoneRun(fn: Function) {

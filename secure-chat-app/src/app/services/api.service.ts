@@ -20,13 +20,14 @@ export class ApiService {
         return this.http.get(`${environment.apiUrl}/${endpoint}`);
     }
 
-    getBlob(url: string, reportProgress: boolean = false) {
+    getBlob(url: string, reportProgress: boolean = false, headers?: any) {
         // Handle full URL or relative
         const fullUrl = url.startsWith('http') ? url : `${environment.apiUrl}/${url}`;
         const options: any = {
             responseType: 'blob',
             reportProgress: reportProgress,
-            observe: reportProgress ? 'events' : 'body'
+            observe: reportProgress ? 'events' : 'body',
+            headers: headers
         };
         return this.http.get(fullUrl, options);
     }
