@@ -1,6 +1,7 @@
 <?php
 require_once 'db.php';
 require_once 'audit_log.php';
+require_once 'rate_limiter.php'; // v12
 
 /**
  * Authentication Middleware
@@ -222,11 +223,18 @@ function requireAuth($requestUserId = null)
             "auth_chars" => $authHeader ? strlen($authHeader) : 0,
             "xid_chars" => $xUserId ? strlen($xUserId) : 0
         ];
+
+        // Enforce IP limit even for failed auth to prevent brute force
+        enforceRateLimit(null);
+
         auditLog(AUDIT_AUTH_FAILED, null, ['reason' => 'missing_or_invalid_token', 'debug' => $debugInfo]);
         http_response_code(401);
         echo json_encode($debugInfo);
         exit;
     }
+
+    // v12: Enforce Rate Limit (Prioritized User > Device > IP)
+    enforceRateLimit($authUserId);
 
     // --- Server-Side Block Enforcement (v8.1) ---
     if (isUserBlocked($authUserId)) {

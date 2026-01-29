@@ -35,6 +35,27 @@ function auditLog($action, $userId = null, $details = null)
         // Don't let audit logging failures break the main flow
         error_log("Audit log failed: " . $e->getMessage());
     }
+
+    // v12: Probabilistic Garbage Collection (1/1000 chance)
+    if (rand(1, 1000) === 1) {
+        purgeOldLogs();
+    }
+}
+
+/**
+ * Purge audit logs older than N days (Default 90)
+ * v12: Compliance Requirement - Bounded Log Growth
+ */
+function purgeOldLogs($retentionDays = 90)
+{
+    global $conn;
+    try {
+        $stmt = $conn->prepare("DELETE FROM audit_logs WHERE created_at < NOW() - INTERVAL ? DAY");
+        $stmt->bind_param("i", $retentionDays);
+        $stmt->execute();
+    } catch (Exception $e) {
+        error_log("Audit GC failed: " . $e->getMessage());
+    }
 }
 
 // Common audit actions

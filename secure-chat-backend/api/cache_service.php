@@ -57,6 +57,16 @@ class CacheService
         return $stmt->execute();
     }
 
+    // v12: Pattern-based invalidation
+    public static function invalidate($pattern)
+    {
+        global $conn;
+        // WARNING: Ensure pattern is sanitized in usage or limited to internal calls.
+        $stmt = $conn->prepare("DELETE FROM cache_store WHERE cache_key LIKE ?");
+        $stmt->bind_param("s", $pattern);
+        return $stmt->execute();
+    }
+
     /* --- Session Specific Cache Helpers --- */
 
     public static function cacheSession($jti, $userId, $metadata = [])
