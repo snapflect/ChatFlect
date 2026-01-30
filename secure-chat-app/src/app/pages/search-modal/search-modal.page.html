@@ -1,0 +1,27 @@
+<ion-header>
+    <ion-toolbar>
+        <ion-buttons slot="start">
+            <ion-button (click)="close()">
+                <ion-icon name="arrow-back"></ion-icon>
+            </ion-button>
+        </ion-buttons>
+        <ion-searchbar placeholder="Search local messages..." (ionInput)="onSearch($event)" [debounce]="300">
+        </ion-searchbar>
+    </ion-toolbar>
+</ion-header>
+
+<ion-content>
+    <ion-list *ngIf="results.length > 0">
+        <ion-item button *ngFor="let msg of results" (click)="selectMessage(msg)">
+            <ion-label>
+                <h2>{{ msg.text?.text || 'Media File' }}</h2>
+                <p>{{ msg.timestamp | date:'short' }}</p>
+                <p *ngIf="msg.senderId"><small>From: {{ msg.senderId }}</small></p>
+            </ion-label>
+        </ion-item>
+    </ion-list>
+
+    <div class="ion-padding ion-text-center" *ngIf="results.length === 0 && query.length > 1 && !isSearching">
+        <p class="text-muted">No matches found.</p>
+    </div>
+</ion-content>

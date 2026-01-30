@@ -16,6 +16,8 @@ import { DrawingEditorPageModule } from './pages/drawing-editor/drawing-editor.m
 
 import { ReactionPickerComponent } from './components/reaction-picker/reaction-picker.component';
 import { GifPickerComponent } from './components/gif-picker/gif-picker.component';
+import { SearchModalPage } from './pages/search-modal/search-modal.page';
+import { ViewerHistoryComponent } from './components/viewer-history/viewer-history.component';
 import { GlobalErrorHandler } from './services/global-error-handler';
 
 import { environment } from 'src/environments/environment';
@@ -25,7 +27,7 @@ import { HTTP_INTERCEPTORS } from '@angular/common/http';
 import { AuthInterceptor } from './interceptors/auth.interceptor';
 
 @NgModule({
-  declarations: [AppComponent, ReactionPickerComponent, GifPickerComponent],
+  declarations: [AppComponent, ReactionPickerComponent, GifPickerComponent, SearchModalPage, ViewerHistoryComponent],
   imports: [
     BrowserModule,
     IonicModule.forRoot(),

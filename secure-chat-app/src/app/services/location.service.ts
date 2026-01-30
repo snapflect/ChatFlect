@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { Geolocation } from '@capacitor/geolocation';
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, where, orderBy, limit } from 'firebase/firestore';
 import { BehaviorSubject, Observable } from 'rxjs';
 import { LoggingService } from './logging.service';
 
@@ -193,6 +193,18 @@ export class LocationService {
         } catch (e) {
             this.logger.error("Location audit failed", e);
         }
+    }
+
+    // --- History (v16) ---
+    getViewerHistory(chatId: string): Observable<any[]> {
+        const ref = collection(this.db, 'location_audit');
+        const q = query(ref, where('chatId', '==', chatId), orderBy('timestamp', 'desc'), limit(20));
+
+        return new Observable(observer => {
+            onSnapshot(q, (snap) => {
+                observer.next(snap.docs.map(d => d.data()));
+            });
+        });
     }
 }
 

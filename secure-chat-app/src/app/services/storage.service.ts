@@ -452,6 +452,18 @@ export class StorageService {
         }
     }
 
+    // --- Search (v16) ---
+    async searchMessages(query: string, limit: number = 50): Promise<any[]> {
+        await this.waitForInit();
+        const term = `%${query}%`;
+        // Search in JSON payload
+        const res = await this.db.query(
+            'SELECT payload FROM messages WHERE payload LIKE ? ORDER BY timestamp DESC LIMIT ?',
+            [term, limit]
+        );
+        return (res.values || []).map(v => JSON.parse(v.payload));
+    }
+
     // --- Outbox Management (v9) ---
 
     async addToOutbox(chatId: string, action: 'send' | 'edit' | 'delete', payload: any) {

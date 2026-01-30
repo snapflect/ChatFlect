@@ -1091,6 +1091,14 @@ export class ChatService {
         });
     }
 
+    async toggleReaction(chatId: string, messageId: string, reaction: string, add: boolean) {
+        if (add) {
+            await this.addReaction(chatId, messageId, reaction);
+        } else {
+            await this.removeReaction(chatId, messageId);
+        }
+    }
+
     async toggleStarMessage(chatId: string, messageId: string, star: boolean) {
         const myId = String(localStorage.getItem('user_id'));
         const msgRef = this.fsDoc('chats', chatId, 'messages', messageId);

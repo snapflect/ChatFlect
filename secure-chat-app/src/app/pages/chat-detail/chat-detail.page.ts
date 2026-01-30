@@ -19,6 +19,8 @@ import { CallService } from 'src/app/services/call.service';
 import { ForwardModalPage } from '../forward-modal/forward-modal.page';
 import { PopoverController } from '@ionic/angular';
 import { ReactionPickerComponent } from 'src/app/components/reaction-picker/reaction-picker.component';
+import { SearchModalPage } from '../search-modal/search-modal.page';
+import { ViewerHistoryComponent } from 'src/app/components/viewer-history/viewer-history.component';
 import { LoggingService } from 'src/app/services/logging.service';
 // ... imports
 import { PresenceService } from 'src/app/services/presence.service';
@@ -706,6 +708,11 @@ export class ChatDetailPage implements OnInit, OnDestroy {
       header: 'Message Options',
       buttons: [
         {
+          text: 'View Location History',
+          icon: 'map',
+          handler: () => { this.openViewerHistory(); }
+        },
+        {
           text: 'Reply',
           icon: 'arrow-undo',
           handler: () => { this.replyingTo = msg; }
@@ -796,6 +803,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
       this.showToast('Message unstarred');
     }
   }
+
 
   async starSelectedMessages() {
     const ids = Array.from(this.selectedMessages);
@@ -1086,23 +1094,6 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     await modal.present();
   }
 
-  async presentReactionPicker(msg: any, event?: any) {
-    const popover = await this.popoverCtrl.create({
-      component: ReactionPickerComponent,
-      cssClass: 'reaction-popover',
-      translucent: true,
-      // event: event // If called from click, position it. From ActionSheet, centers it.
-      // Let's force center or near message if possible. For now, center is fine.
-    });
-
-    popover.onDidDismiss().then(async (result) => {
-      if (result.data && result.data.reaction) {
-        await this.chatService.addReaction(this.chatId!, msg.id, result.data.reaction);
-      }
-    });
-
-    await popover.present();
-  }
 
   async presentAttachmentMenu() {
     const actionSheet = await this.actionSheetCtrl.create({
@@ -2264,6 +2255,47 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     // For MVP: Show toast indicating the phone number
     // Full implementation would search users collection for phone match
     this.showToast(`Start chat with ${name}: ${phone} - Feature coming soon`);
+  }
+
+
+  // --- UX Features (v16) ---
+
+  async openSearch() {
+    const modal = await this.modalController.create({
+      component: SearchModalPage,
+      componentProps: { chatId: this.chatId }
+    });
+    await modal.present();
+    const { data } = await modal.onWillDismiss();
+    if (data && data.messageId) {
+      this.scrollToMessage(data.messageId);
+    }
+  }
+
+  async openViewerHistory() {
+    const modal = await this.modalController.create({
+      component: ViewerHistoryComponent,
+      componentProps: { chatId: this.chatId }
+    });
+    await modal.present();
+  }
+
+  async presentReactionPicker(msg: any) {
+    const popover = await this.popoverCtrl.create({
+      component: ReactionPickerComponent,
+      event: undefined,
+      cssClass: 'reaction-popover',
+      translucent: true
+    });
+    await popover.present();
+
+    const { data } = await popover.onWillDismiss();
+    if (data && data.reaction) {
+      const myId = String(this.currentUserId);
+      const myReaction = msg.reactions?.[myId];
+      const has = myReaction === data.reaction;
+      await this.chatService.toggleReaction(this.chatId!, msg.id, data.reaction, !has);
+    }
   }
 
   isRead(msg: any): boolean {
