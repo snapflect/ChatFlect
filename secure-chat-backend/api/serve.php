@@ -52,10 +52,20 @@ if (!file_exists($fullPath) || !is_file($fullPath)) {
 // ---------- PRODUCTION-GRADE ETAG OPTIMIZATION (v8 Definitive) ----------
 require_once 'db.php';
 require_once 'cache_service.php';
+require_once 'audit_log.php';
 
 // forensic correlation
 $requestUid = uniqid('req_', true);
 $sessionId = session_id() ?: 'no-session';
+$accessUserId = $_GET['uid'] ?? $_SERVER['HTTP_X_USER_ID'] ?? null;
+
+// v12: Structured audit log for media access (3.4 compliance)
+auditLog('media_accessed', $accessUserId, [
+    'file' => $filePath,
+    'request_uid' => $requestUid,
+    'session' => $sessionId
+]);
+
 error_log("[SERVE][v8][START] UID: $requestUid | Session: $sessionId | File: $filePath");
 
 $mtime = filemtime($fullPath);
