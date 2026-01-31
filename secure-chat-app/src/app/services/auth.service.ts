@@ -325,8 +325,16 @@ export class AuthService {
         const myId = this.userIdSource.value;
         if (!myId) return false;
 
-        const d = await getDoc(doc(this.db, 'users', myId, 'blocked', targetId));
-        return d.exists();
+        try {
+            const d = await getDoc(doc(this.db, 'users', myId, 'blocked', targetId));
+            return d.exists();
+        } catch (e: any) {
+            // Offline: Assume not blocked to allow app usage
+            if (e.message?.includes('offline') || e.code === 'unavailable') {
+                return false;
+            }
+            throw e;
+        }
     }
 
     async deleteAccount() {

@@ -156,7 +156,14 @@ export class ProfileService {
     }
 
     protected async firestoreGetDoc(ref: any) {
-        return await getDoc(ref);
+        try {
+            return await getDoc(ref);
+        } catch (e: any) {
+            if (e.message?.includes('offline') || e.code === 'unavailable') {
+                return { exists: () => false, data: () => undefined };
+            }
+            throw e;
+        }
     }
 
     protected firestoreDoc(ref: any, ...paths: string[]) {

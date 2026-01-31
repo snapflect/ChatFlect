@@ -13,7 +13,8 @@
   <div class="profile-header ion-text-center">
     <div class="avatar-container">
       <ion-avatar class="profile-avatar" (click)="viewPhoto()">
-        <img [secureSrc]="profile.photo_url || 'assets/placeholder_user.png'" (error)="onImageError($event)" />
+        <img [secureSrc]="profile.photo_url || 'assets/placeholder_user.png'" (error)="onImageError($event)"
+          referrerpolicy="no-referrer" />
       </ion-avatar>
       <ion-button fill="clear" class="change-photo-btn" (click)="changePhoto()">
         <ion-icon name="camera" slot="icon-only"></ion-icon>

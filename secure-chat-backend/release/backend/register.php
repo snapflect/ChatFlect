@@ -1,5 +1,6 @@
 <?php
 // Headers handled by db.php
+header('Content-Type: application/json; charset=utf-8');
 require_once 'db.php';
 require_once 'rate_limiter.php';
 enforceRateLimit();

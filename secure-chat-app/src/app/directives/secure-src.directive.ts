@@ -62,6 +62,16 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
             return;
         }
 
+        // v15.2: Synchronous skip for External/Unencrypted URLs
+        // This prevents "flicker" and NotReadableError issues for public resources
+        const isExternal = this.src.startsWith('http') && !this.key;
+        if (isExternal) {
+            this.setSrc(this.src);
+            this.setOpacity('1');
+            this.setBlur('0px');
+            return;
+        }
+
         // 2. Fetch High-Res
         this.sub = this.mediaService.getMedia(this.src, this.key, this.iv).subscribe({
             next: (url: string) => {

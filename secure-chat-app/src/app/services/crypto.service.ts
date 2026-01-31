@@ -22,9 +22,9 @@ export class CryptoService {
         return buf;
     }
 
-    public arrayBufferToBase64(buffer: ArrayBuffer): string {
+    public arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
         let binary = '';
-        const bytes = new Uint8Array(buffer);
+        const bytes = (buffer instanceof Uint8Array) ? buffer : new Uint8Array(buffer);
         const len = bytes.byteLength;
         for (let i = 0; i < len; i++) {
             binary += String.fromCharCode(bytes[i]);
@@ -225,11 +225,13 @@ export class CryptoService {
         const iv = window.crypto.getRandomValues(new Uint8Array(12));
         const arrayBuffer = await blob.arrayBuffer();
 
+        console.log('[Crypto] Encrypting blob of size:', blob.size, 'type:', blob.type);
         const encryptedBuffer = await window.crypto.subtle.encrypt(
             { name: "AES-GCM", iv: iv as any },
             key,
             arrayBuffer
         );
+        console.log('[Crypto] Encryption complete. Encrypted size:', encryptedBuffer.byteLength);
 
         return {
             encryptedBlob: new Blob([encryptedBuffer]),
@@ -238,7 +240,7 @@ export class CryptoService {
         };
     }
 
-    async decryptBlob(encryptedBlob: Blob, key: CryptoKey, iv: Uint8Array): Promise<Blob> {
+    async decryptBlob(encryptedBlob: Blob, key: CryptoKey, iv: Uint8Array, mimeType: string = ''): Promise<Blob> {
         const arrayBuffer = await encryptedBlob.arrayBuffer();
 
         const decryptedBuffer = await window.crypto.subtle.decrypt(
@@ -247,7 +249,7 @@ export class CryptoService {
             arrayBuffer
         );
 
-        return new Blob([decryptedBuffer]);
+        return new Blob([decryptedBuffer], { type: mimeType || 'application/octet-stream' });
     }
 
     // --- Security Enhancement #9: Message Integrity Verification --- //

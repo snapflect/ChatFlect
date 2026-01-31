@@ -55,4 +55,13 @@ export class RecordingService {
       throw e;
     }
   }
+
+  async getCurrentStatus(): Promise<'RECORDING' | 'STOPPED' | 'NONE' | 'UNKNOWN'> {
+    try {
+      const state = await (VoiceRecorder as any).getCurrentRecorderState();
+      return (state?.status as any) || 'UNKNOWN';
+    } catch {
+      return 'UNKNOWN';
+    }
+  }
 }

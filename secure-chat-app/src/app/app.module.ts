@@ -23,6 +23,7 @@ import { GlobalErrorHandler } from './services/global-error-handler';
 
 import { environment } from 'src/environments/environment';
 import { initializeApp } from 'firebase/app';
+import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 
 import { HTTP_INTERCEPTORS } from '@angular/common/http';
 import { AuthInterceptor } from './interceptors/auth.interceptor';
@@ -51,8 +52,16 @@ import { AuthInterceptor } from './interceptors/auth.interceptor';
 export class AppModule {
   constructor() {
     try {
-      initializeApp(environment.firebase);
-      console.log('Firebase Initialized Globally');
+      const app = initializeApp(environment.firebase);
+      const db = getFirestore(app);
+      enableIndexedDbPersistence(db).catch((err: any) => {
+        if (err.code === 'failed-precondition') {
+          console.warn('Firestore persistence failed: multiple tabs open');
+        } else if (err.code === 'unimplemented') {
+          console.warn('Firestore persistence not supported by browser');
+        }
+      });
+      console.log('Firebase Initialized Globally with Persistence');
     } catch (e) {
       console.warn('Firebase already initialized or error', e);
     }

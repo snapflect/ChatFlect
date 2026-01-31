@@ -5,14 +5,16 @@ import { Subscription } from 'rxjs';
 @Component({
     selector: 'app-audio-waveform',
     template: `
-        <div class="waveform-container" (click)="togglePlay()">
-            <canvas #waveformCanvas class="waveform-canvas"></canvas>
-            <div class="progress-overlay" [style.width.%]="progressPercent"></div>
-            <div class="play-icon" *ngIf="!isPlaying">
-                <ion-icon name="play"></ion-icon>
+        <div class="audio-player-container">
+            <!-- Play/Pause Button -->
+            <div class="control-btn" (click)="togglePlay($event)">
+                <ion-icon [name]="isPlaying ? 'pause' : 'play'"></ion-icon>
             </div>
-            <div class="pause-icon" *ngIf="isPlaying">
-                <ion-icon name="pause"></ion-icon>
+
+            <!-- Waveform Tracker -->
+            <div class="waveform-track" (click)="seekTo($event)">
+                <canvas #waveformCanvas class="waveform-canvas"></canvas>
+                <div class="progress-overlay" [style.width.%]="progressPercent"></div>
             </div>
         </div>
         <div class="waveform-time">
@@ -21,14 +23,35 @@ import { Subscription } from 'rxjs';
         </div>
     `,
     styles: [`
-        .waveform-container {
-            position: relative;
-            width: 200px;
+        .audio-player-container {
+            display: flex;
+            align-items: center;
+            width: 220px;
             height: 40px;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 20px;
-            overflow: hidden;
+            padding: 0 4px;
+        }
+        .control-btn {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            margin-right: 8px;
             cursor: pointer;
+            flex-shrink: 0;
+            color: var(--ion-color-primary, #3880ff);
+        }
+        .waveform-track {
+            position: relative;
+            flex-grow: 1;
+            height: 30px;
+            cursor: pointer;
+            overflow: hidden;
+            border-radius: 4px;
         }
         .waveform-canvas {
             width: 100%;
@@ -39,16 +62,9 @@ import { Subscription } from 'rxjs';
             top: 0;
             left: 0;
             height: 100%;
-            background: rgba(var(--ion-color-primary-rgb), 0.3);
+            background: rgba(var(--ion-color-primary-rgb, 56, 128, 255), 0.3);
             pointer-events: none;
-        }
-        .play-icon, .pause-icon {
-            position: absolute;
-            left: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 20px;
-            color: var(--ion-color-primary);
+            transition: width 0.1s linear;
         }
         .waveform-time {
             display: flex;
@@ -56,7 +72,8 @@ import { Subscription } from 'rxjs';
             font-size: 11px;
             color: rgba(255, 255, 255, 0.6);
             margin-top: 4px;
-            padding: 0 4px;
+            padding: 0 8px;
+            width: 220px;
         }
     `],
     standalone: false
@@ -70,8 +87,6 @@ export class AudioWaveformComponent implements OnChanges, OnDestroy {
     @ViewChild('waveformCanvas', { static: true }) canvasRef!: ElementRef<HTMLCanvasElement>;
 
     private audio: HTMLAudioElement | null = null;
-    private audioContext: AudioContext | null = null;
-    private analyser: AnalyserNode | null = null;
     private animationId: number | null = null;
     private sub: Subscription | null = null;
 
@@ -94,21 +109,41 @@ export class AudioWaveformComponent implements OnChanges, OnDestroy {
             this.sub = null;
         }
 
+        console.log('[AudioWaveform] setupAudio called with:', {
+            url: this.audioUrl,
+            key: this.audioKey?.substring(0, 20) + '...',
+            iv: this.audioIv?.substring(0, 20) + '...',
+            mime: this.audioMime
+        });
+
         // Use SecureMediaService to decrypt/resolve URL
         this.sub = this.secureMedia.getMedia(this.audioUrl, this.audioKey, this.audioIv, this.audioMime).subscribe(
             (blobUrl) => {
+                console.log('[AudioWaveform] Got blobUrl:', blobUrl?.substring(0, 50));
+
                 if (this.audio) {
                     this.audio.pause();
                     this.audio = null;
                 }
 
                 this.audio = new Audio(blobUrl);
+
                 this.audio.addEventListener('loadedmetadata', () => {
+                    console.log('[AudioWaveform] loadedmetadata, duration:', this.audio!.duration);
                     if (isFinite(this.audio!.duration)) {
                         this.duration = this.audio!.duration;
                     }
                     this.drawStaticWaveform();
                 });
+
+                this.audio.addEventListener('canplaythrough', () => {
+                    console.log('[AudioWaveform] canplaythrough');
+                });
+
+                this.audio.addEventListener('error', (e) => {
+                    console.error('[AudioWaveform] Audio error:', this.audio?.error);
+                });
+
                 this.audio.addEventListener('timeupdate', () => {
                     this.currentTime = this.audio!.currentTime;
                     if (this.duration > 0) {
@@ -119,10 +154,16 @@ export class AudioWaveformComponent implements OnChanges, OnDestroy {
                     this.isPlaying = false;
                     this.progressPercent = 0;
                     this.currentTime = 0;
+                    if (this.animationId) cancelAnimationFrame(this.animationId);
                 });
+                this.audio.addEventListener('play', () => this.isPlaying = true);
+                this.audio.addEventListener('pause', () => this.isPlaying = false);
+
+                // Force load
+                this.audio.load();
             },
             (err) => {
-                console.error("Audio Load Failed", err);
+                console.error("[AudioWaveform] SecureMedia error:", err);
             }
         );
     }
@@ -132,34 +173,73 @@ export class AudioWaveformComponent implements OnChanges, OnDestroy {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const width = canvas.width = canvas.offsetWidth * 2;
-        const height = canvas.height = canvas.offsetHeight * 2;
+        // Use parent container for dimensions or fixed relative size
+        const parent = canvas.parentElement;
+        const width = canvas.width = (parent?.offsetWidth || 150) * 2;
+        const height = canvas.height = (parent?.offsetHeight || 30) * 2;
         ctx.scale(2, 2);
 
         const barWidth = 3;
         const gap = 2;
-        const numBars = Math.floor(canvas.offsetWidth / (barWidth + gap));
+        const numBars = Math.floor((width / 2) / (barWidth + gap));
 
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
 
         // Draw pseudo-random waveform bars
         for (let i = 0; i < numBars; i++) {
-            const x = i * (barWidth + gap) + 30; // Offset for play button
-            const barHeight = Math.random() * (height / 3) + 5;
-            const y = (height / 2 - barHeight) / 2;
-            ctx.fillRect(x, y, barWidth, barHeight);
+            const x = i * (barWidth + gap);
+            const barHeight = Math.random() * (height / 2) * 0.8 + 4;
+            const y = (height / 4 - barHeight / 2); // Center in container
+            ctx.fillRect(x, y + 8, barWidth, barHeight); // Slight offset
         }
     }
 
-    togglePlay() {
-        if (!this.audio) return;
+    togglePlay(event?: Event) {
+        if (event) event.stopPropagation();
+
+        if (!this.audio) {
+            // Retry setup if failed first time?
+            this.setupAudio();
+            return;
+        }
 
         if (this.isPlaying) {
             this.audio.pause();
+            if (this.animationId) cancelAnimationFrame(this.animationId);
         } else {
-            this.audio.play();
+            this.audio.play().catch(e => console.error("Play failed", e));
+            this.animate();
         }
-        this.isPlaying = !this.isPlaying;
+    }
+
+    animate() {
+        if (this.isPlaying && this.audio) {
+            this.currentTime = this.audio.currentTime;
+            if (this.duration > 0) {
+                this.progressPercent = (this.currentTime / this.duration) * 100;
+            }
+            this.animationId = requestAnimationFrame(() => this.animate());
+        }
+    }
+
+    seekTo(event: MouseEvent) {
+        if (!this.audio || !this.duration) return;
+
+        const track = event.currentTarget as HTMLElement;
+        const rect = track.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const percent = Math.min(Math.max(x / rect.width, 0), 1);
+
+        const newTime = percent * this.duration;
+        this.audio.currentTime = newTime;
+
+        // Update UI immediately for responsiveness
+        this.currentTime = newTime;
+        this.progressPercent = percent * 100;
+
+        if (!this.isPlaying) {
+            // Optional: Auto-play on seek? WhatsApp does not auto-play on scrub if paused.
+        }
     }
 
     formatTime(seconds: number): string {

@@ -8,12 +8,12 @@
   <base href="./" />
 
   <!-- Content Security Policy: Allow Google images and API -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: https:; 
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: https: http:; 
              img-src 'self' data: blob: https: http: *.googleusercontent.com *.googleapis.com; 
-             connect-src 'self' https: wss: ws: *.firebaseio.com *.firebase.google.com *.googleapis.com *.snapflect.com; 
-             script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; 
-             style-src 'self' 'unsafe-inline' https:;
-             font-src 'self' data: https:;">
+             connect-src 'self' blob: https: http: wss: ws: *.firebaseio.com *.firebase.google.com *.googleapis.com *.snapflect.com; 
+             script-src 'self' 'unsafe-inline' 'unsafe-eval' https: http:; 
+             style-src 'self' 'unsafe-inline' https: http:;
+             font-src 'self' data: https: http:;">
 
   <meta name="color-scheme" content="light dark" />
   <meta name="viewport"

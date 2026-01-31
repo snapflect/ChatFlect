@@ -3,6 +3,11 @@ require_once 'db.php';
 require_once 'audit_log.php';
 require_once 'rate_limiter.php'; // v12
 
+// v15.2: Ensure consistent JSON headers for all functional endpoints
+if (basename($_SERVER['SCRIPT_NAME']) !== 'serve.php') {
+    header('Content-Type: application/json; charset=utf-8');
+}
+
 /**
  * Authentication Middleware
  * Security Enhancement #3: JWT/Firebase Token Validation on all API requests

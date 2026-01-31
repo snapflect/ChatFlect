@@ -13,6 +13,7 @@ import { PresenceService } from './presence.service';
 import { TransferProgressService } from './transfer-progress.service';
 import { HttpEventType } from '@angular/common/http';
 import { Network } from '@capacitor/network';
+import { SecureMediaService } from './secure-media.service';
 
 @Injectable({
     providedIn: 'root'
@@ -35,6 +36,7 @@ export class ChatService {
     constructor(
         private crypto: CryptoService,
         private api: ApiService,
+        private secureMedia: SecureMediaService,
         private toast: ToastController,
         private logger: LoggingService,
         private auth: AuthService,
@@ -642,10 +644,18 @@ export class ChatService {
                                     decrypted.type = data['type'];
                                 } else {
                                     const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
+                                    const rawKeyBase64 = 'RAW:' + this.crypto.arrayBufferToBase64(rawKey);
+
+                                    console.log(`[ChatService] Media decrypted: ${data['type']}, ID: ${msgId}`, {
+                                        k_prefix: rawKeyBase64.substring(0, 10),
+                                        iv_len: data['iv']?.length,
+                                        url_present: !!(data['file_url'] || data['url'])
+                                    });
+
                                     decrypted = {
                                         type: data['type'],
                                         url: data['file_url'] || data['url'],
-                                        k: (data['k'] || data['ks']) ? (data['k'] || data['ks']) : (this.crypto.arrayBufferToBase64(rawKey)),
+                                        k: rawKeyBase64,
                                         i: data['iv'],
                                         caption: data['caption'] || '',
                                         mime: data['mime'] || '',
@@ -759,10 +769,11 @@ export class ChatService {
                             };
                         } else {
                             const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
+                            const rawKeyBase64 = 'RAW:' + this.crypto.arrayBufferToBase64(rawKey);
                             decrypted = {
                                 type: data['type'],
                                 url: data['file_url'] || data['url'],
-                                k: (data['k'] || data['ks']) ? (data['k'] || data['ks']) : (this.crypto.arrayBufferToBase64(rawKey)),
+                                k: rawKeyBase64,
                                 i: data['iv'],
                                 caption: data['caption'] || '',
                                 mime: data['mime'] || '',
@@ -789,23 +800,25 @@ export class ChatService {
     }
     async sendAudioMessage(chatId: string, audioBlob: Blob, senderId: string, duration: number) {
         try {
-            const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(audioBlob);
-            const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
-
-            const formData = new FormData();
-            formData.append('file', encryptedBlob, 'voice.bin');
-
-            const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
-            if (!uploadRes || !uploadRes.url) throw new Error("Audio Upload Failed");
+            // Use SecureMediaService for handling upload + encryption (Fixed for Android 400 error)
+            const uploadResult = await this.secureMedia.uploadMedia(audioBlob, true);
 
             const metadata = {
                 type: 'audio',
-                url: uploadRes.url,
+                url: uploadResult.url,
                 d: duration,
-                mime: audioBlob.type || 'audio/mp4' // Default to mp4/aac if missing
+                mime: audioBlob.type || 'audio/mp4' // Default to mp4/aac
             };
 
-            await this.distributeSecurePayload(chatId, senderId, 'audio', '', ivBase64, sessionKey, metadata);
+            await this.distributeSecurePayload(
+                chatId,
+                senderId,
+                'audio',
+                '',
+                uploadResult.iv,
+                uploadResult.key, // Use the key returned from encryption
+                metadata
+            );
 
         } catch (e) {
             this.logger.error("Audio Send Failed", e);
@@ -813,8 +826,22 @@ export class ChatService {
     }
 
     // Helper methods for mocking in tests
-    protected async getChatDoc(chatId: string) {
-        return await this.fsGetDoc(this.fsDoc('chats', chatId));
+    protected async getChatDoc(chatId: string): Promise<any> {
+        try {
+            return await this.fsGetDoc(this.fsDoc('chats', chatId));
+        } catch (e: any) {
+            // Handle offline - return mock doc that allows message send to proceed
+            if (e.message?.includes('offline') || e.code === 'unavailable') {
+                this.logger.warn("[Chat] getChatDoc offline, using chatId to infer participants");
+                // Parse participants from deterministic chatId (format: uid1_uid2)
+                const parts = chatId.split('_');
+                return {
+                    exists: () => true,
+                    data: () => ({ participants: parts, isGroup: false })
+                };
+            }
+            throw e;
+        }
     }
 
     protected async addMessageDoc(chatId: string, payload: any) {
@@ -934,28 +961,33 @@ export class ChatService {
 
     // Trigger Push Notification
     private async sendPushNotification(chatId: string, senderId: string, messageText: string, excludeSender: boolean = true) {
-        // 1. Get Participants
-        const chatDoc = await getDoc(doc(this.db, 'chats', chatId));
-        if (!chatDoc.exists()) return;
+        try {
+            // 1. Get Participants (using wrapper for offline resilience)
+            const chatDoc = await this.getChatDoc(chatId);
+            if (!chatDoc.exists()) return;
 
-        const data = chatDoc.data();
-        const participants = data['participants'] || [];
-        const isGroup = data['isGroup'];
-        const chatName = data['name'] || 'New Message'; // Use group name or generic
+            const data = chatDoc.data();
+            const participants = data['participants'] || [];
+            const isGroup = data['isGroup'];
+            const chatName = data['name'] || 'New Message'; // Use group name or generic
 
-        // 2. Loop and Send
-        for (const p of participants) {
-            const pid = String(p).trim();
-            if (excludeSender && pid === String(senderId).trim()) continue;
+            // 2. Loop and Send
+            for (const p of participants) {
+                const pid = String(p).trim();
+                if (excludeSender && pid === String(senderId).trim()) continue;
 
-            const title = isGroup ? chatName : 'New Secure Message';
+                const title = isGroup ? chatName : 'New Secure Message';
 
-            this.api.post('push.php', {
-                target_user_id: pid,
-                title: title,
-                body: messageText,
-                data: { chatId: chatId } // Deep Linking Support
-            }).subscribe();
+                this.api.post('push.php', {
+                    target_user_id: pid,
+                    title: title,
+                    body: messageText,
+                    data: { chatId: chatId } // Deep Linking Support
+                }).subscribe();
+            }
+        } catch (e: any) {
+            // Silently fail push notifications if offline - message already queued
+            this.logger.warn("[Chat] Push notification skipped (offline)", e?.message);
         }
     }
 
@@ -964,7 +996,6 @@ export class ChatService {
     }
 
     async getOrCreateChat(otherUserId: string) {
-        // ... (existing logic)
         const currentUserId = localStorage.getItem('user_id');
         if (!currentUserId) throw new Error('Not logged in');
         const uid1 = String(currentUserId);
@@ -972,20 +1003,30 @@ export class ChatService {
         const sortedIds = [uid1, uid2].sort();
         const deterministicId = `${sortedIds[0]}_${sortedIds[1]}`;
         const chatDocRef = this.fsDoc('chats', deterministicId);
-        const chatDoc = await this.fsGetDoc(chatDocRef);
 
-        if (chatDoc.exists()) {
-            return deterministicId;
-        } else {
-            // Create
-            await this.fsSetDoc(chatDocRef, {
-                participants: [uid1, uid2],
-                createdAt: Date.now(),
-                lastMessage: '',
-                lastTimestamp: Date.now()
-            });
-            return deterministicId;
+        try {
+            const chatDoc = await this.fsGetDoc(chatDocRef);
+            if (chatDoc.exists()) {
+                return deterministicId;
+            }
+        } catch (e: any) {
+            // If offline, try to create anyway - Firestore will sync when back online
+            if (e.message?.includes('offline') || e.code === 'unavailable') {
+                this.logger.warn("[Chat] Offline - creating chat optimistically");
+            } else {
+                throw e;
+            }
         }
+
+        // Create chat (works offline with Firestore persistence)
+        await this.fsSetDoc(chatDocRef, {
+            participants: [uid1, uid2],
+            createdAt: Date.now(),
+            lastMessage: '',
+            lastTimestamp: Date.now()
+        }, { merge: true }); // merge: true prevents overwrite if it exists
+
+        return deterministicId;
     }
 
     getMyChats(): Observable<any[]> {

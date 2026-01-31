@@ -152,8 +152,11 @@ export class ChatSettingsService {
                 this.settingsCache.set(chatId, settings);
                 return settings;
             }
-        } catch (e) {
-            this.logger.error('Error loading settings', e);
+        } catch (e: any) {
+            // Only log if it's not a connectivity issue to avoid noise
+            if (e?.code !== 'unavailable' && e?.message?.indexOf('offline') === -1) {
+                this.logger.error('Error loading settings', e);
+            }
         }
 
         return { pinned: false, muted: 0, archived: false };

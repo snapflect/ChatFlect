@@ -54,6 +54,10 @@ if (!file_exists($fullPath) || !is_file($fullPath)) {
 require_once 'db.php';
 require_once 'cache_service.php';
 require_once 'audit_log.php';
+require_once 'rate_limiter.php';
+
+// v12: Enforce Rate Limit for media (protection against scraping/DoS)
+enforceRateLimit();
 
 // forensic correlation
 $requestUid = uniqid('req_', true);
@@ -160,7 +164,7 @@ if (isset($extMimeMap[$ext])) {
 // Set headers for proper browser rendering
 header("Content-Type: " . $mimeType);
 header("Content-Length: " . $fsize);
-header("Cache-Control: public, max-age=31536000"); // Cache for 1 year
+header("Cache-Control: public, max-age=31536000, immutable"); // Cache for 1 year
 header("Accept-Ranges: bytes");
 
 // Handle range requests for video/audio streaming
