@@ -346,11 +346,32 @@ export class SecureMediaService implements OnDestroy {
             keyData = enc.key;
         }
 
-        const formData = new FormData();
-        formData.append('file', blob, encrypt ? 'secure_file.bin' : 'file');
+        // Determine filename with proper extension
+        const ext = encrypt ? 'bin' : this.getExtFromMime(blob.type);
+        const filename = `upload_${Date.now()}.${ext}`;
 
-        // Note: Using toPromise() as per project pattern, even if deprecated in RxJS 7
-        const res: any = await this.api.post('upload.php', formData).toPromise();
+        const formData = new FormData();
+        formData.append('file', blob, filename);
+
+        // Use native fetch for file uploads (more reliable on mobile/Capacitor)
+        const userId = localStorage.getItem('user_id') || '';
+        const idToken = localStorage.getItem('id_token') || '';
+
+        const response = await fetch(`https://chat.snapflect.com/api/upload.php`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${idToken || userId}`,
+                'X-User-ID': userId
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            throw new Error(errBody.error || 'Upload failed');
+        }
+
+        const res = await response.json();
         if (!res?.url) throw new Error('Upload failed');
 
         return {
@@ -359,6 +380,20 @@ export class SecureMediaService implements OnDestroy {
             mime: res.mime,
             _rawKey: keyData
         };
+    }
+
+    private getExtFromMime(mime: string): string {
+        const map: Record<string, string> = {
+            'image/jpeg': 'jpg',
+            'image/png': 'png',
+            'image/gif': 'gif',
+            'image/webp': 'webp',
+            'video/mp4': 'mp4',
+            'audio/mpeg': 'mp3',
+            'audio/ogg': 'ogg',
+            'application/pdf': 'pdf'
+        };
+        return map[mime] || 'bin';
     }
 
     private async decryptMedia(blobEnc: Blob, keyEncBase64: string, ivBase64: string): Promise<Blob> {

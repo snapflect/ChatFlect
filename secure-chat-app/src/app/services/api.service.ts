@@ -13,6 +13,7 @@ export class ApiService {
             reportProgress: reportProgress,
             observe: reportProgress ? 'events' : 'body'
         };
+
         return this.http.post(`${environment.apiUrl}/${endpoint}`, data, options);
     }
 
