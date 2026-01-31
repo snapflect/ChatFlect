@@ -1490,7 +1490,8 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   // --- Voice Recording ---
-  isRecording = false;
+  recordingState: 'IDLE' | 'STARTING' | 'RECORDING' | 'STOPPING' | 'FAILED' = 'IDLE';
+  isRecording = false; // Legacy guard kept for UI compatibility
   recordDuration = 0;
   private recordInterval: any;
 
@@ -1547,12 +1548,12 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   async recordAudio() {
-    // 1. Immediate JS guard
-    if (this.isRecording) {
+    // 🔒 Immediate JS guard - R1
+    if (this.recordingState !== 'IDLE' && this.recordingState !== 'FAILED') {
       return;
     }
 
-    // 2. Permission Check
+    // 1. Permission Check
     const hasPerm = await this.recordingService.hasPermission();
     if (!hasPerm) {
       const granted = await this.recordingService.requestPermission();
@@ -1562,63 +1563,79 @@ export class ChatDetailPage implements OnInit, OnDestroy {
       }
     }
 
-    // 3. Native truth check & Defensive Reset
-    const nativeState = await this.recordingService.getCurrentStatus();
-    if (nativeState === 'RECORDING') {
-      try {
-        await this.recordingService.stopRecording();
-      } catch {
-        // Silent reset
-      }
-    }
+    // 2. R4: startRecording Is Always Pre-normalized
+    // Defensive reset of native recorder
+    await this.recordingService.safeStopRecording();
 
-    // 4. Start Recording
+    // 3. Start Recording
     try {
+      this.recordingState = 'STARTING';
       this.isRecording = true;
       this.recordCancelled = false;
       this.recordDuration = 0;
 
       await this.recordingService.startRecording();
 
+      this.recordingState = 'RECORDING';
       this.recordInterval = setInterval(() => {
         this.zone.run(() => {
           this.recordDuration++;
         });
       }, 1000);
     } catch (e: any) {
+      // R5/R6: Native errors are NOT exceptional, fallback to FAILED observability
+      this.recordingState = 'FAILED';
       this.isRecording = false;
       clearInterval(this.recordInterval);
 
       if (e?.message !== 'ALREADY_RECORDING') {
-        this.logger.error("Start Recording Failed", e);
-        this.showToast('Failed to start recording');
+        this.logger.warn("[Recording] Start failed, recovered safely", e);
       }
     }
   }
 
   async stopRecording(send: boolean) {
-    // 🔐 JS cleanup FIRST (never trust native)
-    clearInterval(this.recordInterval);
-    const wasRecording = this.isRecording;
+    // 🔐 R3: JS cleanup FIRST (never trust native)
+    this.recordingState = 'STOPPING';
     this.isRecording = false;
-
-    if (!wasRecording) return;
+    clearInterval(this.recordInterval);
 
     try {
-      const result = await this.recordingService.stopRecording();
+      // 🔎 R2: stopRecording MUST be Idempotent
+      const res = await this.recordingService.safeStopRecording();
 
-      if (send && result.value.recordDataBase64) {
-        // Upload & Send
-        const base64 = result.value.recordDataBase64;
-        const mime = result.value.mimeType;
-        // Convert Base64 to Blob (v15.2: immediate fetch buffer)
-        const res = await fetch(`data:${mime};base64,${base64}`);
-        const blob = await res.blob();
+      if (!res.ok) {
+        this.recordingState = 'FAILED';
+        this.logger.warn('[Recording] Native stop failed, recovered safely');
+        return;
+      }
 
-        await this.uploadAudio(blob, Math.round(result.value.msDuration / 1000));
+      this.recordingState = 'IDLE';
+
+      if (send && res.value?.recordDataBase64) {
+        await this.handleRecordedFile(res.value);
       }
     } catch (e) {
-      this.logger.error("Stop Recording Failed", e);
+      this.recordingState = 'FAILED';
+      this.logger.error("[Recording] Unexpected stop failure", e);
+    }
+  }
+
+  /**
+   * v15.3: Process the captured audio result
+   */
+  private async handleRecordedFile(value: any) {
+    try {
+      const base64 = value.recordDataBase64;
+      const mime = value.mimeType;
+      // Convert Base64 to Blob 
+      const res = await fetch(`data:${mime};base64,${base64}`);
+      const blob = await res.blob();
+
+      await this.uploadAudio(blob, Math.round(value.msDuration / 1000));
+    } catch (e) {
+      this.logger.error("[Recording] Failed to process audio result", e);
+      this.showToast("Failed to process recording");
     }
   }
 
