@@ -91,33 +91,30 @@ export class ProfileService {
     async updateProfile(profileData: any) {
         const id = localStorage.getItem('user_id');
 
-        // 1. Update MySQL (Legacy/API)
-        const apiPromise = this.api.post('profile.php', { ...profileData, user_id: id }).toPromise();
+        // 1. Update MySQL (Legacy/API) - Primary, must complete
+        const result = await this.api.post('profile.php', { ...profileData, user_id: id }).toPromise();
 
-        // 2. Update Firestore (Sync for CallService)
+        // 2. Update Firestore (Sync for CallService) - Background, non-blocking
         if (id) {
-            try {
-                const db = this.firestoreGetInstance();
-                const userRef = this.firestoreDoc(db, 'users', id);
-                const username = `${profileData.first_name || ''} ${profileData.last_name || ''}`.trim() || 'Unknown';
+            const db = this.firestoreGetInstance();
+            const userRef = this.firestoreDoc(db, 'users', id);
+            const username = `${profileData.first_name || ''} ${profileData.last_name || ''}`.trim() || 'Unknown';
 
-                await setDoc(userRef, {
-                    first_name: profileData.first_name || '',
-                    last_name: profileData.last_name || '',
-                    short_note: profileData.short_note || '',
-                    photo_url: profileData.photo_url || '',
-                    phone_number: profileData.phone_number || '', // Added
-                    username: username,
-                    updated_at: Date.now()
-                }, { merge: true });
-
-                this.logger.log("[Profile] Synced to Firestore for user:", id);
-            } catch (e) {
-                this.logger.error("[Profile] Failed to sync to Firestore", e);
-            }
+            // Fire-and-forget: Don't block UI on Firestore sync
+            setDoc(userRef, {
+                first_name: profileData.first_name || '',
+                last_name: profileData.last_name || '',
+                short_note: profileData.short_note || '',
+                photo_url: profileData.photo_url || '',
+                phone_number: profileData.phone_number || '',
+                username: username,
+                updated_at: Date.now()
+            }, { merge: true })
+                .then(() => this.logger.log("[Profile] Synced to Firestore for user:", id))
+                .catch(e => this.logger.error("[Profile] Failed to sync to Firestore", e));
         }
 
-        return apiPromise;
+        return result;
     }
 
     async requestPhoneUpdateOtp(email: string, newPhone: string) {
