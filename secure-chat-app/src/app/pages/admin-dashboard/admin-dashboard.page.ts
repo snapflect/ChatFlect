@@ -7,6 +7,7 @@ import { ToastController } from '@ionic/angular';
   selector: 'app-admin-dashboard',
   templateUrl: './admin-dashboard.page.html',
   styleUrls: ['./admin-dashboard.page.scss'],
+  standalone: false
 })
 export class AdminDashboardPage implements OnInit {
   stats: any = null;

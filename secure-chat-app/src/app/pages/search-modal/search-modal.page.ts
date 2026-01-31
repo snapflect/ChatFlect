@@ -1,11 +1,14 @@
 import { Component, OnInit, ViewChild } from '@angular/core';
-import { ModalController, IonSearchbar } from '@ionic/angular';
+import { ModalController, IonSearchbar, IonicModule } from '@ionic/angular';
 import { StorageService } from '../../services/storage.service';
+import { CommonModule } from '@angular/common';
 
 @Component({
     selector: 'app-search-modal',
     templateUrl: './search-modal.page.html',
     styleUrls: ['./search-modal.page.scss'],
+    standalone: true,
+    imports: [CommonModule, IonicModule]
 })
 export class SearchModalPage implements OnInit {
     @ViewChild(IonSearchbar) searchbar!: IonSearchbar;

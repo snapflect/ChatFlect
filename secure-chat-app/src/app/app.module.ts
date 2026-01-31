@@ -1,5 +1,6 @@
 import { ErrorHandler, NgModule } from '@angular/core';
 import { BrowserModule } from '@angular/platform-browser';
+import { CommonModule } from '@angular/common';
 import { RouteReuseStrategy } from '@angular/router';
 
 import { IonicModule, IonicRouteStrategy } from '@ionic/angular';
@@ -27,16 +28,18 @@ import { HTTP_INTERCEPTORS } from '@angular/common/http';
 import { AuthInterceptor } from './interceptors/auth.interceptor';
 
 @NgModule({
-  declarations: [AppComponent, ReactionPickerComponent, GifPickerComponent, SearchModalPage, ViewerHistoryComponent],
+  declarations: [AppComponent, ReactionPickerComponent, GifPickerComponent, ViewerHistoryComponent],
   imports: [
     BrowserModule,
+    CommonModule,
     IonicModule.forRoot(),
     AppRoutingModule,
     HttpClientModule,
     FormsModule,
     CallModalPageModule,
     ForwardModalPageModule,
-    DrawingEditorPageModule
+    DrawingEditorPageModule,
+    SearchModalPage
   ],
   providers: [
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
