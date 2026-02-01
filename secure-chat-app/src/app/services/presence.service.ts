@@ -6,11 +6,13 @@ import { AppState } from '@capacitor/app';
 import { Observable, BehaviorSubject } from 'rxjs';
 import { LoggingService } from './logging.service';
 
+import { db } from './firebase.config';
+
 @Injectable({
     providedIn: 'root'
 })
 export class PresenceService {
-    private db: any;
+    private db = db;
     private myId: string | null = null;
 
     // Throttling & State Tracking (v10)
@@ -22,9 +24,8 @@ export class PresenceService {
     private readonly TYPING_THROTTLE_MS = 15000; // 15 seconds
 
     constructor(private logger: LoggingService) {
-        const app = initializeApp(environment.firebase);
-        this.db = getFirestore(app);
-        this.myId = localStorage.getItem('user_id');
+        // db initialized via property assignment
+        this.myId = localStorage.getItem('user_id')?.trim().toUpperCase() || null;
     }
 
     /**

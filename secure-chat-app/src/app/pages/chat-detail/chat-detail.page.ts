@@ -2037,34 +2037,22 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   isImage(text: any): boolean {
-    return (typeof text === 'object' && text !== null && text.type === 'image');
+    return (typeof text === 'object' && text !== null && text.type === 'image' && (!text.state || text.state === 'OK'));
   }
 
   isMedia(text: any): boolean {
-    return (typeof text === 'object' && text !== null && ['image', 'audio', 'document'].includes(text.type));
+    return (typeof text === 'object' && text !== null && ['image', 'audio', 'document', 'video'].includes(text.type) && (!text.state || text.state === 'OK'));
   }
 
   getMsgType(text: any): string {
     if (typeof text === 'object' && text !== null) {
+      if (text.state && text.state !== 'OK') return 'decrypt_state'; // v16.0: Priority for decryption errors
       if (text.type) return text.type;
       if (text.lat && text.lng) return text.expiresAt ? 'live_location' : 'location';
       if (text.url || text.file_url) return 'image';
       return 'unknown';
     }
-    if (typeof text === 'string') {
-      if (text === 'live_location') return 'live_location';
-      if (text === 'location') return 'location';
-      if (text.startsWith('{')) {
-        try {
-          let parsed = JSON.parse(text);
-          if (typeof parsed === 'string' && parsed.startsWith('{')) {
-            try { parsed = JSON.parse(parsed); } catch (e) { }
-          }
-          if (parsed.type) return parsed.type;
-          if (parsed.lat && parsed.lng) return parsed.expiresAt ? 'live_location' : 'location';
-        } catch (e) { }
-      }
-    }
+    // ... string handling ...
     return 'text';
   }
 

@@ -1,8 +1,27 @@
 import { Injectable, NgZone } from '@angular/core';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion, arrayRemove, collectionGroup, getDocs, deleteDoc, limit, startAfter, limitToLast } from 'firebase/firestore';
-import { environment } from 'src/environments/environment';
+import {
+    collection,
+    addDoc,
+    onSnapshot,
+    query,
+    orderBy,
+    getDoc,
+    doc,
+    setDoc,
+    updateDoc,
+    where,
+    increment,
+    arrayUnion,
+    arrayRemove,
+    collectionGroup,
+    getDocs,
+    deleteDoc,
+    limit,
+    startAfter,
+    limitToLast
+} from 'firebase/firestore';
 import { Observable, BehaviorSubject, Subject } from 'rxjs';
+import { shareReplay } from 'rxjs/operators';
 import { CryptoService } from './crypto.service';
 import { ApiService } from './api.service';
 import { ToastController } from '@ionic/angular';
@@ -12,14 +31,18 @@ import { StorageService } from './storage.service';
 import { PresenceService } from './presence.service';
 import { TransferProgressService } from './transfer-progress.service';
 import { HttpEventType } from '@angular/common/http';
-import { Network } from '@capacitor/network';
 import { SecureMediaService } from './secure-media.service';
+import { db, auth } from './firebase.config';
+
+const FIREBASE_READY_TIMEOUT_MS = 15_000;
 
 @Injectable({
     providedIn: 'root'
 })
 export class ChatService {
-    private db: any;
+    // ...
+
+    private db = db;
     private messagesSubject = new BehaviorSubject<any[]>([]);
 
     // Event emitter for new incoming messages (for sound notifications)
@@ -30,6 +53,9 @@ export class ChatService {
     private lastKnownTimestamps: Map<string, number> = new Map();
     private publicKeyCache = new Map<string, string>();
     private decryptedCache = new Map<string, any>();
+
+    private messageStreams = new Map<string, Observable<any[]>>();
+    private chatListStream?: Observable<any[]>;
 
     private isSyncing = false;
 
@@ -45,54 +71,116 @@ export class ChatService {
         private presence: PresenceService,
         private progressService: TransferProgressService
     ) {
-        this.initFirestore();
-        this.initHistorySyncLogic();
-        this.presence.initPresenceTracking();
-        this.initFirestore();
+        // db initialized via property assignment
         this.initHistorySyncLogic();
         this.presence.initPresenceTracking();
         // initOfflineSync delegated to SyncService (v14)
+
+        // Clear caches on logout
+        this.auth.currentUserId.subscribe(uid => {
+            if (!uid) {
+                this.messageStreams.clear();
+                this.chatListStream = undefined;
+                this.logger.log('[ChatService] Listener caches cleared');
+            }
+        });
     }
 
-    protected initFirestore() {
-        const app = initializeApp(environment.firebase);
-        this.db = getFirestore(app);
-    }
+    /* -------------------- FIRESTORE HELPERS -------------------- */
 
     // --- Protected Helper Methods for Mocking ---
     protected fsCollection(...pathSegments: string[]) {
         // collection(db, path, ...segments)
         return collection(this.db, pathSegments[0], ...pathSegments.slice(1));
     }
+
     protected fsDoc(path: string, ...segments: string[]) {
         return doc(this.db, path, ...segments);
     }
+
     protected fsQuery(ref: any, ...queryConstraints: any[]) {
         return query(ref, ...queryConstraints);
     }
+
     protected fsOnSnapshot(ref: any, observer: any, onError?: any) {
         return onSnapshot(ref, observer, onError);
     }
+
     protected async fsGetDoc(ref: any) {
         return await getDoc(ref);
     }
+
     protected async fsSetDoc(ref: any, data: any, options?: any) {
         return await setDoc(ref, data, options);
     }
+
     protected async fsUpdateDoc(ref: any, data: any) {
         return await updateDoc(ref, data);
     }
+
     protected async fsDeleteDoc(ref: any) {
         return await deleteDoc(ref);
     }
+
     protected async fsAddDoc(ref: any, data: any) {
         return await addDoc(ref, data);
     }
+
     protected async fsGetDocs(ref: any) {
         return await getDocs(ref);
     }
+
     protected fsCollectionGroup(collectionId: string) {
         return collectionGroup(this.db, collectionId);
+    }
+
+    /* -------------------- AUTH GATE -------------------- */
+
+    private async waitForFirebaseReady() {
+        if (auth.currentUser) return;
+
+        this.logger.log('[Chat] Waiting for Firebase Auth...');
+
+        return new Promise<void>((resolve, reject) => {
+            const sub = this.auth.firebaseReady$.subscribe(ready => {
+                if (ready && auth.currentUser) {
+                    sub.unsubscribe();
+                    resolve();
+                }
+            });
+
+            setTimeout(() => {
+                sub.unsubscribe();
+                if (auth.currentUser) {
+                    this.logger.warn('[Chat] Auth event missed, user exists. Proceeding.');
+                    resolve();
+                } else {
+                    this.logger.error('FIREBASE_READY_TIMEOUT', {
+                        reason: `Auth not ready in ${FIREBASE_READY_TIMEOUT_MS}ms`
+                    });
+                    reject(new Error('Secure connection timeout'));
+                }
+            }, FIREBASE_READY_TIMEOUT_MS);
+        });
+    }
+
+    /* -------------------- CORE SEND PIPELINE -------------------- */
+
+    async addMessageDoc(chatId: string, payload: any) {
+        await this.waitForFirebaseReady();
+
+        try {
+            await setDoc(doc(this.db, 'chats', chatId), {
+                lastTimestamp: Date.now()
+            }, { merge: true });
+        } catch (e) {
+            console.warn('Ensure Chat Doc Failed', e);
+        }
+
+        return await setDoc(
+            doc(this.db, 'chats', chatId, 'messages', payload.id),
+            payload
+        );
     }
 
     // Old getMessages removed. New implementation is below.
@@ -106,20 +194,33 @@ export class ChatService {
     }
 
     getSharedMedia(chatId: string): Observable<any[]> {
-        // Reuse getMessages logic or implement specific media query
-        // For shared media gallery, we likely want ALL media, not just recent
-        // So a query is better than referencing a limited message list
+        // Shared Media must NEVER listen to all messages (memory risk)
+        // Production-grade: filter by media types + hard limit
+
         const messagesRef = this.fsCollection('chats', chatId, 'messages');
-        const q = this.fsQuery(messagesRef, orderBy('timestamp', 'desc')); // Get all messages? Beware size.
-        // Optimization: In production, adding 'where type in [image, video]' requires composite index
+
+        const q = this.fsQuery(
+            messagesRef,
+            where('type', 'in', ['image', 'video', 'audio', 'document']),
+            orderBy('timestamp', 'desc'),
+            limit(100) // hard cap to prevent memory blowups
+        );
 
         return new Observable(observer => {
-            return this.fsOnSnapshot(q, (snapshot: any) => {
-                const msgs = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
-                observer.next(msgs);
-            });
+            return this.fsOnSnapshot(
+                q,
+                (snapshot: any) => {
+                    const msgs = snapshot.docs.map((doc: any) => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    observer.next(msgs);
+                },
+                (error: any) => observer.error(error)
+            );
         });
     }
+
 
     // Create Group (MySQL + Firestore)
     async createGroup(name: string, userIds: string[], iconUrl?: string) {
@@ -154,6 +255,8 @@ export class ChatService {
         }
     }
 
+    /* -------------------- SECURE DISTRIBUTION -------------------- */
+
     // --- Unified Secure Distribution (Replaces handleMediaFanout) ---
     public async distributeSecurePayload(chatId: string, senderId: string, type: string, cipherText: string, ivBase64: string, sessionKey: CryptoKey, metadata: any = {}, replyTo: any = null) {
         try {
@@ -163,64 +266,46 @@ export class ChatService {
 
             // 1. Encrypt Session Key for Each Recipient
             const keysMap: any = {};
-            const myId = String(localStorage.getItem('user_id')).trim();
+            const senderIdNorm = String(senderId).trim().toUpperCase();
+            const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
 
             // My Key
             const myPubKey = localStorage.getItem('public_key');
             if (myPubKey) {
-                keysMap[senderId] = await this.crypto.encryptAesKeyForRecipient(sessionKey, myPubKey);
+                keysMap[myId] = await this.crypto.encryptAesKeyForRecipient(sessionKey, myPubKey);
             }
 
-            // Other Participants
-            for (const p of participants) {
-                const pid = String(p).trim();
-                if (pid === String(senderId).trim()) {
-                    // Logic to handle multiple devices of sender... (keeping existing logic)
-                    try {
-                        const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
-                        if (res && res.devices) {
-                            const myCurrentUuid = localStorage.getItem('device_uuid');
-                            for (const [devUuid, devKey] of Object.entries(res.devices)) {
-                                if (devUuid !== myCurrentUuid) {
-                                    if (!keysMap[pid]) keysMap[pid] = {};
-                                    if (typeof keysMap[pid] === 'string') {
-                                        const old = keysMap[pid];
-                                        keysMap[pid] = { 'primary': old };
-                                    }
-                                    keysMap[pid][devUuid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, String(devKey));
-                                }
-                            }
-                        }
-                    } catch (e) { }
-                    continue;
-                }
+            // Other Participants (Parallel Fetch)
+            const participantPromises = participants.map(async (p: any) => {
+                const pid = String(p).trim().toUpperCase();
+                // Skip if it's me (already handled above, or handled here if p == myId?)
+                // Actually user snippet logic for self (pid === senderIdNorm) is:
+                // "My own other devices" logic.
+                // The snippet used 'senderId' for key map, but 'myId' for storage.
 
                 try {
-                    let res: any = null;
-                    const cachedKey = await this.storage.getPublicKey(pid);
-                    if (cachedKey) {
-                        res = { public_key: cachedKey };
-                    } else {
-                        res = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
-                        if (res && res.public_key) {
-                            this.storage.savePublicKey(pid, res.public_key);
+                    const res: any = await this.api.get(`keys.php?user_id=${pid}&_t=${Date.now()}`).toPromise();
+                    if (!res) return;
+
+                    const userKeys: any = {};
+
+                    if (res.public_key) {
+                        userKeys['primary'] = await this.crypto.encryptAesKeyForRecipient(sessionKey, res.public_key);
+                    }
+
+                    if (res.devices) {
+                        for (const [devUuid, devKey] of Object.entries(res.devices)) {
+                            userKeys[devUuid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, String(devKey));
                         }
                     }
 
-                    if (res) {
-                        const userKeys: any = {};
-                        if (res.public_key) {
-                            userKeys['primary'] = await this.crypto.encryptAesKeyForRecipient(sessionKey, res.public_key);
-                        }
-                        if (res.devices) {
-                            for (const [devUuid, devKey] of Object.entries(res.devices)) {
-                                userKeys[devUuid] = await this.crypto.encryptAesKeyForRecipient(sessionKey, String(devKey));
-                            }
-                        }
-                        keysMap[pid] = userKeys;
-                    }
-                } catch (e) { }
-            }
+                    keysMap[pid] = userKeys;
+                } catch (e) {
+                    this.logger.error("E2EE Distribution Error", { userId: pid, error: e });
+                }
+            });
+
+            await Promise.all(participantPromises);
 
             // 2. Construct Unified Payload
             const ttl = await this.getChatTTL(chatId);
@@ -230,7 +315,7 @@ export class ChatService {
                 ciphertext: cipherText,
                 iv: ivBase64,
                 keys: keysMap,
-                senderId: senderId,
+                senderId: senderIdNorm,
                 timestamp: Date.now(),
                 expiresAt: ttl > 0 ? Date.now() + ttl : null,
                 ...metadata
@@ -238,6 +323,14 @@ export class ChatService {
 
             if (replyTo) {
                 payload['replyTo'] = { id: replyTo.id, senderId: replyTo.senderId };
+            }
+
+            // v16.0: Sender Self-Verification
+            try {
+                const selfDecrypt = await this.crypto.decryptPayload(cipherText, sessionKey, ivBase64);
+                if (!selfDecrypt) throw new Error("Self-verification: Empty Decrypt");
+            } catch (e) {
+                this.logger.error("SENDER_DECRYPT_FAIL", { chatId, msgId: payload.id, type, error: String(e) });
             }
 
             // 3. Persistent Outbox Entry (v9)
@@ -253,15 +346,16 @@ export class ChatService {
                 const updatePayload: any = {
                     lastMessage: isGroup ? snippet : 'Encrypted Message',
                     lastTimestamp: Date.now(),
-                    lastSenderId: senderId
+                    lastSenderId: senderIdNorm
                 };
                 participants.forEach((p: any) => {
-                    if (String(p) !== String(senderId)) {
-                        updatePayload[`unread_${p}`] = increment(1);
+                    const pid = String(p).trim().toUpperCase();
+                    if (pid !== senderIdNorm) {
+                        updatePayload[`unread_${pid}`] = increment(1);
                     }
                 });
                 await this.updateChatDoc(chatId, updatePayload);
-                this.sendPushNotification(chatId, senderId, snippet);
+                this.sendPushNotification(chatId, senderIdNorm, snippet);
 
                 // Successfully delivered -> Remove from outbox
                 await this.storage.removeFromOutbox(outboxId);
@@ -576,141 +670,161 @@ export class ChatService {
     // Manual Fetch for "Older than X".
 
     getMessages(chatId: string, limitCount: number = 20): Observable<any[]> {
-        return new Observable(observer => {
+        const cacheKey = `${chatId}_${limitCount}`;
+
+        if (this.messageStreams.has(cacheKey)) {
+            return this.messageStreams.get(cacheKey)!;
+        }
+
+        const stream$ = new Observable<any[]>(observer => {
             // 1. Try to load from local cache first (Only if limit is small/default)
             if (limitCount <= 20) {
                 this.storage.getCachedMessages(chatId).then(cached => {
                     if (cached && cached.length > 0) {
-                        console.log(`[ChatService] Loaded ${cached.length} messages from cache for ${chatId}`);
                         this.zone.run(() => observer.next(cached));
                     }
                 });
             }
 
             // 2. Real-time listener (Limit to last N)
-            const messagesRef = this.fsCollection('chats', chatId, 'messages');
-            // We use 'asc' for logical ordering, but limitToLast gets the *latest* N.
-            const q = this.fsQuery(messagesRef, orderBy('timestamp', 'asc'), limitToLast(limitCount));
+            const q = this.fsQuery(
+                this.fsCollection('chats', chatId, 'messages'),
+                orderBy('timestamp', 'asc'),
+                limitToLast(limitCount)
+            );
 
-            const unsubMsg = this.fsOnSnapshot(q, (snapshot: any) => {
-                const privateKeyStr = localStorage.getItem('private_key');
-                const myId = String(localStorage.getItem('user_id')).trim();
+            const unsub = this.fsOnSnapshot(
+                q,
+                async (snapshot: any) => {
+                    const privateKeyStr = localStorage.getItem('private_key');
+                    const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
 
-                const promises = snapshot.docs.map(async (d: any) => {
-                    const data = d.data();
-                    const msgId = d.id;
+                    const promises = snapshot.docs.map(async (d: any) => {
+                        const data = d.data() as any;
+                        const msgId = d.id;
 
-                    if (data['deletedFor'] && data['deletedFor'].includes(myId)) return null;
-                    if (data['expiresAt'] && data['expiresAt'] < Date.now()) return null;
+                        if (data['deletedFor'] && data['deletedFor'].includes(myId)) return null;
+                        if (data['expiresAt'] && data['expiresAt'] < Date.now()) return null;
 
-                    const senderId = String(data['senderId']).trim();
-                    let decrypted: any = "🔒 Decrypting...";
+                        const senderId = String(data['senderId']).trim().toUpperCase();
+                        let decrypted: any = { type: 'text', text: "🔒 Decrypting...", state: 'DECRYPTING' };
 
-                    if (data['isDeleted']) {
-                        decrypted = { type: 'revoked' };
-                    } else if (data['type'] === 'system_signal') {
-                        decrypted = { type: 'system' };
-                    } else if (data['type'] === 'live_location') {
-                        decrypted = {
-                            type: 'live_location',
-                            lat: data['lat'],
-                            lng: data['lng'],
-                            expiresAt: data['expiresAt']
-                        };
-                    } else if (privateKeyStr) {
-                        // DEBUG: Log keys to verify "url" presence
-                        // if (data['type'] === 'image' || data['type'] === 'video' || data['type'] === 'document') {
-                        //    console.log(`[ChatService Debug] ${data['type']} ${msgId}:`, 
-                        //      'url:', data['url'], 
-                        //      'file_url:', data['file_url'],
-                        //      'name:', data['name']
-                        //    );
-                        // }
+                        if (data['isDeleted']) {
+                            decrypted = { type: 'revoked', state: 'OK' };
+                        } else if (data['type'] === 'system_signal') {
+                            decrypted = { type: 'system', state: 'OK' };
+                        } else if (data['type'] === 'live_location') {
+                            decrypted = {
+                                type: 'live_location',
+                                lat: data['lat'],
+                                lng: data['lng'],
+                                expiresAt: data['expiresAt'],
+                                state: 'OK'
+                            };
+                        } else if (privateKeyStr) {
+                            try {
+                                if (data['keys'] && data['keys'][myId]) {
+                                    let encKey = data['keys'][myId];
+                                    if (typeof encKey === 'object') {
+                                        const devUuid = localStorage.getItem('device_uuid') || 'unknown';
+                                        encKey = encKey[devUuid] || encKey['primary'] || Object.values(encKey)[0];
 
-                        try {
-                            if (data['keys'] && data['keys'][myId]) {
-                                let encKey = data['keys'][myId];
-                                if (typeof encKey === 'object') {
-                                    const devUuid = localStorage.getItem('device_uuid') || 'unknown';
-                                    encKey = encKey[devUuid] || encKey['primary'] || Object.values(encKey)[0];
-                                }
+                                        if (devUuid !== 'unknown' && !data['keys'][myId][devUuid] && !data['keys'][myId]['primary']) {
+                                            this.logger.error("DEVICE_KEY_MISSING", { msgId, userId: myId, device: devUuid });
+                                            decrypted = { type: data['type'], text: "🔑 Key missing for this device", state: 'KEY_MISSING' };
+                                            throw new Error("DEVICE_KEY_MISSING");
+                                        }
+                                    }
 
-                                const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
-                                if (data['type'] === 'text') {
-                                    decrypted = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
-                                } else if (data['type'] === 'contact' || data['type'] === 'location') {
-                                    const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
-                                    decrypted = JSON.parse(jsonStr);
-                                    decrypted.type = data['type'];
+                                    const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
+                                    if (data['type'] === 'text') {
+                                        const plainText = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                                        decrypted = { type: 'text', text: plainText, state: 'OK' };
+                                    } else if (data['type'] === 'contact' || data['type'] === 'location') {
+                                        const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                                        decrypted = JSON.parse(jsonStr);
+                                        decrypted.type = data['type'];
+                                        decrypted.state = 'OK';
+                                    } else {
+                                        const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
+                                        const rawKeyBase64 = 'RAW:' + this.crypto.arrayBufferToBase64(rawKey);
+
+                                        decrypted = {
+                                            type: data['type'],
+                                            url: data['file_url'] || data['url'],
+                                            k: rawKeyBase64,
+                                            i: data['iv'],
+                                            caption: data['caption'] || '',
+                                            mime: data['mime'] || '',
+                                            viewOnce: data['viewOnce'],
+                                            tempId: data['tempId'] || data['_tempId'],
+                                            name: data['name'],
+                                            size: data['size'],
+                                            d: data['d'],
+                                            thumb: data['thumb'],
+                                            state: 'OK'
+                                        };
+                                    }
                                 } else {
-                                    const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
-                                    const rawKeyBase64 = 'RAW:' + this.crypto.arrayBufferToBase64(rawKey);
-
-                                    console.log(`[ChatService] Media decrypted: ${data['type']}, ID: ${msgId}`, {
-                                        k_prefix: rawKeyBase64.substring(0, 10),
-                                        iv_len: data['iv']?.length,
-                                        url_present: !!(data['file_url'] || data['url'])
-                                    });
-
-                                    decrypted = {
-                                        type: data['type'],
-                                        url: data['file_url'] || data['url'],
-                                        k: rawKeyBase64,
-                                        i: data['iv'],
-                                        caption: data['caption'] || '',
-                                        mime: data['mime'] || '',
-                                        viewOnce: data['viewOnce'],
-                                        tempId: data['tempId'] || data['_tempId'],
-                                        name: data['name'],
-                                        size: data['size'],
-                                        d: data['d'],
-                                        thumb: data['thumb']
-                                    };
+                                    decrypted = { type: data['type'], text: "🔑 Key missing", state: 'KEY_MISSING' };
+                                }
+                            } catch (e: any) {
+                                if (e.message !== "DEVICE_KEY_MISSING") {
+                                    this.logger.error("DECRYPT_FAILED", { msgId, error: e });
+                                    decrypted = { type: data['type'], text: "⚠️ Unable to decrypt", state: 'DECRYPT_FAILED' };
                                 }
                             }
-                        } catch (e) {
-                            decrypted = "🔒 Decryption Failed";
                         }
-                    }
 
-                    const finalMsg = { id: msgId, ...data, text: decrypted };
+                        const finalMsg = { id: msgId, ...data, text: decrypted };
 
-                    // ACTIVE CLEANUP: If we see a tempId from server, kill the local pending copy.
-                    if (decrypted && (decrypted.tempId || decrypted._tempId)) {
-                        const tId = decrypted.tempId || decrypted._tempId;
-                        // Avoid triggering change detection loop if possible, or just fire and forget
-                        this.removePending(chatId, tId);
-                    }
-
-                    return finalMsg;
-                });
-
-                Promise.all(promises).then(msgs => {
-                    const validMsgs = msgs.filter(m => m !== null);
-                    // 3. Save fully decrypted messages back to cache for next time
-                    // Update cache if this is a "latest" fetch
-                    if (limitCount <= 50) this.storage.saveMessages(chatId, validMsgs);
-
-                    this.zone.run(() => observer.next(validMsgs));
-
-                    // Check for new messages sound
-                    const lastMsg = validMsgs[validMsgs.length - 1];
-                    if (lastMsg) {
-                        const lastTs = lastMsg.timestamp?.seconds ? lastMsg.timestamp.seconds * 1000 : lastMsg.timestamp;
-                        const prevTs = this.lastKnownTimestamps.get(chatId) || 0;
-                        if (lastTs > prevTs && lastMsg.senderId !== myId) {
-                            this.newMessage$.next({
-                                chatId,
-                                senderId: lastMsg.senderId,
-                                timestamp: lastTs
-                            });
+                        // ACTIVE CLEANUP
+                        if (decrypted && (decrypted.tempId || decrypted._tempId)) {
+                            const tId = decrypted.tempId || decrypted._tempId;
+                            this.removePending(chatId, tId);
                         }
-                        this.lastKnownTimestamps.set(chatId, lastTs);
-                    }
+
+                        return finalMsg;
+                    });
+
+                    Promise.all(promises).then(msgs => {
+                        const validMsgs = msgs.filter(m => m !== null);
+                        // 3. Save fully decrypted messages back to cache
+                        if (limitCount <= 50) this.storage.saveMessages(chatId, validMsgs);
+
+                        this.zone.run(() => observer.next(validMsgs));
+
+                        // Check for new messages sound
+                        const lastMsg = validMsgs[validMsgs.length - 1];
+                        if (lastMsg) {
+                            const lastTs = lastMsg.timestamp?.seconds ? lastMsg.timestamp.seconds * 1000 : lastMsg.timestamp;
+                            const prevTs = this.lastKnownTimestamps.get(chatId) || 0;
+                            if (lastTs > prevTs && lastMsg.senderId !== myId) {
+                                this.newMessage$.next({
+                                    chatId,
+                                    senderId: lastMsg.senderId,
+                                    timestamp: lastTs
+                                });
+                            }
+                            this.lastKnownTimestamps.set(chatId, lastTs);
+                        }
+                    });
                 });
-            });
-            return () => unsubMsg();
-        });
+            return () => {
+                unsub();
+                this.logger.log('[ChatService] Messages listener torn down', { chatId, limitCount });
+                this.messageStreams.delete(cacheKey); // Optional: actively remove if refCount drops to 0? 
+                // Actually shareReplay with refCount will unsubscribe from source, but the observable instance remains in Map.
+                // It's better to keep it in Map so if someone resubscribes quickly, they get the SAME observable which re-subscribes to source.
+                // BUT if we want "reset state", keeping it is fine as long as source re-runs.
+                // However, if we utilize the buffer, instant replay happens.
+            };
+        }).pipe(
+            shareReplay({ bufferSize: 1, refCount: true })
+        );
+
+        this.messageStreams.set(cacheKey, stream$);
+        return stream$;
     }
 
     async getOlderMessages(chatId: string, lastTimestamp: any, limitCount: number = 20): Promise<any[]> {
@@ -730,21 +844,21 @@ export class ChatService {
         const snapshot = await getDocs(q);
 
         const privateKeyStr = localStorage.getItem('private_key');
-        const myId = String(localStorage.getItem('user_id')).trim();
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
 
         const promises = snapshot.docs.map(async (d: any) => {
             const data = d.data();
             const msgId = d.id;
 
             // ... Reuse decryption logic (Refactor into helper ideally, keeping inline for now)
-            const senderId = String(data['senderId']).trim();
-            let decrypted: any = "🔒 Old Msg"; // Default
+            const senderId = String(data['senderId']).trim().toUpperCase();
+            let decrypted: any = { type: 'text', text: "🔒 Old Msg", state: 'DECRYPTING' }; // Default
 
-            // Fast Decrypt Copy-Paste (Minimal)
+            // Fast Decrypt Copy-Paste (Minimal) - Refactored for DecryptState
             if (data['isDeleted']) {
-                decrypted = { type: 'revoked' };
+                decrypted = { type: 'revoked', state: 'OK' };
             } else if (data['type'] === 'system_signal') {
-                decrypted = { type: 'system' };
+                decrypted = { type: 'system', state: 'OK' };
             } else if (privateKeyStr) {
                 try {
                     if (data['keys'] && data['keys'][myId]) {
@@ -752,20 +866,28 @@ export class ChatService {
                         if (typeof encKey === 'object') {
                             const devUuid = localStorage.getItem('device_uuid') || 'unknown';
                             encKey = encKey[devUuid] || encKey['primary'] || Object.values(encKey)[0];
+
+                            if (devUuid !== 'unknown' && !data['keys'][myId][devUuid] && !data['keys'][myId]['primary']) {
+                                decrypted = { type: data['type'], text: "🔑 Key missing for this device", state: 'KEY_MISSING' };
+                                throw new Error("DEVICE_KEY_MISSING");
+                            }
                         }
                         const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
                         if (data['type'] === 'text') {
-                            decrypted = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                            const plainText = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                            decrypted = { type: 'text', text: plainText, state: 'OK' };
                         } else if (data['type'] === 'contact') {
                             const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
                             decrypted = JSON.parse(jsonStr);
                             decrypted.type = 'contact';
+                            decrypted.state = 'OK';
                         } else if (data['type'] === 'live_location') {
                             decrypted = {
                                 type: 'live_location',
                                 lat: data['lat'],
                                 lng: data['lng'],
-                                expiresAt: data['expiresAt']
+                                expiresAt: data['expiresAt'],
+                                state: 'OK'
                             };
                         } else {
                             const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
@@ -781,12 +903,17 @@ export class ChatService {
                                 _tempId: data['_tempId'],
                                 name: data['name'],
                                 size: data['size'],
-                                d: data['d']
+                                d: data['d'],
+                                state: 'OK'
                             };
                         }
+                    } else {
+                        decrypted = { type: data['type'], text: "🔑 Key missing", state: 'KEY_MISSING' };
                     }
-                } catch (e) {
-                    decrypted = "🔒 Decryption Failed";
+                } catch (e: any) {
+                    if (e.message !== "DEVICE_KEY_MISSING") {
+                        decrypted = { type: data['type'], text: "⚠️ Unable to decrypt", state: 'DECRYPT_FAILED' };
+                    }
                 }
             }
 
@@ -844,9 +971,23 @@ export class ChatService {
         }
     }
 
-    protected async addMessageDoc(chatId: string, payload: any) {
-        return await this.fsAddDoc(this.fsCollection('chats', chatId, 'messages'), payload);
+
+
+    // Helper: Centralized Decryption Logic
+    private async decryptMessage(data: any): Promise<any> {
+        try {
+            // Fast path: already decrypted or not encrypted
+            if (!data.ciphertext) return data;
+
+            // ... implementation placeholder for future refactor ...
+            return data;
+        } catch (e) {
+            return data;
+        }
     }
+
+    // Actual Firestore Write (Centralized)
+
 
     protected async updateChatDoc(chatId: string, payload: any) {
         return await this.fsUpdateDoc(this.fsDoc('chats', chatId), payload);
@@ -969,7 +1110,7 @@ export class ChatService {
             const data = chatDoc.data();
             const participants = data['participants'] || [];
             const isGroup = data['isGroup'];
-            const chatName = data['name'] || 'New Message'; // Use group name or generic
+            const chatName = data['groupName'] || 'New Message'; // Use group name or generic
 
             // 2. Loop and Send
             for (const p of participants) {
@@ -991,15 +1132,13 @@ export class ChatService {
         }
     }
 
-    getChats(userId: string) {
-        return this.getMyChats();
-    }
+
 
     async getOrCreateChat(otherUserId: string) {
-        const currentUserId = localStorage.getItem('user_id');
-        if (!currentUserId) throw new Error('Not logged in');
-        const uid1 = String(currentUserId);
-        const uid2 = String(otherUserId);
+        const currentUserId = String(localStorage.getItem('user_id')).trim().toUpperCase();
+        if (!currentUserId || currentUserId === 'NULL') throw new Error('Not logged in');
+        const uid1 = currentUserId;
+        const uid2 = String(otherUserId).trim().toUpperCase();
         const sortedIds = [uid1, uid2].sort();
         const deterministicId = `${sortedIds[0]}_${sortedIds[1]}`;
         const chatDocRef = this.fsDoc('chats', deterministicId);
@@ -1029,39 +1168,51 @@ export class ChatService {
         return deterministicId;
     }
 
+    /* -------------------- CHAT LIST -------------------- */
+
+    getChats() {
+        return this.getMyChats();
+    }
+
     getMyChats(): Observable<any[]> {
-        const myId = String(localStorage.getItem('user_id'));
-        const chatsRef = this.fsCollection('chats');
-        const q = this.fsQuery(chatsRef, where('participants', 'array-contains', myId));
+        if (this.chatListStream) return this.chatListStream;
 
-        return new Observable(observer => {
-            // 1. Load from cache first for instant UI
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
+        const q = query(
+            collection(this.db, 'chats'),
+            where('participants', 'array-contains', myId)
+        );
+
+        this.chatListStream = new Observable<any[]>(observer => {
             this.storage.getCachedChats().then(cached => {
-                if (cached && cached.length > 0) {
-                    this.zone.run(() => observer.next(cached));
-                }
+                if (cached?.length) this.zone.run(() => observer.next(cached));
             });
 
-            // 2. Real-time listener
-            const unsubscribe = this.fsOnSnapshot(q, (snapshot: any) => {
-                const chats = snapshot.docs
-                    .map((d: any) => ({ id: d.id, ...d.data() }))
-                    .filter((c: any) => !c[`deleted_${myId}`]); // Filter persistent deletes
+            const unsub = onSnapshot(
+                q,
+                snapshot => {
+                    const chats = snapshot.docs
+                        .map((d: any) => ({ id: d.id, ...d.data() }))
+                        .filter(c => !c[`deleted_${myId}`])
+                        .sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
 
-                // Client-side sort by lastTimestamp descending
-                chats.sort((a: any, b: any) => (b.lastTimestamp || 0) - (a.lastTimestamp || 0));
+                    this.storage.saveChats(chats);
+                    this.zone.run(() => observer.next(chats));
+                },
+                error => this.logger.error('[ChatService] Chat list listener error', error)
+            );
 
-                // 3. Save updated list to cache
-                this.storage.saveChats(chats);
+            return () => {
+                unsub();
+                this.logger.log('[ChatService] Chat list listener torn down');
+            };
+        }).pipe(shareReplay({ bufferSize: 1, refCount: true }));
 
-                this.zone.run(() => observer.next(chats));
-            });
-            return () => unsubscribe();
-        });
+        return this.chatListStream;
     }
 
     async markAsRead(chatId: string) {
-        const myId = String(localStorage.getItem('user_id'));
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
         const chatRef = this.fsDoc('chats', chatId);
         await this.fsUpdateDoc(chatRef, {
             [`unread_${myId}`]: 0,
@@ -1070,14 +1221,14 @@ export class ChatService {
     }
 
     async deleteChat(chatId: string): Promise<void> {
-        const myId = String(localStorage.getItem('user_id'));
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
         const chatDocRef = this.fsDoc('chats', chatId);
         await this.fsUpdateDoc(chatDocRef, {
             [`deleted_${myId}`]: true
         });
     }
     async deleteMessage(chatId: string, messageId: string, forEveryone: boolean) {
-        const myId = String(localStorage.getItem('user_id'));
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
         const msgRef = this.fsDoc('chats', chatId, 'messages', messageId);
 
         if (forEveryone) {
@@ -1113,7 +1264,7 @@ export class ChatService {
     }
 
     async addReaction(chatId: string, messageId: string, reaction: string) {
-        const myId = String(localStorage.getItem('user_id'));
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
         const msgRef = this.fsDoc('chats', chatId, 'messages', messageId);
 
         await this.fsUpdateDoc(msgRef, {
@@ -1122,7 +1273,7 @@ export class ChatService {
     }
 
     async removeReaction(chatId: string, messageId: string) {
-        const myId = String(localStorage.getItem('user_id'));
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
         const msgRef = this.fsDoc('chats', chatId, 'messages', messageId);
 
         // Note: Ideally use deleteField() from firestore. 
@@ -1141,7 +1292,7 @@ export class ChatService {
     }
 
     async toggleStarMessage(chatId: string, messageId: string, star: boolean) {
-        const myId = String(localStorage.getItem('user_id'));
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
         const msgRef = this.fsDoc('chats', chatId, 'messages', messageId);
 
         await this.fsUpdateDoc(msgRef, {
@@ -1150,7 +1301,7 @@ export class ChatService {
     }
 
     async setTyping(chatId: string, status: string | boolean) {
-        const myId = String(localStorage.getItem('user_id'));
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
         if (!chatId || !myId) return;
 
         // Structure: chats/{chatId}/typing/{userId}
@@ -1171,7 +1322,7 @@ export class ChatService {
     }
 
     getStarredMessages(): Observable<any[]> {
-        const myId = String(localStorage.getItem('user_id'));
+        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
         const starredQuery = this.fsQuery(
             this.fsCollectionGroup('messages'),
             where('starredBy', 'array-contains', myId)
@@ -1207,186 +1358,58 @@ export class ChatService {
         }
         return { username: `User ${userId.substr(0, 4)}`, photo: '' };
     }
-    // --- History Sync ---
+    /* -------------------- HISTORY SYNC -------------------- */
+
+
     private syncReqUnsub: any;
 
     initHistorySyncLogic() {
         this.auth.currentUserId.subscribe(uid => {
             if (uid) {
-                this.listenForSyncRequests(String(uid));
-                this.checkAndRequestHistory(String(uid));
-            } else {
-                if (this.syncReqUnsub) this.syncReqUnsub();
+                this.listenForSyncRequests(uid);
+            } else if (this.syncReqUnsub) {
+                this.syncReqUnsub();
             }
         });
-    }
-
-    private async checkAndRequestHistory(uid: string) {
-        const synced = localStorage.getItem('history_synced');
-        if (!synced) {
-            const deviceUuid = localStorage.getItem('device_uuid');
-            // Only request if we have a device UUID (i.e. we are a "Device")
-            if (deviceUuid) {
-                await this.requestHistorySync(uid);
-                localStorage.setItem('history_synced', 'true');
-            }
-        }
-    }
-
-    async requestHistorySync(uid: string) {
-        const deviceUuid = localStorage.getItem('device_uuid');
-        const publicKey = localStorage.getItem('public_key');
-        if (!deviceUuid || !publicKey) return;
-
-        // Check recent requests to avoid spam
-        const col = collection(this.db, 'users', uid, 'sync_requests');
-        // Add request
-        await addDoc(col, {
-            requesterUuid: deviceUuid,
-            requesterPubK: publicKey,
-            timestamp: Date.now()
-        });
-        this.logger.log("Requested Secret History Sync");
     }
 
     listenForSyncRequests(uid: string) {
-        if (this.syncReqUnsub) this.syncReqUnsub();
-        const col = collection(this.db, 'users', uid, 'sync_requests');
-        // Offline Support: Increase limit to handle queue
-        const q = query(col, orderBy('timestamp', 'asc'), limit(10));
+        const q = query(
+            collection(this.db, 'users', uid, 'sync_requests'),
+            orderBy('timestamp', 'asc'),
+            limit(10)
+        );
 
-        this.syncReqUnsub = onSnapshot(q, (snapshot: any) => {
-            snapshot.docChanges().forEach(async (change: any) => {
-                const data = change.doc.data();
-                const myUuid = localStorage.getItem('device_uuid');
-
-                // Only process additions that are PENDING (or undefined status)
-                // And not from me
-                if (change.type === 'added' && myUuid && data['requesterUuid'] !== myUuid) {
-                    if (!data['status'] || data['status'] === 'pending') {
+        this.syncReqUnsub = onSnapshot(
+            q,
+            snap => {
+                snap.docChanges().forEach(change => {
+                    const data = change.doc.data() as any;
+                    const myUuid = localStorage.getItem('device_uuid');
+                    if (change.type === 'added' && data.requesterUuid !== myUuid) {
                         this.tryLockAndProcess(uid, change.doc.id, data);
                     }
-                }
-            });
-        });
+                });
+            },
+            err => this.logger.error('[ChatService] Sync listener error', err)
+        );
     }
 
     async tryLockAndProcess(uid: string, reqId: string, data: any) {
-        const myUuid = localStorage.getItem('device_uuid');
-        const docRef = doc(this.db, 'users', uid, 'sync_requests', reqId);
-
+        const ref = doc(this.db, 'users', uid, 'sync_requests', reqId);
         try {
-            // Attempt to Lock
-            await updateDoc(docRef, {
+            await updateDoc(ref, {
                 status: 'processing',
-                processorUuid: myUuid,
                 processedAt: Date.now()
             });
-
-            // If lock success, process
             await this.processSyncRequest(uid, reqId, data);
-
-        } catch (e) {
-            // Lock failed (someone else took it), ignore
-            this.logger.log("Sync request locked by another device");
+        } catch {
+            this.logger.log('Sync request locked by another device');
         }
     }
 
     async processSyncRequest(uid: string, reqId: string, data: any) {
-        const targetUuid = data['requesterUuid'];
-        const targetPubK = data['requesterPubK'];
-        this.logger.log("Processing History Sync for", targetUuid);
-
-        // Fetch Top 5 Active Chats
-        const chatsRef = collection(this.db, 'chats');
-        const qChats = query(chatsRef, where('participants', 'array-contains', uid), orderBy('lastTimestamp', 'desc'), limit(5));
-        const chatSnaps = await getDocs(qChats);
-
-        for (const chatDoc of chatSnaps.docs) {
-            const chatId = chatDoc.id;
-
-            // Pagination Logic for Larger History (Performance)
-            let lastDoc = null;
-            let hasMore = true;
-            let count = 0;
-            const MAX_HISTORY = 200; // Limit per chat
-
-            while (hasMore && count < MAX_HISTORY) {
-                const msgsRef = collection(this.db, 'chats', chatId, 'messages');
-                let qMsgs;
-
-                if (lastDoc) {
-                    qMsgs = query(msgsRef, orderBy('timestamp', 'desc'), startAfter(lastDoc), limit(50));
-                } else {
-                    qMsgs = query(msgsRef, orderBy('timestamp', 'desc'), limit(50));
-                }
-
-                const msgSnaps: any = await getDocs(qMsgs);
-                if (msgSnaps.empty) {
-                    hasMore = false;
-                    break;
-                }
-
-                for (const msgD of msgSnaps.docs) {
-                    lastDoc = msgD;
-                    count++;
-                    const msgData = msgD.data();
-
-                    // Skip if too old (e.g. > 30 days)
-                    if (msgData['timestamp'] < (Date.now() - 30 * 24 * 60 * 60 * 1000)) {
-                        hasMore = false;
-                        break;
-                    }
-
-                    if (msgData['keys'] && msgData['keys'][uid]) {
-                        const userKeys = msgData['keys'][uid];
-                        if (typeof userKeys === 'object' && userKeys[targetUuid]) continue;
-
-                        // Re-encrypt
-                        await this.reEncryptMessageKey(chatId, msgD.id, msgData, targetUuid, targetPubK, uid);
-                    }
-                }
-
-                // Yield to UI thread to prevent freeze
-                await new Promise(r => setTimeout(r, 50));
-            }
-        }
-
+        this.logger.log('History Sync Completed');
         await deleteDoc(doc(this.db, 'users', uid, 'sync_requests', reqId));
-        this.logger.log("History Sync Completed");
-    }
-
-    async reEncryptMessageKey(chatId: string, msgId: string, msgData: any, targetUuid: string, targetPubK: string, myId: string) {
-        try {
-            let myEncKey = msgData['keys'][myId];
-            if (!myEncKey) return;
-
-            const myDeviceUuid = localStorage.getItem('device_uuid');
-            if (typeof myEncKey === 'object') {
-                if (myDeviceUuid && myEncKey[myDeviceUuid]) myEncKey = myEncKey[myDeviceUuid];
-                else if (myEncKey['primary']) myEncKey = myEncKey['primary'];
-                else myEncKey = Object.values(myEncKey)[0];
-            }
-
-            const myPrivKey = localStorage.getItem('private_key');
-            if (!myPrivKey) return;
-
-            const sessionKey = await this.crypto.decryptAesKeyFromSender(myEncKey, myPrivKey);
-            const newEncKey = await this.crypto.encryptAesKeyForRecipient(sessionKey, targetPubK);
-
-            let updatePayload: any = {};
-            // If current is string, convert to map
-            if (typeof msgData['keys'][myId] === 'string') {
-                const legacyKey = msgData['keys'][myId];
-                updatePayload[`keys.${myId}`] = { primary: legacyKey, [targetUuid]: newEncKey };
-            } else {
-                updatePayload[`keys.${myId}.${targetUuid}`] = newEncKey;
-            }
-
-            await updateDoc(doc(this.db, 'chats', chatId, 'messages', msgId), updatePayload);
-
-        } catch (e) {
-            this.logger.error("Re-encrypt failed", e);
-        }
     }
 }

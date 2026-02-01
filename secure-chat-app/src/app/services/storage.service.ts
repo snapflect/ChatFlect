@@ -151,6 +151,11 @@ export class StorageService {
             await this.db.execute('ALTER TABLE media_cache ADD COLUMN last_used INTEGER');
         } catch (e) { }
 
+        // v16.0 Migration: fetched_at for contacts
+        try {
+            await this.db.execute('ALTER TABLE contacts ADD COLUMN fetched_at INTEGER');
+        } catch (e) { }
+
         this.pruneMessageCache();
         this.enforceMediaCacheLimit(200);
     }
@@ -184,6 +189,7 @@ export class StorageService {
         email TEXT,
         photo_url TEXT,
         public_key TEXT,
+        fetched_at INTEGER, -- v16.0: TTL for E2EE keys
         last_seen INTEGER,
         updated_at INTEGER
       );
@@ -299,8 +305,8 @@ export class StorageService {
         const now = Date.now();
         for (const contact of contacts) {
             await this.safeRun(
-                `INSERT OR REPLACE INTO contacts (user_id, first_name, last_name, phone_number, email, photo_url, public_key, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                `INSERT OR REPLACE INTO contacts (user_id, first_name, last_name, phone_number, email, photo_url, public_key, updated_at, fetched_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     contact.user_id,
                     contact.first_name,
@@ -309,22 +315,33 @@ export class StorageService {
                     contact.email,
                     contact.photo_url,
                     contact.public_key || null,
-                    now
+                    now,
+                    contact.public_key ? now : null
                 ]
             );
         }
     }
 
-    async getPublicKey(userId: string): Promise<string | null> {
-        const values = await this.safeQuery('SELECT public_key FROM contacts WHERE user_id = ?', [userId]);
-        if (values.length > 0) {
-            return values[0].public_key;
+    async getPublicKey(userId: string): Promise<{ key: string, fetchedAt: number } | null> {
+        const normalizedId = String(userId).trim().toUpperCase();
+        const values = await this.safeQuery('SELECT public_key, fetched_at FROM contacts WHERE user_id = ?', [normalizedId]);
+        if (values.length > 0 && values[0].public_key) {
+            return {
+                key: values[0].public_key,
+                fetchedAt: values[0].fetched_at || 0
+            };
         }
         return null;
     }
 
     async savePublicKey(userId: string, key: string) {
-        await this.safeRun('UPDATE contacts SET public_key = ? WHERE user_id = ?', [key, userId]);
+        const normalizedId = String(userId).trim().toUpperCase();
+        const now = Date.now();
+        // Use Insert or Replace to ensure the entry exists even if not in contacts yet
+        await this.safeRun(
+            'INSERT INTO contacts (user_id, public_key, fetched_at, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET public_key=excluded.public_key, fetched_at=excluded.fetched_at, updated_at=excluded.updated_at',
+            [normalizedId, key, now, now]
+        );
     }
 
     async getCachedContacts() {

@@ -787,6 +787,47 @@ ion-content.chat-content {
     }
 }
 
+/* v16.0: Decryption State Styling */
+.decryption-state-container {
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 12px;
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    margin: 4px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 180px;
+
+    .state-decrypting {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 14px;
+
+        .state-spinner {
+            --color: var(--ion-color-primary);
+        }
+    }
+
+    .state-error {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 13px;
+        text-align: center;
+
+        ion-icon {
+            font-size: 24px;
+            color: var(--ion-color-warning);
+        }
+    }
+}
+
 /* Revoked / Deleted Message */
 .revoked-content {
     display: flex;
