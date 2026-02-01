@@ -15,15 +15,12 @@ define('RATE_LIMIT_ENABLED', true);  // v12: Enabled by default
  * Check and enforce rate limits
  * Returns true if request is allowed, false if rate limited
  */
-function checkRateLimit($userId = null, $endpoint = null, $limit = null, $window = null)
+function checkRateLimit($userId = null, $endpoint = null)
 {
     global $conn;
 
     if (!RATE_LIMIT_ENABLED)
         return true;
-
-    $maxRequests = $limit ?? RATE_LIMIT_REQUESTS;
-    $timeWindow = $window ?? RATE_LIMIT_WINDOW;
 
     // v12: Priority Resolution
     // 1. User ID (Authenticated)
@@ -53,7 +50,7 @@ function checkRateLimit($userId = null, $endpoint = null, $limit = null, $window
     }
 
     $now = time();
-    $windowStart = $now - $timeWindow;
+    $windowStart = $now - RATE_LIMIT_WINDOW;
 
     // Clean up old entries
     $cleanStmt = $conn->prepare("DELETE FROM rate_limits WHERE window_start < FROM_UNIXTIME(?)");
@@ -76,7 +73,7 @@ function checkRateLimit($userId = null, $endpoint = null, $limit = null, $window
         $row = $result->fetch_assoc();
         $currentCount = $row['request_count'];
 
-        if ($currentCount >= $maxRequests) {
+        if ($currentCount >= RATE_LIMIT_REQUESTS) {
             return false; // Rate limited
         }
 
@@ -103,19 +100,18 @@ function checkRateLimit($userId = null, $endpoint = null, $limit = null, $window
 /**
  * Enforce rate limit - returns 429 if exceeded
  */
-function enforceRateLimit($userId = null, $limit = null, $window = null)
+function enforceRateLimit($userId = null)
 {
-    if (!checkRateLimit($userId, null, $limit, $window)) {
+    if (!checkRateLimit($userId)) {
         http_response_code(429);
-        $retryAfter = $window ?? RATE_LIMIT_WINDOW;
-        header('Retry-After: ' . $retryAfter);
+        header('Retry-After: ' . RATE_LIMIT_WINDOW);
 
         // Log the excessive hit (optional analytics)
         // auditLog(AUDIT_RATE_LIMIT_HIT, $userId, ['endpoint' => $_SERVER['REQUEST_URI']]);
 
         echo json_encode([
             "error" => "Too Many Requests",
-            "retry_after" => $retryAfter
+            "retry_after" => RATE_LIMIT_WINDOW
         ]);
         exit;
     }

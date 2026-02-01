@@ -1,0 +1,45 @@
+# ================================
+# ChatFlect API - CORS & Delivery
+# ================================
+
+# ----------------
+# GLOBAL CORS & PREFLIGHT (CRITICAL for Mobile/Capacitor)
+# ----------------
+<IfModule mod_headers.c>
+    # Using 'always' ensures headers remain even on error responses (401, 404, 500)
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-User-ID, If-None-Match, Cache-Control, Range"
+    Header always set Access-Control-Expose-Headers "Content-Length, Content-Range, ETag"
+</IfModule>
+
+# Handle preflight OPTIONS requests immediately
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_METHOD} OPTIONS
+    RewriteRule ^ - [R=200,L]
+
+    # ----------------
+    # AUTHORIZATION HEADER FIX (Critical for reading Bearer tokens in PHP)
+    # ----------------
+    RewriteCond %{HTTP:Authorization} ^(.*)
+    RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
+
+    # ----------------
+    # UPLOADS DIRECTORY SAFETY
+    # ----------------
+    # Ensure uploaded files are served directly
+    RewriteCond %{REQUEST_URI} ^/api/uploads/
+    RewriteCond %{REQUEST_FILENAME} -f
+    RewriteRule ^(.*)$ - [L]
+</IfModule>
+
+# ----------------
+# CACHING & RANGE HEADERS
+# ----------------
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|mp4|mp3|ogg|pdf)$">
+    <IfModule mod_headers.c>
+        Header set Accept-Ranges bytes
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </IfModule>
+</FilesMatch>
