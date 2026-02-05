@@ -49,6 +49,8 @@ The following risks have been identified during the Phase 1 mapping and must be 
 - **Risk H1 — Sync Request TTL**: Sync requests (session mirroring) in Firestore could linger if the client-side cleanup fails. This leaves a "ghost" encrypted key payload in the cloud which, if compromised along with the ephemeral browser key, could lead to private key exposure.
 - **🚨 Risk H2 — Unencrypted Backup Security (HIGH)**: The `BackupService` generates an unencrypted JSON file containing the user's Master Private Key. If a user stores this file insecurely (e.g., in a public cloud, email), the entire E2EE security of their account is compromised.
 - **Risk H3 — Handshake Phishing**: A malicious actor could trick a user into scanning a rogue QR code from a phishing site, potentially initiating an unauthorized session mirroring request.
+- **Risk I1 — Chat Metadata Leakage**: High-level chat fields such as `lastMessage` (even descriptive snippets), `typing` status, and `unread_{UID}` counters are stored in plaintext Firestore docs. This reveals activity patterns and "last active" metrics to the server provider.
+- **Risk I2 — Fan-out Key Map Side Channel**: The `keys` map in each message document reveals the exact number of devices owned by each recipient. Traffic analysis of this map over time can reveal which devices are active, being added, or being revoked, creating a side-channel for user behavioral profiling.
 
 ---
 > [!WARNING]
