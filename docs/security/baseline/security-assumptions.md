@@ -36,6 +36,9 @@ The following risks have been identified during the Phase 1 mapping and must be 
 - **Risk R1 — Refresh Token Rotation Security**: While rotation exists in `refresh_token.php`, we must confirm that invalidation of the old token is atomic and that any attempt to reuse an old refresh token triggers an immediate lockout of all sessions for that user (Reuse Detection).
 - **Risk R2 — Public Key Registration at OTP Confirmation**: Currently, the `profile.php?action=confirm_otp` endpoint accepts a `public_key` alongside the OTP. If an attacker intercepts the OTP, they can register their own key, effectively hijacking the user's identity for all subsequent encrypted messages.
 - **Risk R3 — Custom Token Issuance Scope**: The `firebase_auth.php` bridge generates a custom token bound to a UID. We must verify that this issuance is strictly bound to the authenticated PHP session and, where possible, tied to a specific `device_uuid` to prevent token lateral movement.
+- **Risk D1 — device_uuid stored in localStorage**: While non-sensitive, the `device_uuid` is stored in plaintext `localStorage`. If stolen, an attacker could attempt to impersonate a specific device identity at the API level. Backend enforcement of session-to-device binding must be strictly audited.
+- **Risk D2 — Web Fallback Key Derivation**: The `SecureStorageService` web fallback uses a "device fingerprint derived key". The entropy and robustness of this fingerprint must be audited to ensure it doesn't degrade into "security theater."
+- **Risk D3 — Multi-Device Eviction Transparency**: LRU eviction in `devices.php` forcibly logs out the oldest device. However, there is currently no real-time notification to the user's *other* devices, trust banners in chats, or user-visible audit entries explaining the eviction.
 
 ---
 > [!WARNING]
