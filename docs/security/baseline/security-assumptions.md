@@ -28,5 +28,15 @@ This document lists the core security assumptions that underpin ChatFlect's curr
 2.  **Audit Log Accuracy**: We assume that logs sent to `audit_log.php` are not being tampered with by a malicious user before dispatch (currently untrusted).
 
 ---
+
+## 5. Identified Risks (Phase 1 Baseline)
+
+The following risks have been identified during the Phase 1 mapping and must be addressed in subsequent threat modeling and hardening:
+
+- **Risk R1 — Refresh Token Rotation Security**: While rotation exists in `refresh_token.php`, we must confirm that invalidation of the old token is atomic and that any attempt to reuse an old refresh token triggers an immediate lockout of all sessions for that user (Reuse Detection).
+- **Risk R2 — Public Key Registration at OTP Confirmation**: Currently, the `profile.php?action=confirm_otp` endpoint accepts a `public_key` alongside the OTP. If an attacker intercepts the OTP, they can register their own key, effectively hijacking the user's identity for all subsequent encrypted messages.
+- **Risk R3 — Custom Token Issuance Scope**: The `firebase_auth.php` bridge generates a custom token bound to a UID. We must verify that this issuance is strictly bound to the authenticated PHP session and, where possible, tied to a specific `device_uuid` to prevent token lateral movement.
+
+---
 > [!WARNING]
-> If any of these assumptions are violated (e.g., a Backend compromise allows Public Key swapping), the E2EE guarantees of the system may be bypassed. Phase 2 hardening should aim to reduce the number of "Trusted Infrastructure" assumptions.
+> If any of these assumptions or risks are ignored, the E2EE guarantees of the system may be bypassed. Reduction of these risks is a primary goal for Phase 2.
