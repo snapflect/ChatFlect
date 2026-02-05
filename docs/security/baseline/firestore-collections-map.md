@@ -1,4 +1,4 @@
-# Firestore Collections Map - ChatFlect
+# Firestore Collections Map (TASK 1.1-I) - ChatFlect
 
 This document details the Firestore database structure used for real-time messaging, presence, and metadata.
 

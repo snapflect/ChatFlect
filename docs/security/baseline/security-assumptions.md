@@ -46,6 +46,9 @@ The following risks have been identified during the Phase 1 mapping and must be 
 - **Risk G1 — Local Message Cache Risk**: Decrypted messages are cached in `StorageService` (SQLite). While this enables offline search and performance, it stores plaintext material on the device filesystem. This is a security vs. UX tradeoff that must be audited for disk-level encryption.
 - **Risk G2 — User Confusion (KEY_MISSING)**: If a user logs in on a new device, they cannot decrypt past messages because those messages weren't encrypted for the new device's RSA key. Without clear UI education, this looks like a system failure.
 - **Risk G3 — Permanent Data Loss (E2EE Behavior)**: If a user wipes their device secure storage (Keychain/Keystore) without a backup, all historical and future messages encrypted for that device are permanently lost. There is no server-side recovery "backdoor."
+- **Risk H1 — Sync Request TTL**: Sync requests (session mirroring) in Firestore could linger if the client-side cleanup fails. This leaves a "ghost" encrypted key payload in the cloud which, if compromised along with the ephemeral browser key, could lead to private key exposure.
+- **🚨 Risk H2 — Unencrypted Backup Security (HIGH)**: The `BackupService` generates an unencrypted JSON file containing the user's Master Private Key. If a user stores this file insecurely (e.g., in a public cloud, email), the entire E2EE security of their account is compromised.
+- **Risk H3 — Handshake Phishing**: A malicious actor could trick a user into scanning a rogue QR code from a phishing site, potentially initiating an unauthorized session mirroring request.
 
 ---
 > [!WARNING]
