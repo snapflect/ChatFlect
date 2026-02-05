@@ -10,7 +10,13 @@
           <mxGeometry x="40" y="80" width="220" height="400" as="geometry" />
         </mxCell>
         <mxCell id="node_client_app" value="Client App&#xa;(Ionic/Angular)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1" vertex="1" parent="boundary_client">
-          <mxGeometry x="50" y="160" width="120" height="80" as="geometry" />
+          <mxGeometry x="50" y="80" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="node_crypto_hub" value="&lt;b&gt;E2EE Security Hub&lt;/b&gt;&#xa;Encryption/Decryption&#xa;performed on-device only" style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="boundary_client">
+          <mxGeometry x="30" y="200" width="160" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="edge_client_crypto" value="" style="endArrow=none;dashed=1;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="boundary_client" source="node_client_app" target="node_crypto_hub">
+          <mxGeometry width="50" height="50" relative="1" as="geometry" />
         </mxCell>
 
         <!-- Trust Boundary: Server/Infrastructure -->
@@ -32,6 +38,10 @@
         
         <mxCell id="node_fcm" value="Firebase Cloud&#xa;Messaging (FCM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="boundary_server">
           <mxGeometry x="260" y="240" width="140" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="node_fauth" value="Firebase Auth&#xa;(Identity Hub)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="boundary_server">
+          <mxGeometry x="150" y="150" width="140" height="60" as="geometry" />
         </mxCell>
 
         <!-- Connections -->
