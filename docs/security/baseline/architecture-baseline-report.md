@@ -71,3 +71,29 @@ A summary of all identified risks categorized by their architectural impact:
 
 ## 6. Conclusion
 ChatFlect possesses a strong cryptographic foundation but suffers from significant architectural gaps in the semi-trusted PHP layer. Phase 2 must focus on **Identity-to-Key binding** and **Backend Access Control** to maintain the integrity of the E2EE trust model.
+
+---
+
+## 7. Crypto Assets & Secrets (STORY-1.2)
+
+A formal inventory of the system's cryptographic primitives and assets:
+
+### Cryptographic Assets
+- **Asset Inventory**: [crypto-assets-inventory.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-assets-inventory.md)
+    - Lists RSA-2048 identity keys, AES-256 session keys, and HMAC-256 integrity keys.
+- **Storage Map**: [crypto-storage-map.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-storage-map.md)
+    - Maps assets to Keychain/Keystore and encrypted `localStorage` fallbacks.
+- **Key Lifecycle**: [key-lifecycle-matrix.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/key-lifecycle-matrix.md)
+    - Defines generation, rotation, and revocation triggers.
+
+### Protocols & Schemas
+- **Envelope Spec**: [crypto-envelope-spec.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-envelope-spec.md)
+    - Details the `v1` (Hybrid) and `v2` (Ratchet) JSON delivery formats.
+- **Algorithm Register**: [crypto-algorithm-register.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-algorithm-register.md)
+    - Confirms usage of SHA-256 for hashes, AES-GCM for symmetric, and RSA-OAEP for asymmetric operations.
+
+### Attack Surface Review
+- **Crypto Attack Surface**: [crypto-attack-surface-notes.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-attack-surface-notes.md)
+    - Identifies Backup Exposure (Risk H2) and Key Injection (Risk E1) as primary crypto failure vectors.
+- **Token Inventory**: [token-inventory.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/token-inventory.md)
+    - Catalogs PHP JWTs and Firebase ID tokens.
