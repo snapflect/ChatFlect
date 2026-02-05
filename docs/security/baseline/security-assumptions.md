@@ -40,6 +40,7 @@ The following risks have been identified during the Phase 1 mapping and must be 
 - **Risk D2 — Web Fallback Key Derivation**: The `SecureStorageService` web fallback uses a "device fingerprint derived key". The entropy and robustness of this fingerprint must be audited to ensure it doesn't degrade into "security theater."
 - **Risk D3 — Multi-Device Eviction Transparency**: LRU eviction in `devices.php` forcibly logs out the oldest device. However, there is currently no real-time notification to the user's *other* devices, trust banners in chats, or user-visible audit entries explaining the eviction.
 - **🚨 Risk E1 — Backend Key Injection Attack (HIGH)**: The system assumes the PHP backend (`keys.php`) is honest. A compromised server or malicious admin could replace a user's public key with an attacker's key during the discovery fetch. Since there is currently no client-side verification (Safety Numbers) or signed key bundles, this represents the single largest trust weakness in the E2EE architecture.
+- **Risk F1 — Key Discovery Latency (UX/Perf)**: In large group chats (20+ participants), the client must perform a separate RSA-OAEP encryption for every device of every participant. This can cause significant processing latency on low-end hardware and increased payload size, potentially leading to a degraded "Sending..." experience or timing-based side-channel leaks.
 
 ---
 > [!WARNING]
