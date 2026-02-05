@@ -51,6 +51,12 @@ The following risks have been identified during the Phase 1 mapping and must be 
 - **Risk H3 — Handshake Phishing**: A malicious actor could trick a user into scanning a rogue QR code from a phishing site, potentially initiating an unauthorized session mirroring request.
 - **Risk I1 — Chat Metadata Leakage**: High-level chat fields such as `lastMessage` (even descriptive snippets), `typing` status, and `unread_{UID}` counters are stored in plaintext Firestore docs. This reveals activity patterns and "last active" metrics to the server provider.
 - **Risk I2 — Fan-out Key Map Side Channel**: The `keys` map in each message document reveals the exact number of devices owned by each recipient. Traffic analysis of this map over time can reveal which devices are active, being added, or being revoked, creating a side-channel for user behavioral profiling.
+- **Risk J4 — Unauthenticated Device Registration**: `devices.php` lack authentication. An attacker can register a rogue RSA public key to any `user_id`, allowing them to participate in the E2EE fan-out for all future messages sent to that user.
+- **Risk J5 — Broken Group Access Control**: Group modification endpoints (Add/Remove member) in `groups.php` lack authentication. Any user can modify the membership of any group if they possess the `groupId`.
+- **Risk J6 — Unauthenticated File Uploads**: `upload.php` is public, exposing the server to storage exhaustion attacks and unauthorized hosting of malicious content.
+- **Risk J7 — Sensitive Profile Exposure**: The profile `GET` endpoint in `profile.php` is unauthenticated and returns sensitive fields like `email` and `phone_number` for any requested `user_id`.
+- **Risk J8 — Public Contact Harvesting**: `contacts.php` provides a public search interface that allows wildcard-based harvesting of the entire user directory, including phone numbers.
+- **Risk J9 — Identity Spoofing in Status**: `status.php` does not verify if the `user_id` provided in the request matches the session holder. This allows massive impersonation where any user can post, delete, or "view" statuses as any other user.
 
 ---
 > [!WARNING]
