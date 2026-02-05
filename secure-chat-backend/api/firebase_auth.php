@@ -18,8 +18,7 @@ enforceRateLimit(null, 10, 60); // 10 req/min/IP
 header('Content-Type: application/json');
 
 // 1. Verify User is logged in via PHP backend
-$user = authenticateRequest(); // From auth_middleware.php, exits if failed
-$userId = $user['user_id'];
+$userId = requireAuth(); // Returns user_id string or exits with 401
 
 // 2. Load Service Account Key
 $keyPath = __DIR__ . '/service-account.json';

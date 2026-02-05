@@ -24,10 +24,24 @@ $createTableQuery = "CREATE TABLE IF NOT EXISTS user_devices (
 )";
 $conn->query($createTableQuery);
 
-// Migration: Ensure fcm_token exists (Safe to run repeatedly on modern MariaDB/MySQL usually, or suppress error)
-try {
-    $conn->query("ALTER TABLE user_devices ADD COLUMN fcm_token TEXT");
-} catch (Exception $e) {
+// Migration: Ensure fcm_token and device_name exist
+// Using try-catch with error suppression for "duplicate column" scenarios
+$migrations = [
+    "ALTER TABLE user_devices ADD COLUMN fcm_token TEXT",
+    "ALTER TABLE user_devices ADD COLUMN device_name VARCHAR(100) DEFAULT 'Unknown Device'"
+];
+
+foreach ($migrations as $sql) {
+    try {
+        if (!$conn->query($sql)) {
+            // Check if error is NOT "Duplicate column" (Code 1060)
+            if ($conn->errno !== 1060) {
+                error_log("Migration failed: " . $conn->error);
+            }
+        }
+    } catch (Exception $e) {
+        // Find safe way to ignore
+    }
 }
 
 
@@ -54,45 +68,70 @@ if ($method === 'POST') {
         // --- Multi-Device Session Hardening (v8.1) ---
         $MAX_DEVICES = 5;
         $countStmt = $conn->prepare("SELECT COUNT(*) as count FROM user_devices WHERE user_id = ?");
-        $countStmt->bind_param("s", $userId);
-        $countStmt->execute();
-        $countRes = $countStmt->get_result()->fetch_assoc();
+        if ($countStmt) {
+            $countStmt->bind_param("s", $userId);
+            $countStmt->execute();
+            $countRes = $countStmt->get_result()->fetch_assoc();
+            $countStmt->close();
+        } else {
+            $countRes = ['count' => 0]; // Fail safe
+        }
 
         // Check if device already exists (update doesn't count towards limit)
         $existsStmt = $conn->prepare("SELECT 1 FROM user_devices WHERE user_id = ? AND device_uuid = ?");
-        $existsStmt->bind_param("ss", $userId, $deviceUuid);
-        $existsStmt->execute();
-        $isUpdate = $existsStmt->get_result()->num_rows > 0;
+        $isUpdate = false;
+        if ($existsStmt) {
+            $existsStmt->bind_param("ss", $userId, $deviceUuid);
+            $existsStmt->execute();
+            $isUpdate = $existsStmt->get_result()->num_rows > 0;
+            $existsStmt->close();
+        }
 
-        if (!$isUpdate && $countRes['count'] >= $MAX_DEVICES) {
+        if (!$isUpdate && isset($countRes['count']) && $countRes['count'] >= $MAX_DEVICES) {
             // Find the oldest device
             $oldestStmt = $conn->prepare("SELECT device_uuid FROM user_devices WHERE user_id = ? ORDER BY last_active ASC LIMIT 1");
-            $oldestStmt->bind_param("s", $userId);
-            $oldestStmt->execute();
-            $oldest = $oldestStmt->get_result()->fetch_assoc();
+            if ($oldestStmt) {
+                $oldestStmt->bind_param("s", $userId);
+                $oldestStmt->execute();
+                $oldest = $oldestStmt->get_result()->fetch_assoc();
+                $oldestStmt->close();
 
-            if ($oldest) {
-                // Evict oldest device
-                $evictStmt = $conn->prepare("DELETE FROM user_devices WHERE user_id = ? AND device_uuid = ?");
-                $evictStmt->bind_param("ss", $userId, $oldest['device_uuid']);
-                $evictStmt->execute();
+                if ($oldest) {
+                    // Evict oldest device
+                    $evictStmt = $conn->prepare("DELETE FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+                    if ($evictStmt) {
+                        $evictStmt->bind_param("ss", $userId, $oldest['device_uuid']);
+                        $evictStmt->execute();
+                        $evictStmt->close();
+                    }
 
-                // Clear sessions associated with evicted device
-                $sessStmt = $conn->prepare("DELETE FROM user_sessions WHERE user_id = ? AND device_uuid = ?");
-                $sessStmt->bind_param("ss", $userId, $oldest['device_uuid']);
-                $sessStmt->execute();
+                    // Clear sessions associated with evicted device
+                    $sessStmt = $conn->prepare("DELETE FROM user_sessions WHERE user_id = ? AND device_uuid = ?");
+                    if ($sessStmt) {
+                        $sessStmt->bind_param("ss", $userId, $oldest['device_uuid']);
+                        $sessStmt->execute();
+                        $sessStmt->close();
+                    }
 
-                auditLog('DEVICE_EVICTED_MAX_LIMIT', $userId, [
-                    'evicted_device' => $oldest['device_uuid'],
-                    'new_device' => $deviceUuid,
-                    'reason' => 'max_limit_reached'
-                ]);
+                    auditLog('DEVICE_EVICTED_MAX_LIMIT', $userId, [
+                        'evicted_device' => $oldest['device_uuid'],
+                        'new_device' => $deviceUuid,
+                        'reason' => 'max_limit_reached'
+                    ]);
+                }
             }
         }
 
         // Upsert device
         $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token) VALUES (?, ?, ?, ?, ?) 
                                 ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, last_active = NOW()");
+
+        if (!$stmt) {
+            http_response_code(500);
+            echo json_encode(["error" => "Database error: " . $conn->error]);
+            exit;
+        }
+
         $stmt->bind_param("ssssssss", $userId, $deviceUuid, $publicKey, $deviceName, $fcmToken, $publicKey, $deviceName, $fcmToken);
 
         if ($stmt->execute()) {
@@ -100,7 +139,7 @@ if ($method === 'POST') {
             echo json_encode(["status" => "success", "message" => "Device registered"]);
         } else {
             http_response_code(500);
-            echo json_encode(["error" => "Failed to register device"]);
+            echo json_encode(["error" => "Failed to register device: " . $stmt->error]);
         }
     }
 } elseif ($method === 'GET') {

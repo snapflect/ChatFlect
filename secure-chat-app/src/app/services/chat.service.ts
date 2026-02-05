@@ -18,7 +18,8 @@ import {
     deleteDoc,
     limit,
     startAfter,
-    limitToLast
+    limitToLast,
+    enableNetwork
 } from 'firebase/firestore';
 import { Observable, BehaviorSubject, Subject } from 'rxjs';
 import { shareReplay } from 'rxjs/operators';
@@ -34,7 +35,7 @@ import { HttpEventType } from '@angular/common/http';
 import { SecureMediaService } from './secure-media.service';
 import { db, auth } from './firebase.config';
 
-const FIREBASE_READY_TIMEOUT_MS = 15_000;
+const FIREBASE_READY_TIMEOUT_MS = 30_000;
 
 @Injectable({
     providedIn: 'root'
@@ -138,6 +139,14 @@ export class ChatService {
 
     private async waitForFirebaseReady() {
         if (auth.currentUser) return;
+
+        // Auto-Recovery: Trigger a sign-in attempt if we are missing auth but have a user ID
+        const myId = localStorage.getItem('user_id');
+        if (myId && !auth.currentUser) {
+            this.logger.log('[Chat] Auth missing, triggering opportunistic sign-in & network...');
+            try { enableNetwork(this.db); } catch (err) { }
+            this.auth.signInToFirebase(myId).catch(e => console.error("Auto-Auth Failed", e));
+        }
 
         this.logger.log('[Chat] Waiting for Firebase Auth...');
 
@@ -325,12 +334,14 @@ export class ChatService {
                 payload['replyTo'] = { id: replyTo.id, senderId: replyTo.senderId };
             }
 
-            // v16.0: Sender Self-Verification
-            try {
-                const selfDecrypt = await this.crypto.decryptPayload(cipherText, sessionKey, ivBase64);
-                if (!selfDecrypt) throw new Error("Self-verification: Empty Decrypt");
-            } catch (e) {
-                this.logger.error("SENDER_DECRYPT_FAIL", { chatId, msgId: payload.id, type, error: String(e) });
+            // v16.0: Sender Self-Verification (Only for text/content payloads)
+            if (cipherText && cipherText.length > 0) {
+                try {
+                    const selfDecrypt = await this.crypto.decryptPayload(cipherText, sessionKey, ivBase64);
+                    if (!selfDecrypt) throw new Error("Self-verification: Empty Decrypt");
+                } catch (e) {
+                    this.logger.error("SENDER_DECRYPT_FAIL", { chatId, msgId: payload.id, type, error: String(e) });
+                }
             }
 
             // 3. Persistent Outbox Entry (v9)
@@ -432,16 +443,32 @@ export class ChatService {
 
     async sendMessage(chatId: string, plainText: string, senderId: string, replyTo: any = null) {
         try {
-            // 1. Generate Key & IV
+            const tempId = `tmp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+
+            // 1. Optimistic UI Update
+            this.addPending(chatId, {
+                id: tempId,
+                senderId: senderId,
+                timestamp: Date.now(),
+                type: 'text',
+                text: {
+                    type: 'text',
+                    text: plainText,
+                    _isOffline: true,
+                    tempId: tempId
+                }
+            });
+
+            // 2. Generate Key & IV
             const sessionKey = await this.crypto.generateSessionKey();
             const iv = window.crypto.getRandomValues(new Uint8Array(12));
             const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
 
-            // 2. Encrypt Text
+            // 3. Encrypt Text
             const cipherText = await this.crypto.encryptPayload(plainText, sessionKey, iv);
 
-            // 3. Distribute
-            await this.distributeSecurePayload(chatId, senderId, 'text', cipherText, ivBase64, sessionKey, {}, replyTo);
+            // 4. Distribute (with tempId for reconciliation)
+            await this.distributeSecurePayload(chatId, senderId, 'text', cipherText, ivBase64, sessionKey, { tempId }, replyTo);
         } catch (e) {
             this.logger.error("Send Text Failed", e);
         }
@@ -739,7 +766,12 @@ export class ChatService {
                                     const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
                                     if (data['type'] === 'text') {
                                         const plainText = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
-                                        decrypted = { type: 'text', text: plainText, state: 'OK' };
+                                        decrypted = {
+                                            type: 'text',
+                                            text: plainText,
+                                            state: 'OK',
+                                            tempId: data['tempId'] || data['_tempId']
+                                        };
                                     } else if (data['type'] === 'contact' || data['type'] === 'location') {
                                         const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
                                         decrypted = JSON.parse(jsonStr);
@@ -1151,7 +1183,8 @@ export class ChatService {
         } catch (e: any) {
             // If offline, try to create anyway - Firestore will sync when back online
             if (e.message?.includes('offline') || e.code === 'unavailable') {
-                this.logger.warn("[Chat] Offline - creating chat optimistically");
+                this.logger.warn("[Chat] Offline - creating chat optimistically. Triggering network reconnect...");
+                try { enableNetwork(this.db); } catch (err) { }
             } else {
                 throw e;
             }
