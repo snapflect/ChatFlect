@@ -76,24 +76,20 @@ ChatFlect possesses a strong cryptographic foundation but suffers from significa
 
 ## 7. Crypto Assets & Secrets (STORY-1.2)
 
-A formal, high-fidelity inventory of the system's cryptographic primitives and assets, refined to meet P0 requirements:
+A formal, high-fidelity inventory of the system's cryptographic primitives and assets, refined to meet P0 requirements.
+
+> **Master Index**: [Crypto Inventory Index](crypto/crypto-inventory-index.md)
 
 ### Cryptographic Assets
-- **Asset Inventory**: [crypto-assets-inventory.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-assets-inventory.md)
-    - Comprehensive catalog of Identity, Device, Session, Handshake, and Storage keys.
-- **Storage Map**: [crypto-storage-map.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-storage-map.md)
-    - Detailed matrix mapping assets to physical storage (Keychain, Keystore, SQLite, etc.) with risk ratings.
-- **Key Lifecycle**: [key-lifecycle-matrix.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/key-lifecycle-matrix.md)
-    - Operational lifecycle definition including generation, rotation, and revocation triggers.
+- **Asset Inventory**: [crypto-assets-inventory.md](crypto/crypto-assets-inventory.md)
+- **Storage Map**: [crypto-storage-map.md](crypto/crypto-storage-map.md)
+- **Key Lifecycle**: [key-lifecycle-matrix.md](crypto/key-lifecycle-matrix.md)
 
 ### Protocols & Schemas
-- **Envelope Spec**: [crypto-envelope-spec.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-envelope-spec.md)
-    - JSON schemas for `v1` (Hybrid), `v2` (Ratchet), and `v16.0` (Integrity) delivery envelopes.
-- **Algorithm Register**: [crypto-algorithm-register.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-algorithm-register.md)
-    - Definitive list of primitives (RSA-OAEP, AES-GCM, PBKDF2) and implementation parameters.
+- **Envelope Spec**: [crypto-envelope-spec.md](crypto/crypto-envelope-spec.md)
+- **Algorithm Register**: [crypto-algorithm-register.md](crypto/crypto-algorithm-register.md)
 
 ### Identity & Access
-- **Token Inventory**: [token-inventory.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/token-inventory.md)
-    - Catalog of PHP JWTs, Refresh Tokens, Firebase ID tokens, and FCM tokens.
-- **Crypto Attack Surface**: [crypto-attack-surface-notes.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-attack-surface-notes.md)
-    - Identification of critical crypto-relevant attack vectors (Backup Exposure, Key Injection).
+- **Token Inventory**: [token-inventory.md](crypto/token-inventory.md)
+- **Crypto Attack Surface**: [crypto-attack-surface-notes.md](crypto/crypto-attack-surface-notes.md)
+
