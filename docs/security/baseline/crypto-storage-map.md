@@ -1,57 +1,58 @@
-# Crypto Storage Map (TASK 1.2-B) - ChatFlect
+# Crypto Storage Map (TASK 1.2-C) - ChatFlect
 
-This document maps cryptographic assets to their physical storage locations, detailing the protection mechanisms at each layer.
+This document provides a definitive map of all cryptographic asset storage locations, detailing their protection mechanisms and exposure risks.
 
-## 1. Client-Side Asset Storage
+## 1. Cryptographic Storage Matrix
 
-| Asset Class | Primary Storage | Fallback Storage | Protection Mechanism |
-| :--- | :--- | :--- | :--- |
-| **Private Keys** | iOS Keychain / Android Keystore | `secure_` localStorage | Native OS Encryption / AES-GCM (PBKDF2) |
-| **Public Keys** | localStorage | N/A | Plaintext (Derived) |
-| **Ratchet State** | localStorage | N/A | Plaintext JSON (Risk: Exposure) |
-| **Media Blobs** | Native Cache Directory | Browser Blob Storage | AES-GCM Encrypted on Disk |
-| **Auth Tokens** | localStorage | N/A | Plaintext Base64 |
-
----
-
-## 2. Server-Side Asset Storage
-
-| Asset Class | Storage Engine | Collection/Table | Visibility |
-| :--- | :--- | :--- | :--- |
-| **User Public Keys** | MySQL | `users.public_key` | Public Service Discovery |
-| **Device Public Keys**| MySQL | `user_devices.public_key`| Public Service Discovery |
-| **Encrypted Messages**| Firestore | `messages` | Auth-Gated (Recipient/Sender) |
-| **Refresh Tokens** | MySQL | `user_sessions.token` | Server-Internal |
+| Asset Name | Storage System | Encryption at Rest | Sensitivity (1-10) | Exposure Risk | Access Boundary |
+| :--- | :--- | :--- | :---: | :--- | :--- |
+| **Master Private Key** | SecureStorage (Keychain) | ✅ (Hardware) | 10 | LOW | Client-Only |
+| **Master Private Key** | localStorage (Fallback) | ✅ (AES-GCM) | 10 | MED | Client-Only |
+| **Master Private Key** | **Backup JSON Export** | ❌ **Plaintext** | 10 | **CRITICAL** | User-Exported |
+| **Ratchet State** | localStorage | ❌ **Plaintext** | 8 | **HIGH** | Client-Only |
+| **Device Public Key** | MySQL (`user_devices`) | ❌ (Public) | 2 | LOW | Public Plane |
+| **Offline Outbox** | SQLite (SQLCipher) | ✅ (AES-256) | 7 | LOW | Client-Only|
+| **Auth Tokens** | localStorage | ❌ **Plaintext** | 6 | **HIGH** | Client-Only |
+| **Encrypted Blobs** | Native Cache Dir | ✅ (AES-GCM) | 5 | LOW | Client-Only |
+| **Message Payloads** | Firestore (`messages`) | ✅ (E2EE) | 9 | LOW | Converged |
 
 ---
 
-## 3. Storage Protection Deep-Dive
+## 2. Storage System Deep-Dive
 
-### A. Capacitor Secure Storage (Mobile)
-- **Mechanism**: Uses `capacitor-secure-storage-plugin`.
-- **Backend**: 
-    - **iOS**: Keychain services.
-    - **Android**: Shared Preferences backed by Android KeyStore.
-- **Exposure**: Private keys remain encrypted at rest via hardware-backed modules where available.
+### A. SecureStorageService (Mobile)
+- **Primary**: Uses `capacitor-secure-storage-plugin` for raw RSA private keys and the SQLite passphrase.
+- **Hardware Binding**: Leverages TEE (Trusted Execution Environment) on Android and Secure Enclave on iOS.
+- **Access**: Strictly scoped to the application sandbox.
 
-### B. Encrypted localStorage (Web Fallback)
-- **Mechanism**: Custom Implementation in `SecureStorageService`.
-- **Derivation**: `PBKDF2` with 100,000 iterations.
-- **Salt**: `ChatFlect_SecureStorage_Salt`.
-- **Input**: Device Fingerprint (UserAgent, Screen Size, Language).
-- **Encryption**: `AES-GCM-256`.
-- **Risk**: Device fingerprints can be low-entropy, making the storage wrap vulnerable to offline brute-force if the `localStorage` is dumped.
+### B. SQLite Outbox (Persistent)
+- **Engine**: `@capacitor-community/sqlite` with full-disk encryption.
+- **Key Storage**: The 32-byte database passphrase is stored in `SecureStoragePlugin`.
+- **Content**: Encrypted E2EE payloads waiting for network restoration.
 
-### C. Media Cache Persistence
-- **Mechanism**: `SecureMediaService` + `Filesystem`.
-- **Directory**: `Directory.Cache`.
-- **Integrity**: Verified via `ETag` matching against the backend before serving.
-- **Zeroization**: Cache is zeroed out and purged on **Logout** or **Remote Kill**.
+### C. localStorage (Web/Hybrid)
+- **Unwrapped State**: Ratchet chain keys and session tokens are stored in standard `localStorage`.
+- **Wrapped State**: The `private_key` is wrapped using `AES-GCM-256` derived from a device fingerprint via PBKDF2 (100k iterations).
+- **Risk**: Susceptible to XSS, allowing for "Ratchet Advancement" or "Session Hijacking".
+
+### D. Backup JSON Export
+- **Format**: Plaintext JSON file.
+- **Content**: Contains the raw `private_key`.
+- **Risk**: If the user saves this to unencrypted cloud storage or a shared drive, the entire identity is lost.
 
 ---
 
-## 4. Identified Storage Vulnerabilities (Phase 2)
+## 3. Sensitivity Ratings & Access Boundaries
 
-1.  **Ratchet State Plaintext**: Conversation ratchets (Chain keys) are currently stored in `localStorage` without additional wrapping.
-2.  **Backup Exposure**: The JSON backup feature manually extracts keys from `localStorage` and places them in a plaintext file (Risk H2).
-3.  **Auth Token Storage**: PHP `id_token` and `refresh_token` are stored in plaintext `localStorage`, allowing for session hijacking if an XSS vulnerability exists.
+- **Identity Layer (Rating 10)**: Master Private Key. **Critical Boundary**: Must never leave the device unless wrapped by a user-provided password (not currently implemented).
+- **Session Layer (Rating 7-9)**: Ratchet State & Message Payloads. **Boundary**: Multi-device converged view.
+- **Transport Layer (Rating 6)**: Auth Tokens. **Boundary**: Front-to-Back signaling.
+
+---
+
+## 4. Compliance Verification
+
+- [x] Includes `SecureStorageService`, `localStorage`, `SQLite`, `Firestore`, `MySQL`, and `Backup JSON`.
+- [x] Risk ratings (LOW/MED/HIGH/CRITICAL) assigned based on current architecture.
+- [x] Sensitivity ratings (1-10) assigned to all critical assets.
+- [x] Access boundaries (Client-Only / Converged / Public) defined.
