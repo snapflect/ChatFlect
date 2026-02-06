@@ -45,3 +45,9 @@ __pycache__/
 
 # OS-generated files
 UserInterfaceState.xcuserstate
+
+# Sensitive files - NEVER commit these
+**/service-account.json
+**/firebase-adminsdk*.json
+*.pem
+*.key
