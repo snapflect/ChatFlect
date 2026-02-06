@@ -1,51 +1,62 @@
-# Crypto Algorithm Register (TASK 1.2-F) - ChatFlect
+# Crypto Algorithm Register (TASK 1.2-D) - ChatFlect
 
-This document lists the exact cryptographic primitives and implementation parameters used throughout the application.
+This document serves as the formal register of all cryptographic algorithms, parameters, and configurations used in the ChatFlect system.
 
-## 1. Asymmetric Encryption
+## 1. Cryptographic Register
 
-| Primitive | Operation | Hash | implementation | Purpose |
+| Algorithm | Key Size | Mode / Padding | Usage Location | Justification |
 | :--- | :--- | :--- | :--- | :--- |
-| **RSA-OAEP** | Encrypt/Decrypt| SHA-256 | WebCrypto API | Asymmetric key transit & Handshakes |
+| **RSA-OAEP** | 2048-bit | SHA-256 Padding | Client (E2EE) | Industry standard for hybrid key transit. NIST SP 800-56B. |
+| **AES-GCM** | 256-bit | 96-bit (12B) IV | Client/Outbox/Cache | Authenticated encryption (AEAD). High security margin. |
+| **PBKDF2** | 256-bit Key | 100k Iterations | Client (Web Fallback) | Mitigation against offline brute-force for storage wrap. |
 
-- **Key Size**: 2048-bit.
-- **Public Exponent**: 65537 (`0x010001`).
+> [!NOTE]
+> **Phase 2 Improvement**: Currently uses a static namespace salt. Phase 2 should introduce a per-device random salt stored alongside ciphertext to maximize entropy and brute-force resistance.
 
----
-
-## 2. Symmetric Encryption
-
-| Primitive | Operation | Key Size | Mode | Purpose |
-| :--- | :--- | :--- | :--- | :--- |
-| **AES-GCM** | Encrypt/Decrypt| 256-bit | GCM | Authenticated payload encryption |
-
-- **IV Size**: 96-bit (12 bytes).
-- **Tag Size**: 128-bit (Standard GCM tag).
+| **HKDF** | N/A | SHA-256 (Extract/Expand) | Client (Ratchet) | Deterministic key derivation for symmetric rachets. |
+| **HMAC** | 256-bit | SHA-256 | Backend (Tokens) | Fast, secure integrity checks for JWT signatures. |
+| **SHA-256** | N/A | N/A | Global (Fingerprinting) | Collision-resistant hashing for device/key identity. |
 
 ---
 
-## 3. Key Derivation & Hashing
+## 2. Technical Configuration Details
 
-| Primitive | Operation | Hash | Parameters | Purpose |
-| :--- | :--- | :--- | :--- | :--- |
-| **HKDF** | Extract/Expand | SHA-256 | RFC 5869 | Ratchet state derivation |
-| **PBKDF2** | Derive Key | SHA-256 | 100,000 Iterations | Storage wrap key (Web fallback) |
-| **HMAC** | Sign/Verify | SHA-256 | 256-bit Key | Message integrity & PRK extraction |
+### A. Random Number Generation (RNG)
+- **Primary Source**: `window.crypto.getRandomValues()`.
+- **Implementation**: Used for all AES IVs, Ratchet Root Keys, and cryptographically secure session identifiers (JTIs).
+- **Compliance**: Standards-based CSPRNG (Cryptographically Secure Pseudo-Random Number Generator).
+
+### B. Storage KDF (PBKDF2)
+- **Iterations**: 100,000.
+- **Hashing**: SHA-256.
+- **Salt**: `ChatFlect_SecureStorage_Salt` (Static, used to distinguish storage scopes).
+- **Fallback Entropy**: Device fingerprint (UserAgent, Screen Size, Language, Timezone).
+
+### C. RSA Padding Specification
+- **Mode**: OAEP (Optimal Asymmetric Encryption Padding).
+- **Mask Generation Function**: MGF1 with SHA-256.
+- **Public Exponent**: 65537 (standard).
 
 ---
 
-## 4. Randomness & Entropy
+## 3. Security Assessment
 
-- **Source**: `window.crypto.getRandomValues()` (WebCrypto API).
-- **Usage**:
-    - AES IV generation.
-    - Ratchet Root Key generation.
-    - Session ID (JTI) generation for tokens.
+### Flagged Weak Algorithms
+- **MD5 / SHA-1**: **None detected**. Only SHA-256+ used.
+- **RSA-1024**: **None detected**. All identity keys are 2048-bit.
+- **ECB Mode**: **None detected**. GCM mode used exclusively for symmetric encryption.
+
+### Roadmap (Phase 4)
+- Post-Quantum Cryptography (PQC) evaluation for long-term forward secrecy.
+- Migration to RSA-4096 or Ed25519 (ECC) for improved performance/security ratio.
 
 ---
 
-## 5. Implementation Compliance (Phase 2 Focus)
+## 4. Compliance Verification
 
-1.  **Fips 140-2 Considerations**: The app relies on the browser/system WebCrypto implementation. On mobile platforms, this typically maps to secure hardware-backed providers (OpenSSL/BoringSSL).
-2.  **Quantum Resistance**: Current implementations (RSA-2048) are not quantum-resistant. Future roadmap items in Phase 4 may explore PQC (Post-Quantum Cryptography).
-3.  **Key Serialization**: Keys are exported/stored using `spki` (Public) and `pkcs8` (Private) formats, then Base64 encoded for transit.
+- [x] Includes AES-GCM key/IV size.
+- [x] Includes RSA key size and padding mode.
+- [x] Includes hashing function for fingerprints (SHA-256).
+- [x] Includes PBKDF2 iterations (100,000).
+- [x] Includes random generator source (`window.crypto`).
+- [x] All implementations verified against source code (`CryptoService.ts`).

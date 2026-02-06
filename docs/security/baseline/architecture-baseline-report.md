@@ -76,24 +76,24 @@ ChatFlect possesses a strong cryptographic foundation but suffers from significa
 
 ## 7. Crypto Assets & Secrets (STORY-1.2)
 
-A formal inventory of the system's cryptographic primitives and assets:
+A formal, high-fidelity inventory of the system's cryptographic primitives and assets, refined to meet P0 requirements:
 
 ### Cryptographic Assets
 - **Asset Inventory**: [crypto-assets-inventory.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-assets-inventory.md)
-    - Lists RSA-2048 identity keys, AES-256 session keys, and HMAC-256 integrity keys.
+    - Comprehensive catalog of Identity, Device, Session, Handshake, and Storage keys.
 - **Storage Map**: [crypto-storage-map.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-storage-map.md)
-    - Maps assets to Keychain/Keystore and encrypted `localStorage` fallbacks.
+    - Detailed matrix mapping assets to physical storage (Keychain, Keystore, SQLite, etc.) with risk ratings.
 - **Key Lifecycle**: [key-lifecycle-matrix.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/key-lifecycle-matrix.md)
-    - Defines generation, rotation, and revocation triggers.
+    - Operational lifecycle definition including generation, rotation, and revocation triggers.
 
 ### Protocols & Schemas
 - **Envelope Spec**: [crypto-envelope-spec.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-envelope-spec.md)
-    - Details the `v1` (Hybrid) and `v2` (Ratchet) JSON delivery formats.
+    - JSON schemas for `v1` (Hybrid), `v2` (Ratchet), and `v16.0` (Integrity) delivery envelopes.
 - **Algorithm Register**: [crypto-algorithm-register.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-algorithm-register.md)
-    - Confirms usage of SHA-256 for hashes, AES-GCM for symmetric, and RSA-OAEP for asymmetric operations.
+    - Definitive list of primitives (RSA-OAEP, AES-GCM, PBKDF2) and implementation parameters.
 
-### Attack Surface Review
-- **Crypto Attack Surface**: [crypto-attack-surface-notes.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-attack-surface-notes.md)
-    - Identifies Backup Exposure (Risk H2) and Key Injection (Risk E1) as primary crypto failure vectors.
+### Identity & Access
 - **Token Inventory**: [token-inventory.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/token-inventory.md)
-    - Catalogs PHP JWTs and Firebase ID tokens.
+    - Catalog of PHP JWTs, Refresh Tokens, Firebase ID tokens, and FCM tokens.
+- **Crypto Attack Surface**: [crypto-attack-surface-notes.md](file:///d:/Mubarak/SnapFlectMobileWebApp/ChatFlect/ChatFlect/docs/security/baseline/crypto-attack-surface-notes.md)
+    - Identification of critical crypto-relevant attack vectors (Backup Exposure, Key Injection).
