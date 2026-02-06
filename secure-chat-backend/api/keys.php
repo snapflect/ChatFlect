@@ -1,16 +1,23 @@
 <?php
 require_once 'db.php';
-require_once 'rate_limiter.php';
+require_once 'audit_log.php';
+require_once 'auth_middleware.php';
+
 enforceRateLimit();
 header('Content-Type: application/json; charset=utf-8');
 
-// Headers handled by db.php
+// SECURITY FIX (E1): Enforce authentication for key operations
+// This prevents anonymous enumeration of user keys
+$authUserId = requireAuth();
 
 // GET { user_id } -> Return Public Key
 // GET { phone_number } -> Return Public Key (for contacts)
 
 if (isset($_GET['user_id'])) {
     $uid = trim(strtoupper($_GET['user_id'])); // v16.0 Zero-Trust Normalization
+
+    // Audit log for key access
+    auditLog('KEY_FETCH', $authUserId, ['target_user' => $uid]);
 
     // 1. Try fetching device keys
     $stmt = $conn->prepare("SELECT device_uuid, public_key FROM user_devices WHERE user_id = ?");

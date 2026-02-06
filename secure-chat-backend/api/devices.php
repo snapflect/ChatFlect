@@ -2,11 +2,16 @@
 require 'db.php';
 require_once 'rate_limiter.php';
 require_once 'audit_log.php';
+require_once 'auth_middleware.php';
 
 // Enforce rate limiting
 enforceRateLimit();
 
 header('Content-Type: application/json');
+
+// SECURITY FIX (J4): Enforce authentication for all operations
+// This prevents unauthenticated device registration attacks
+$authUserId = requireAuth();
 
 // --- 1. Database Schema Check/Create (One-time or idempotent) ---
 // In production, this should be a migration script.
@@ -62,6 +67,20 @@ if ($method === 'POST') {
         if (!$userId || !$deviceUuid || !$publicKey) {
             http_response_code(400);
             echo json_encode(["error" => "Missing fields"]);
+            exit;
+        }
+
+        // SECURITY FIX (J4): Validate user_id matches authenticated user
+        if (strtoupper($userId) !== strtoupper($authUserId)) {
+            auditLog('DEVICE_REGISTER_FORBIDDEN', $authUserId, [
+                'attempted_user_id' => $userId,
+                'reason' => 'user_mismatch'
+            ]);
+            http_response_code(403);
+            echo json_encode([
+                "error" => "Forbidden - Cannot register devices for other users",
+                "auth_user" => $authUserId
+            ]);
             exit;
         }
 
@@ -146,10 +165,17 @@ if ($method === 'POST') {
 
     // LIST DEVICES
     if ($action === 'list') {
-        $userId = isset($_GET['user_id']) ? trim(strtoupper($_GET['user_id'])) : ''; // v16.0 Zero-Trust Normalization
+        $userId = isset($_GET['user_id']) ? trim(strtoupper($_GET['user_id'])) : '';
         if (!$userId) {
             http_response_code(400);
             echo json_encode(["error" => "User ID required"]);
+            exit;
+        }
+
+        // SECURITY FIX (J4): Validate user can only list their own devices
+        if (strtoupper($userId) !== strtoupper($authUserId)) {
+            http_response_code(403);
+            echo json_encode(["error" => "Forbidden - Cannot list devices for other users"]);
             exit;
         }
 
@@ -170,12 +196,23 @@ if ($method === 'POST') {
 
     // REVOKE DEVICE
     $data = json_decode(file_get_contents("php://input"), true);
-    $userId = isset($data['user_id']) ? trim(strtoupper($data['user_id'])) : ''; // v16.0 Zero-Trust Normalization
+    $userId = isset($data['user_id']) ? trim(strtoupper($data['user_id'])) : '';
     $deviceUuid = $data['device_uuid'] ?? '';
 
     if (!$userId || !$deviceUuid) {
         http_response_code(400);
         echo json_encode(["error" => "User ID and Device UUID required"]);
+        exit;
+    }
+
+    // SECURITY FIX (J4): Validate user can only revoke their own devices
+    if (strtoupper($userId) !== strtoupper($authUserId)) {
+        auditLog('DEVICE_REVOKE_FORBIDDEN', $authUserId, [
+            'attempted_user_id' => $userId,
+            'device_uuid' => $deviceUuid
+        ]);
+        http_response_code(403);
+        echo json_encode(["error" => "Forbidden - Cannot revoke devices for other users"]);
         exit;
     }
 

@@ -3,13 +3,15 @@
 // Fixes: P21, P22, P23, P24, P25
 
 require_once 'rate_limiter.php';
+require_once 'audit_log.php';
+require_once 'auth_middleware.php';
+
 // Enforce Rate Limit (DoS Protection)
 enforceRateLimit();
 
-// Headers handled by .htaccess/server config
-// header("Access-Control-Allow-Origin: *");
-// header("Access-Control-Allow-Methods: POST, OPTIONS");
-// header("Access-Control-Allow-Headers: Content-Type, Authorization, X-User-ID");
+// SECURITY FIX (J6): Enforce authentication for file uploads
+$authUserId = requireAuth();
+
 header("Content-Type: application/json; charset=utf-8");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
