@@ -41,24 +41,73 @@ if ($deviceResult->num_rows === 0 || $deviceResult->fetch_assoc()['status'] !== 
 }
 $stmtDevice->close();
 
-// 2. Parse Input
+// 2. Parse Input (Wait, we need to check DB state for ETag FIRST? No, ETag depends on RESULT usually, OR on server state).
+// Efficient ETag: We need to know the 'latest' state without fetching everything.
+// Ideal: Client sends 'If-None-Match: "md5_hash_of_last_state"'.
+// Server checks current max(server_seq) and max(receipt_id) for this chat/user.
+
 $sinceSeq = isset($_GET['since_seq']) ? (int) $_GET['since_seq'] : 0;
 // Epic 21: Receipts Cursor
 $sinceReceiptId = isset($_GET['since_receipt_id']) ? (int) $_GET['since_receipt_id'] : 0;
 $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : 100;
 $limit = min($limit, 1000); // More generous limit for sync
 
-// 3. Fetch Messages
-// Query: Select messages for chats the user is participating in.
-// We join chat_participants to valid chats.
-$sqlMessages = "
-    SELECT m.chat_id, m.server_seq, m.sender_id, m.message_uuid, m.encrypted_payload, m.created_at, m.server_received_at 
-    FROM messages m
-    JOIN chat_participants cp ON m.chat_id = cp.chat_id
-    WHERE cp.user_id = ? AND m.server_seq > ?
-    ORDER BY m.server_seq ASC 
-    LIMIT ?
+// Optimization (Epic 22): ETag Check
+// We need cheap query to get max seqs.
+// Query: MAX(server_seq) from messages, MAX(receipt_id) from receipts for this user.
+// This might be expensive if many rows, BUT with indexes (chat_id, server_seq) and (chat_id, receipt_id) it's instant.
+// Actually, we pull for ALL chats user is in. That's harder to ETag globally cheaply without a "UserSyncState" table.
+// Fallback: We fetch the data, compute hash, THEN send 304 if matches? 
+// That saves bandwidth but not DB load.
+// Better: Return 304 if `since_seq == max_seq`? No, new messages might arrive.
+
+// Let's implement the "Active" ETag: Fetch, Compute, Return 304 if matches.
+// This is standard for "bandwidth saving".
+// To save DB load, we'd need a separate "UserVer" tracking table updated on every message insert.
+// For now, we save Bandwidth (Payload KB cost).
+
+// WAIT: The previous plan said: "Hash: md5(chat_id . last_server_seq . last_receipt_id)".
+// This implies ETag is per-chat request?
+// pull.php seems to filter by User ID (All chats).
+// If `pull.php` is global, we need a global state hash.
+// Let's stick to "Fetch -> Compute ETag -> Output".
+// If client sent If-None-Match and it matches our computed hash, we clear body and send 304.
+// But wait, if we already fetched, we paid the DB cost.
+// To save DB cost, we need to query ONLY the MAX seqs first.
+
+// Optimized Logic:
+// 1. Get MAX(server_seq) and MAX(receipt_id) for User's chats. (Aggregated?)
+//   - SELECT MAX(m.server_seq) ... JOIN chat_participants ...
+//   - SELECT MAX(r.receipt_id) ...
+// 2. Hash = md5($maxSeq . '-' . $maxReceiptId);
+// 3. If match -> 304.
+// 4. Else -> Fetch full data.
+
+// Let's implement this optimized check.
+$sqlCheck = "
+    SELECT 
+        (SELECT MAX(m.server_seq) FROM messages m JOIN chat_participants cp ON m.chat_id = cp.chat_id WHERE cp.user_id = ?) as max_msg_seq,
+        (SELECT MAX(r.receipt_id) FROM receipts r JOIN chat_participants cp ON r.chat_id = cp.chat_id WHERE cp.user_id = ?) as max_receipt_id
 ";
+$stmtC = $conn->prepare($sqlCheck);
+$stmtC->bind_param("ss", $userId, $userId);
+$stmtC->execute();
+$checkRes = $stmtC->get_result()->fetch_assoc();
+$globalMaxSeq = $checkRes['max_msg_seq'] ?? 0;
+$globalMaxReceipt = $checkRes['max_receipt_id'] ?? 0;
+$stmtC->close();
+
+$etag = '"' . md5($userId . '-' . $globalMaxSeq . '-' . $globalMaxReceipt) . '"';
+
+if (isset($_SERVER['HTTP_IF_NONE_MATCH']) && trim($_SERVER['HTTP_IF_NONE_MATCH']) === $etag) {
+    header('HTTP/1.1 304 Not Modified');
+    header('ETag: ' . $etag);
+    exit;
+}
+header('ETag: ' . $etag);
+
+// 3. Fetch Messages
+// ... (Proceed to fetch)
 
 $stmt = $conn->prepare($sqlMessages);
 if (!$stmt) {
