@@ -1,0 +1,43 @@
+name: Reliability Tests
+
+on:
+    pull_request:
+        branches: [main]
+        paths:
+            - "secure-chat-app/**"
+            - "secure-chat-backend/**"
+            - "crypto-tests/**"
+
+jobs:
+    reliability:
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v2
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v2
+              with:
+                  node-version: "18"
+
+            - name: Install Dependencies
+              run: |
+                  cd crypto-tests
+                  npm install
+
+            - name: Run Chaos Tests (Offline Recovery)
+              run: |
+                  cd crypto-tests
+                  CHAOS_SEED=${{ github.run_id }} npm test reliability/scenarios/offline-recovery.test.ts
+
+            - name: Run Chaos Tests (Protocol Abuse)
+              run: |
+                  cd crypto-tests
+                  CHAOS_SEED=${{ github.run_id }} npm test reliability/scenarios/protocol-abuse.test.ts
+
+            - name: Upload Chaos Logs
+              if: always()
+              uses: actions/upload-artifact@v3
+              with:
+                  name: chaos-logs
+                  path: crypto-tests/chaos-metrics.json
