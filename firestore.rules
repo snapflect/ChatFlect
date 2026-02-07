@@ -23,7 +23,7 @@ service cloud.firestore {
     }
 
     // STRICT: Check if device is active (not revoked)
-    // Requires device_uuid in custom claims OR device registry doc
+    // Requires device_uuid in custom claims
     function isDeviceActive() {
       let deviceUuid = request.auth.token.device_uuid;
       let uid = request.auth.uid;
@@ -32,22 +32,25 @@ service cloud.firestore {
              && get(/databases/$(database)/documents/device_registry/$(uid)/devices/$(deviceUuid)).data.status == 'active';
     }
 
+    // Combined check: authenticated + active device
+    function isActiveUser() {
+      return isAuthenticated() && isDeviceActive();
+    }
+
     // ===========================================
     // CHATS COLLECTION (Metadata)
     // ===========================================
     match /chats/{chatId} {
-      // STRICT: Read-only for participants
-      // Only backend (Admin SDK) should write metadata
-      allow read: if isParticipant(chatId);
+      // STRICT: Read-only for participants with active device
+      allow read: if isParticipant(chatId) && isDeviceActive();
       allow write: if false; // Backend only via Admin SDK
 
       // -----------------------------------------
       // MESSAGES SUBCOLLECTION (E2EE payloads)
       // -----------------------------------------
       match /messages/{msgId} {
-        // STRICT: Participants can read
-        // STRICT: Only backend writes (via send_message.php with Admin SDK)
-        allow read: if isParticipant(chatId);
+        // STRICT: Participants with active device can read
+        allow read: if isParticipant(chatId) && isDeviceActive();
         allow create, update, delete: if false; // Backend Admin SDK only
       }
 
@@ -55,12 +58,14 @@ service cloud.firestore {
       // LIVE LOCATIONS SUBCOLLECTION
       // -----------------------------------------
       match /locations/{locId} {
-        // Participants can read
-        // Only owner can write their own location
-        allow read: if isParticipant(chatId);
-        allow create: if isParticipant(chatId)
+        // Participants with active device can read
+        allow read: if isParticipant(chatId) && isDeviceActive();
+        // Only owner with active device can create their own location
+        allow create: if isParticipant(chatId) && isDeviceActive()
                       && request.resource.data.userId == request.auth.uid;
-        allow update, delete: if resource.data.userId == request.auth.uid;
+        // STRICT FIX: Update/delete requires participant check
+        allow update, delete: if isParticipant(chatId) && isDeviceActive()
+                              && resource.data.userId == request.auth.uid;
       }
     }
 
@@ -68,19 +73,20 @@ service cloud.firestore {
     // USERS COLLECTION (Profile & Contacts)
     // ===========================================
     match /users/{uid} {
-      allow read, write: if isOwner(uid);
+      // STRICT: Owner + active device
+      allow read, write: if isOwner(uid) && isDeviceActive();
 
       match /contacts/{contactId} {
-        allow read, write: if isOwner(uid);
+        allow read, write: if isOwner(uid) && isDeviceActive();
       }
 
       match /blocked/{blockedId} {
-        allow read, write: if isOwner(uid);
+        allow read, write: if isOwner(uid) && isDeviceActive();
       }
 
       // Per-user sync requests (internal device signaling)
       match /sync_requests/{reqId} {
-        allow read, write: if isOwner(uid);
+        allow read, write: if isOwner(uid) && isDeviceActive();
       }
     }
 
@@ -88,12 +94,12 @@ service cloud.firestore {
     // SYNC REQUESTS (CRITICAL: Key Handover)
     // ===========================================
     match /sync_requests/{sessionId} {
-      // Any authenticated user can create (requester)
-      allow create: if isAuthenticated();
-      // Only target user can read and cleanup
-      allow read: if isAuthenticated()
+      // Any authenticated user with active device can create (requester)
+      allow create: if isActiveUser();
+      // Only target user with active device can read and cleanup
+      allow read: if isActiveUser()
                   && resource.data.targetUserId == request.auth.uid;
-      allow update, delete: if isAuthenticated()
+      allow update, delete: if isActiveUser()
                             && resource.data.targetUserId == request.auth.uid;
     }
 
@@ -101,17 +107,17 @@ service cloud.firestore {
     // PRESENCE STATUS
     // ===========================================
     match /status/{userId} {
-      // Owner can write their status
-      allow write: if isOwner(userId);
-      // All authenticated users can read (for presence UI)
-      allow read: if isAuthenticated();
+      // Owner with active device can write their status
+      allow write: if isOwner(userId) && isDeviceActive();
+      // All authenticated users with active device can read (for presence UI)
+      allow read: if isActiveUser();
     }
 
     // ===========================================
     // DEVICE REGISTRY (Epic 7 - Revocation Enforcement)
     // ===========================================
     match /device_registry/{uid} {
-      // Read-only for owner (to check own devices)
+      // Read-only for owner (device check exempted here to allow bootstrap)
       allow read: if isOwner(uid);
       allow write: if false; // Backend Admin SDK only
 
@@ -125,8 +131,8 @@ service cloud.firestore {
     // LOCATION AUDIT TRAIL
     // ===========================================
     match /location_audit/{auditId} {
-      // Anyone can create audit entry
-      allow create: if isAuthenticated();
+      // Anyone with active device can create audit entry
+      allow create: if isActiveUser();
       // No client reads (Admin SDK only for auditing)
       allow read, update, delete: if false;
     }

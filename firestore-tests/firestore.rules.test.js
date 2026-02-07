@@ -22,8 +22,20 @@ const USER_A = "user_a";
 const USER_B = "user_b";
 const USER_C = "user_c";
 
+// Device UUIDs
+const DEVICE_A_ACTIVE = "device_a_active";
+const DEVICE_A_REVOKED = "device_a_revoked";
+const DEVICE_B_ACTIVE = "device_b_active";
+
 // Test chat (participants: A and B)
 const CHAT_AB = "chat_a_b";
+
+// Helper: Create context with device_uuid custom claim
+function userWithDevice(userId, deviceUuid) {
+    return testEnv.authenticatedContext(userId, {
+        device_uuid: deviceUuid,
+    });
+}
 
 describe("Firestore Security Rules", () => {
     before(async () => {
@@ -63,8 +75,21 @@ describe("Firestore Security Rules", () => {
                 payload: "encrypted_key",
             });
 
-            // Create device registry for User A
-            await db.doc(`device_registry/${USER_A}/devices/device1`).set({
+            // Create device registry for User A - ACTIVE device
+            await db.doc(`device_registry/${USER_A}/devices/${DEVICE_A_ACTIVE}`).set({
+                status: "active",
+                createdAt: new Date(),
+            });
+
+            // Create device registry for User A - REVOKED device
+            await db.doc(`device_registry/${USER_A}/devices/${DEVICE_A_REVOKED}`).set({
+                status: "revoked",
+                createdAt: new Date(),
+                revokedAt: new Date(),
+            });
+
+            // Create device registry for User B - ACTIVE device
+            await db.doc(`device_registry/${USER_B}/devices/${DEVICE_B_ACTIVE}`).set({
                 status: "active",
                 createdAt: new Date(),
             });
@@ -84,8 +109,8 @@ describe("Firestore Security Rules", () => {
             await assertFails(db.collection(`chats/${CHAT_AB}/messages`).get());
         });
 
-        it("should ALLOW reading messages for participant (User A)", async () => {
-            const db = testEnv.authenticatedContext(USER_A).firestore();
+        it("should ALLOW reading messages for participant with active device (User A)", async () => {
+            const db = userWithDevice(USER_A, DEVICE_A_ACTIVE).firestore();
             await assertSucceeds(db.collection(`chats/${CHAT_AB}/messages`).get());
         });
     });
@@ -95,12 +120,12 @@ describe("Firestore Security Rules", () => {
     // ==================================
     describe("TC-I-02: Sync Request Interception", () => {
         it("should DENY reading sync request for wrong user (User B)", async () => {
-            const db = testEnv.authenticatedContext(USER_B).firestore();
+            const db = userWithDevice(USER_B, DEVICE_B_ACTIVE).firestore();
             await assertFails(db.doc("sync_requests/session123").get());
         });
 
-        it("should ALLOW reading sync request for target user (User A)", async () => {
-            const db = testEnv.authenticatedContext(USER_A).firestore();
+        it("should ALLOW reading sync request for target user with active device (User A)", async () => {
+            const db = userWithDevice(USER_A, DEVICE_A_ACTIVE).firestore();
             await assertSucceeds(db.doc("sync_requests/session123").get());
         });
     });
@@ -114,8 +139,8 @@ describe("Firestore Security Rules", () => {
             await assertFails(db.doc(`chats/${CHAT_AB}`).get());
         });
 
-        it("should ALLOW reading chat metadata for participant (User A)", async () => {
-            const db = testEnv.authenticatedContext(USER_A).firestore();
+        it("should ALLOW reading chat metadata for participant with active device (User A)", async () => {
+            const db = userWithDevice(USER_A, DEVICE_A_ACTIVE).firestore();
             await assertSucceeds(db.doc(`chats/${CHAT_AB}`).get());
         });
     });
@@ -136,7 +161,7 @@ describe("Firestore Security Rules", () => {
 
         // STRICT: Even participants cannot write messages (backend only)
         it("should DENY writing message even as participant (User A) - backend only", async () => {
-            const db = testEnv.authenticatedContext(USER_A).firestore();
+            const db = userWithDevice(USER_A, DEVICE_A_ACTIVE).firestore();
             await assertFails(
                 db.collection(`chats/${CHAT_AB}/messages`).add({
                     senderId: USER_A,
@@ -151,7 +176,7 @@ describe("Firestore Security Rules", () => {
     // ==================================
     describe("TC-I-05: Chat Metadata Write Block", () => {
         it("should DENY participant modifying chat metadata", async () => {
-            const db = testEnv.authenticatedContext(USER_A).firestore();
+            const db = userWithDevice(USER_A, DEVICE_A_ACTIVE).firestore();
             await assertFails(
                 db.doc(`chats/${CHAT_AB}`).update({ lastMessage: "overwritten" })
             );
@@ -172,7 +197,7 @@ describe("Firestore Security Rules", () => {
     // ==================================
     describe("TC-I-06: Device Registry Protection", () => {
         it("should DENY writing to device registry (client)", async () => {
-            const db = testEnv.authenticatedContext(USER_A).firestore();
+            const db = userWithDevice(USER_A, DEVICE_A_ACTIVE).firestore();
             await assertFails(
                 db.doc(`device_registry/${USER_A}/devices/device2`).set({
                     status: "active",
@@ -183,14 +208,14 @@ describe("Firestore Security Rules", () => {
         it("should ALLOW reading own device registry", async () => {
             const db = testEnv.authenticatedContext(USER_A).firestore();
             await assertSucceeds(
-                db.doc(`device_registry/${USER_A}/devices/device1`).get()
+                db.doc(`device_registry/${USER_A}/devices/${DEVICE_A_ACTIVE}`).get()
             );
         });
 
         it("should DENY reading other user's device registry", async () => {
             const db = testEnv.authenticatedContext(USER_B).firestore();
             await assertFails(
-                db.doc(`device_registry/${USER_A}/devices/device1`).get()
+                db.doc(`device_registry/${USER_A}/devices/${DEVICE_A_ACTIVE}`).get()
             );
         });
     });
@@ -206,4 +231,35 @@ describe("Firestore Security Rules", () => {
             await assertFails(db.collection("status").get());
         });
     });
+
+    // ==================================
+    // TC-I-08: Revoked Device Behavior (STRICT)
+    // ==================================
+    describe("TC-I-08: Revoked Device Access Blocked", () => {
+        it("should DENY reading chat for user with REVOKED device", async () => {
+            const db = userWithDevice(USER_A, DEVICE_A_REVOKED).firestore();
+            await assertFails(db.doc(`chats/${CHAT_AB}`).get());
+        });
+
+        it("should DENY reading messages for user with REVOKED device", async () => {
+            const db = userWithDevice(USER_A, DEVICE_A_REVOKED).firestore();
+            await assertFails(db.collection(`chats/${CHAT_AB}/messages`).get());
+        });
+
+        it("should DENY reading sync request for user with REVOKED device", async () => {
+            const db = userWithDevice(USER_A, DEVICE_A_REVOKED).firestore();
+            await assertFails(db.doc("sync_requests/session123").get());
+        });
+
+        it("should DENY reading status for user with REVOKED device", async () => {
+            const db = userWithDevice(USER_A, DEVICE_A_REVOKED).firestore();
+            await assertFails(db.doc(`status/${USER_B}`).get());
+        });
+
+        it("should ALLOW same user with ACTIVE device", async () => {
+            const db = userWithDevice(USER_A, DEVICE_A_ACTIVE).firestore();
+            await assertSucceeds(db.doc(`chats/${CHAT_AB}`).get());
+        });
+    });
 });
+
