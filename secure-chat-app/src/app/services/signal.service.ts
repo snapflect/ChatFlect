@@ -250,22 +250,48 @@ export class SignalService {
             return null;
         }
 
-        // Handle potential different library return types (ArrayBuffer or KeyObject)
-        const myPub = this.arrayBufferToBase64(myIdentity.pubKey);
-        // theirIdentity might be the key itself or contain pubKey property
+        // STRICT FIX: Normalize to Uint8Array regardless of source type
+        const myBytes = this.toUint8Array(myIdentity.pubKey);
         const theirPubRaw = theirIdentity.pubKey || theirIdentity;
-        const theirPub = this.arrayBufferToBase64(theirPubRaw);
+        const theirBytes = this.toUint8Array(theirPubRaw);
 
-        // Deterministic Sorting
-        const sorted = [myPub, theirPub].sort();
-        const input = sorted[0] + sorted[1]; // Concatenate Base64 strings
+        if (!myBytes || !theirBytes) {
+            console.warn('Cannot generate safety number: Invalid key format');
+            return null;
+        }
 
-        // SHA-256 Hash
-        const enc = new TextEncoder();
-        const hash = await window.crypto.subtle.digest('SHA-256', enc.encode(input));
+        // STRICT FIX: Deterministic sorting by raw bytes, not base64
+        // Compare first byte to determine order (consistent on both sides)
+        let combined: Uint8Array;
+        if (myBytes[0] < theirBytes[0]) {
+            combined = new Uint8Array([...myBytes, ...theirBytes]);
+        } else if (myBytes[0] > theirBytes[0]) {
+            combined = new Uint8Array([...theirBytes, ...myBytes]);
+        } else {
+            // First bytes equal, compare lexicographically
+            const myStr = this.arrayBufferToBase64(myBytes.buffer as ArrayBuffer);
+            const theirStr = this.arrayBufferToBase64(theirBytes.buffer as ArrayBuffer);
+            combined = myStr < theirStr
+                ? new Uint8Array([...myBytes, ...theirBytes])
+                : new Uint8Array([...theirBytes, ...myBytes]);
+        }
+
+        // SHA-256 Hash of raw bytes
+        const hash = await window.crypto.subtle.digest('SHA-256', combined.buffer as ArrayBuffer);
 
         // Format as Numeric Groups
         return this.formatSafetyNumber(hash);
+    }
+
+    // STRICT FIX: Normalize any key format to Uint8Array
+    private toUint8Array(data: any): Uint8Array | null {
+        if (!data) return null;
+        if (data instanceof Uint8Array) return data;
+        if (data instanceof ArrayBuffer) return new Uint8Array(data);
+        if (data.buffer && data.buffer instanceof ArrayBuffer) {
+            return new Uint8Array(data.buffer);
+        }
+        return null;
     }
 
     private formatSafetyNumber(buffer: ArrayBuffer): string {

@@ -12,7 +12,8 @@ export class ApiService {
         const options: any = {
             reportProgress: reportProgress,
             observe: reportProgress ? 'events' : 'body',
-            headers: headers
+            headers: headers,
+            withCredentials: true // STRICT FIX: Include auth cookies
         };
 
         return this.http.post(`${environment.apiUrl}/${endpoint}`, data, options);
@@ -20,11 +21,11 @@ export class ApiService {
 
     delete(endpoint: string) {
         const url = `${environment.apiUrl}/${endpoint}`;
-        return this.http.delete(url);
+        return this.http.delete(url, { withCredentials: true }); // STRICT FIX
     }
 
     get(endpoint: string) {
-        return this.http.get(`${environment.apiUrl}/${endpoint}`);
+        return this.http.get(`${environment.apiUrl}/${endpoint}`, { withCredentials: true }); // STRICT FIX
     }
 
     getBlob(url: string, reportProgress: boolean = false, headers?: any) {

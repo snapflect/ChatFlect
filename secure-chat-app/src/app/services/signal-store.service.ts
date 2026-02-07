@@ -37,7 +37,48 @@ export class SignalStoreService implements SignalProtocolStore {
     private identityMismatchSubject = new Subject<IdentityMismatchEvent>();
     public identityMismatch$ = this.identityMismatchSubject.asObservable();
 
-    constructor(private secureStorage: SecureStorageService) { }
+    // STRICT FIX: Prevent repeated alerts for same identifier
+    private mismatchAlreadyAlerted = new Set<string>();
+
+    // STRICT FIX: Track permanently blocked identities
+    private blockedIdentities = new Set<string>();
+
+    constructor(private secureStorage: SecureStorageService) {
+        // Load blocked identities from storage on init
+        this.loadBlockedIdentities();
+    }
+
+    private async loadBlockedIdentities(): Promise<void> {
+        try {
+            const blocked = await get('blocked_identities');
+            if (blocked && Array.isArray(blocked)) {
+                this.blockedIdentities = new Set(blocked);
+            }
+        } catch (e) {
+            console.warn('Could not load blocked identities', e);
+        }
+    }
+
+    async markIdentityBlocked(identifier: string): Promise<void> {
+        this.blockedIdentities.add(identifier);
+        await set('blocked_identities', Array.from(this.blockedIdentities));
+        console.log(`Identity blocked: ${identifier}`);
+    }
+
+    async unblockIdentity(identifier: string): Promise<void> {
+        this.blockedIdentities.delete(identifier);
+        await set('blocked_identities', Array.from(this.blockedIdentities));
+    }
+
+    isIdentityBlocked(identifier: string): boolean {
+        return this.blockedIdentities.has(identifier);
+    }
+
+    // Clear alert lock (call after user makes a decision)
+    clearMismatchAlert(identifier: string): void {
+        this.mismatchAlreadyAlerted.delete(identifier);
+    }
+
 
     private async initEncryption(): Promise<void> {
         if (this.encryptionKey) return;
@@ -149,6 +190,12 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async isTrustedIdentity(identifier: string, identityKey: any, direction: any): Promise<boolean> {
+        // STRICT FIX: If identity is permanently blocked, reject immediately
+        if (this.blockedIdentities.has(identifier)) {
+            console.warn(`Blocked identity attempt from ${identifier}`);
+            return false;
+        }
+
         const existing = await get(`identityKey_${identifier}`);
         if (!existing) {
             // TOFU: Trust On First Use
@@ -164,12 +211,16 @@ export class SignalStoreService implements SignalProtocolStore {
 
         if (!this.isArrayBufferEqual(existingPub, newPub)) {
             console.warn(`SECURITY WARNING: Identity Key changed for ${identifier}.`);
-            // Story 6.2: Emit event for UI to handle
-            this.identityMismatchSubject.next({
-                identifier: identifier,
-                newKey: identityKey,
-                existingKey: storedKey
-            });
+
+            // STRICT FIX: Emit event only once per identifier
+            if (!this.mismatchAlreadyAlerted.has(identifier)) {
+                this.mismatchAlreadyAlerted.add(identifier);
+                this.identityMismatchSubject.next({
+                    identifier: identifier,
+                    newKey: identityKey,
+                    existingKey: storedKey
+                });
+            }
             return false;
         }
 

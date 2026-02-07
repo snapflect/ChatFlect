@@ -14,50 +14,8 @@ header('Content-Type: application/json');
 // This prevents unauthenticated device registration attacks
 $authUserId = requireAuth();
 
-// --- 1. Database Schema Check/Create (One-time or idempotent) ---
-// In production, this should be a migration script.
-$createTableQuery = "CREATE TABLE IF NOT EXISTS user_devices (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id VARCHAR(50) NOT NULL,
-    device_uuid VARCHAR(64) NOT NULL,
-    public_key TEXT NOT NULL,
-    fcm_token TEXT,
-    device_name VARCHAR(100) DEFAULT 'Unknown Device',
-    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    signature TEXT,
-    bundle_version INT DEFAULT 1,
-    UNIQUE KEY unique_device (user_id, device_uuid),
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
-)";
-$conn->query($createTableQuery);
-
-// Migration: Ensure fcm_token, device_name, signature, bundle_version, libsignal_device_id exist
-// Using try-catch with error suppression for "duplicate column" scenarios
-$migrations = [
-    "ALTER TABLE user_devices ADD COLUMN fcm_token TEXT",
-    "ALTER TABLE user_devices ADD COLUMN device_name VARCHAR(100) DEFAULT 'Unknown Device'",
-    "ALTER TABLE user_devices ADD COLUMN signature TEXT",
-    "ALTER TABLE user_devices ADD COLUMN bundle_version INT DEFAULT 1",
-    "ALTER TABLE user_devices ADD COLUMN signed_at VARCHAR(40)",
-    "ALTER TABLE user_devices ADD COLUMN libsignal_device_id INT DEFAULT 1", // Standard Signal Device ID
-    // Story 3.1: Key Versioning
-    "ALTER TABLE user_devices ADD COLUMN key_version INT NOT NULL DEFAULT 1",
-    "ALTER TABLE user_devices ADD COLUMN rotated_at TIMESTAMP NULL DEFAULT NULL"
-];
-
-foreach ($migrations as $sql) {
-    try {
-        if (!$conn->query($sql)) {
-            // Check if error is NOT "Duplicate column" (Code 1060)
-            if ($conn->errno !== 1060) {
-                error_log("Migration failed: " . $conn->error);
-            }
-        }
-    } catch (Exception $e) {
-        // Find safe way to ignore
-    }
-}
+// STRICT FIX: Schema should be managed via migrations only.
+// See: secure-chat-backend/migrations/
 
 
 $method = $_SERVER['REQUEST_METHOD'];

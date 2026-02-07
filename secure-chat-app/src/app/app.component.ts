@@ -114,12 +114,14 @@ export class AppComponent implements OnInit {
       cssClass: 'security-alert',
       buttons: [
         {
-          text: 'Block (Cancel)',
+          text: 'Block Permanently',
           role: 'cancel',
           cssClass: 'danger',
-          handler: () => {
-            console.log('User denied trust for', event.identifier);
-            // Key remains untrusted, future messages will fail
+          handler: async () => {
+            console.log('User blocking identity for', event.identifier);
+            // STRICT FIX: Mark identity as permanently blocked
+            await this.signalStore.markIdentityBlocked(event.identifier);
+            this.signalStore.clearMismatchAlert(event.identifier);
           }
         },
         {
@@ -127,6 +129,7 @@ export class AppComponent implements OnInit {
           handler: async () => {
             console.log('User trusting new key for', event.identifier);
             await this.signalStore.forceTrustIdentity(event.identifier, event.newKey);
+            this.signalStore.clearMismatchAlert(event.identifier);
           }
         }
       ]
