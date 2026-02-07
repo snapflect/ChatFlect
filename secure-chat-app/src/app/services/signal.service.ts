@@ -260,21 +260,11 @@ export class SignalService {
             return null;
         }
 
-        // STRICT FIX: Deterministic sorting by raw bytes, not base64
-        // Compare first byte to determine order (consistent on both sides)
-        let combined: Uint8Array;
-        if (myBytes[0] < theirBytes[0]) {
-            combined = new Uint8Array([...myBytes, ...theirBytes]);
-        } else if (myBytes[0] > theirBytes[0]) {
-            combined = new Uint8Array([...theirBytes, ...myBytes]);
-        } else {
-            // First bytes equal, compare lexicographically
-            const myStr = this.arrayBufferToBase64(myBytes.buffer as ArrayBuffer);
-            const theirStr = this.arrayBufferToBase64(theirBytes.buffer as ArrayBuffer);
-            combined = myStr < theirStr
-                ? new Uint8Array([...myBytes, ...theirBytes])
-                : new Uint8Array([...theirBytes, ...myBytes]);
-        }
+        // STRICT FIX: Deterministic ordering via full lexicographic byte comparison
+        const order = this.compareByteArrays(myBytes, theirBytes);
+        const combined = order <= 0
+            ? new Uint8Array([...myBytes, ...theirBytes])
+            : new Uint8Array([...theirBytes, ...myBytes]);
 
         // SHA-256 Hash of raw bytes
         const hash = await window.crypto.subtle.digest('SHA-256', combined.buffer as ArrayBuffer);
@@ -292,6 +282,17 @@ export class SignalService {
             return new Uint8Array(data.buffer);
         }
         return null;
+    }
+
+    // STRICT FIX: Full lexicographic byte array comparison
+    private compareByteArrays(a: Uint8Array, b: Uint8Array): number {
+        const minLen = Math.min(a.length, b.length);
+        for (let i = 0; i < minLen; i++) {
+            if (a[i] < b[i]) return -1;
+            if (a[i] > b[i]) return 1;
+        }
+        // All bytes equal up to minLen, shorter array comes first
+        return a.length - b.length;
     }
 
     private formatSafetyNumber(buffer: ArrayBuffer): string {
