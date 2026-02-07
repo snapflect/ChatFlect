@@ -46,7 +46,47 @@ if (!$chatId) {
     exit;
 }
 
-// 3. TIMESTAMP VALIDATION (Anti-Tamper / Skew Check)
+// 3. MESSAGE UUID VALIDATION (Epic 12: Idempotency)
+// Client MUST provide a valid UUIDv7
+$messageUuid = $input['message_uuid'] ?? null;
+
+if (!$messageUuid) {
+    http_response_code(400);
+    echo json_encode(["error" => "MISSING_MESSAGE_UUID", "message" => "Client must provide message_uuid"]);
+    exit;
+}
+
+// Validate UUIDv7 format: version 7, variant 10
+if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i', $messageUuid)) {
+    http_response_code(400);
+    echo json_encode(["error" => "INVALID_UUID_FORMAT", "message" => "message_uuid must be UUIDv7"]);
+    exit;
+}
+
+// 3.1 IDEMPOTENCY CHECK - Return existing message if duplicate
+$stmtIdem = $conn->prepare("SELECT message_uuid, created_at FROM message_idempotency WHERE message_uuid = ?");
+$stmtIdem->bind_param("s", $messageUuid);
+$stmtIdem->execute();
+$resIdem = $stmtIdem->get_result();
+
+if ($resIdem->num_rows > 0) {
+    // Duplicate detected - return success with existing data (idempotent)
+    $existingRow = $resIdem->fetch_assoc();
+    $stmtIdem->close();
+
+    http_response_code(200);
+    echo json_encode([
+        "status" => "success",
+        "id" => $msgId,
+        "message_uuid" => $messageUuid,
+        "duplicate" => true,
+        "original_created_at" => $existingRow['created_at']
+    ]);
+    exit;
+}
+$stmtIdem->close();
+
+// 4. TIMESTAMP VALIDATION (Anti-Tamper / Skew Check)
 $serverTime = round(microtime(true) * 1000);
 $skewLimit = 5 * 60 * 1000; // 5 Minutes
 if (abs($serverTime - $timestamp) > $skewLimit) {
@@ -267,9 +307,19 @@ curl_setopt($chM, CURLOPT_RETURNTRANSFER, true);
 $resM = curl_exec($chM);
 curl_close($chM);
 
-// STRICT FIX: Single JSON Response
+// 8. PERSIST IDEMPOTENCY RECORD (Epic 12)
+// This ensures future duplicate sends return the same response
+$receiverUid = $input['receiverUserId'] ?? $input['pid'] ?? 'unknown';
+$stmtIdemIns = $conn->prepare("INSERT IGNORE INTO message_idempotency (message_uuid, sender_uid, receiver_uid, chat_id, processed_at) VALUES (?, ?, ?, ?, NOW())");
+$stmtIdemIns->bind_param("ssss", $messageUuid, $userId, $receiverUid, $chatId);
+$stmtIdemIns->execute();
+$stmtIdemIns->close();
+
+// STRICT FIX: Single JSON Response with message_uuid
 echo json_encode([
     "status" => "success",
     "id" => $msgId,
+    "message_uuid" => $messageUuid,
+    "duplicate" => false,
     "firestore_result" => json_decode($fsResult)
 ]);
