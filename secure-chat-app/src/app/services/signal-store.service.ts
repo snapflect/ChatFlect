@@ -1,6 +1,13 @@
 import { Injectable } from '@angular/core';
 import { get, set, del, keys, clear } from 'idb-keyval';
 import { SecureStorageService } from './secure-storage.service';
+import { Subject } from 'rxjs';
+
+export interface IdentityMismatchEvent {
+    identifier: string;
+    newKey: any;
+    existingKey: any;
+}
 
 export interface SignalProtocolStore {
     getIdentityKeyPair(): Promise<any>;
@@ -25,6 +32,10 @@ export class SignalStoreService implements SignalProtocolStore {
     private encryptionKey: CryptoKey | null = null;
     private readonly IV_LENGTH = 12;
     private initPromise: Promise<void> | null = null;
+
+    // Story 6.2: Identity Mismatch Observable
+    private identityMismatchSubject = new Subject<IdentityMismatchEvent>();
+    public identityMismatch$ = this.identityMismatchSubject.asObservable();
 
     constructor(private secureStorage: SecureStorageService) { }
 
@@ -140,6 +151,7 @@ export class SignalStoreService implements SignalProtocolStore {
     async isTrustedIdentity(identifier: string, identityKey: any, direction: any): Promise<boolean> {
         const existing = await get(`identityKey_${identifier}`);
         if (!existing) {
+            // TOFU: Trust On First Use
             await this.saveIdentity(identifier, identityKey);
             return true;
         }
@@ -151,11 +163,23 @@ export class SignalStoreService implements SignalProtocolStore {
         const newPub = identityKey.pubKey || identityKey;
 
         if (!this.isArrayBufferEqual(existingPub, newPub)) {
-            console.warn(`SECURITY WARNING: Untrusted Identity Key for ${identifier}. Possible MITM.`);
+            console.warn(`SECURITY WARNING: Identity Key changed for ${identifier}.`);
+            // Story 6.2: Emit event for UI to handle
+            this.identityMismatchSubject.next({
+                identifier: identifier,
+                newKey: identityKey,
+                existingKey: storedKey
+            });
             return false;
         }
 
         return true;
+    }
+
+    // Story 6.2: Force trust a new identity (called after user approval)
+    async forceTrustIdentity(identifier: string, newKey: any): Promise<void> {
+        await this.saveIdentity(identifier, newKey);
+        console.log(`Forced trust for ${identifier}`);
     }
 
     private isArrayBufferEqual(a: ArrayBuffer, b: ArrayBuffer): boolean {

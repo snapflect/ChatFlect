@@ -2,6 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { NavController, AlertController, ToastController } from '@ionic/angular';
 import { ActivatedRoute } from '@angular/router';
 import { ChatService } from 'src/app/services/chat.service';
+import { SignalService } from 'src/app/services/signal.service';
 import { map } from 'rxjs/operators';
 import { Observable } from 'rxjs';
 
@@ -23,9 +24,39 @@ export class ContactInfoPage implements OnInit {
         private route: ActivatedRoute,
         private nav: NavController,
         private chatService: ChatService,
+        private signalService: SignalService, // Injected
         private alertCtrl: AlertController,
         private toastCtrl: ToastController
     ) { }
+
+    // ... (existing ngOnInit/loadUserInfo) ...
+
+    async verifySafetyNumber() {
+        if (!this.userId) return;
+
+        const safetyNumber = await this.signalService.getSafetyNumber(this.userId);
+
+        if (!safetyNumber) {
+            const toast = await this.toastCtrl.create({
+                message: 'Safety number not available (No established session)',
+                duration: 2000
+            });
+            toast.present();
+            return;
+        }
+
+        const alert = await this.alertCtrl.create({
+            header: 'Verify Safety Number',
+            subHeader: this.user?.username || 'User',
+            message: `<div style="text-align: center; font-family: monospace; font-size: 1.2em; letter-spacing: 2px; margin: 10px 0;">${safetyNumber}</div>
+                      <p style="font-size: 0.9em; color: #666;">Compare this number with the one on your contact's device to verify encryption security.</p>`,
+            cssClass: 'safety-number-alert',
+            buttons: ['OK']
+        });
+
+        await alert.present();
+    }
+
 
     ngOnInit() {
         this.route.queryParams.subscribe(params => {

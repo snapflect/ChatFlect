@@ -8,7 +8,9 @@ export interface DeviceInfo {
     last_active: string;
     created_at: string;
     libsignal_device_id: number;
-    status: 'active' | 'pending' | 'revoked'; // v4.1 Schema
+    status: 'active' | 'pending' | 'revoked';
+    revoked_at?: string;
+    signing_public_key?: string; // Epic 5/6 Strict Fingerprint
 }
 
 @Injectable({
@@ -23,10 +25,8 @@ export class DeviceService {
     }
 
     revokeDevice(userId: string, deviceUuid: string): Observable<any> {
-        return this.api.post('v3/revoke_device.php', {
-            user_id: userId, // Optional, depending on strict backend check
-            device_uuid: deviceUuid
-        });
+        // Use DELETE method on devices.php
+        return this.api.delete(`devices.php?user_id=${userId}&device_uuid=${deviceUuid}`);
     }
 
     // Future: Story 4.3 Approve Device

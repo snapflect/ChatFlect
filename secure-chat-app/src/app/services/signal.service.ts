@@ -237,6 +237,59 @@ export class SignalService {
         }
     }
 
+
+
+
+    // --- 6. Trust UX (Epic 6) ---
+    async getSafetyNumber(remoteUserId: string): Promise<string | null> {
+        const myIdentity = await this.store.getIdentityKeyPair();
+        const theirIdentity = await this.store.loadIdentityKey(remoteUserId);
+
+        if (!myIdentity || !theirIdentity) {
+            console.warn('Cannot generate safety number: Missing identity keys');
+            return null;
+        }
+
+        // Handle potential different library return types (ArrayBuffer or KeyObject)
+        const myPub = this.arrayBufferToBase64(myIdentity.pubKey);
+        // theirIdentity might be the key itself or contain pubKey property
+        const theirPubRaw = theirIdentity.pubKey || theirIdentity;
+        const theirPub = this.arrayBufferToBase64(theirPubRaw);
+
+        // Deterministic Sorting
+        const sorted = [myPub, theirPub].sort();
+        const input = sorted[0] + sorted[1]; // Concatenate Base64 strings
+
+        // SHA-256 Hash
+        const enc = new TextEncoder();
+        const hash = await window.crypto.subtle.digest('SHA-256', enc.encode(input));
+
+        // Format as Numeric Groups
+        return this.formatSafetyNumber(hash);
+    }
+
+    private formatSafetyNumber(buffer: ArrayBuffer): string {
+        const bytes = new Uint8Array(buffer);
+        // Use first 15 bytes to generate 30 digits (approx)
+        // Simple visualization: specific chunks -> integers
+        // Standard Signal: 30 digits in 6 groups of 5.
+        // We will do a simplified version: taking 5 byte chunks, modulo 100000.
+
+        let codes = [];
+        for (let i = 0; i < 6; i++) { // 6 groups
+            if ((i * 5) + 5 > bytes.length) break;
+            const chunk = bytes.slice(i * 5, i * 5 + 5);
+            // Convert chunk to integer
+            let val = 0;
+            for (let j = 0; j < 5; j++) {
+                val = (val * 256 + chunk[j]) % 100000;
+            }
+            // Pad with leading zeros to 5 digits
+            codes.push(val.toString().padStart(5, '0'));
+        }
+        return codes.join(' ');
+    }
+
     // Helper: Base64 to ArrayBuffer
     private base64ToArrayBuffer(base64: string | undefined | null): ArrayBuffer {
         return this.base64ToArrayBuffer_Safe(base64 || '');

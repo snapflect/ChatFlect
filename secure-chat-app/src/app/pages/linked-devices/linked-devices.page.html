@@ -33,6 +33,10 @@
       <ion-label>
         <h2>{{ device.device_name }}</h2>
         <p>Last active: {{ device.last_active }}</p>
+        <p class="fingerprint-label">
+          <ion-icon name="finger-print-outline" class="fingerprint-icon"></ion-icon>
+          Key ID: {{ getFingerprint(device) }}
+        </p>
         <p *ngIf="device.device_uuid === currentDeviceUuid" class="current-device-label">This Device</p>
         <ion-badge *ngIf="device.status"
           [color]="device.status === 'active' ? 'success' : (device.status === 'revoked' ? 'medium' : 'warning')">

@@ -36,8 +36,8 @@ export class LinkedDevicesPage implements OnInit {
   loadDevices(userId: string) {
     this.isLoading = true;
     this.deviceService.listDevices(userId).subscribe(
-      (data) => {
-        this.devices = data || [];
+      (data: any) => { // Fix: Explicit any cast or align Types
+        this.devices = (data as DeviceInfo[]) || [];
         // Sort: Pending first (Action needed), then Active, then Revoked
         this.devices.sort((a, b) => {
           const score = (status: string) => {
@@ -59,6 +59,15 @@ export class LinkedDevicesPage implements OnInit {
       }
     );
   }
+
+  getFingerprint(device: DeviceInfo): string {
+    if (device.signing_public_key) {
+      // Show last 8 chars of Key Base64
+      return '...' + device.signing_public_key.slice(-8);
+    }
+    return 'Legacy (No Key)';
+  }
+
 
   goBack() {
     this.nav.back();

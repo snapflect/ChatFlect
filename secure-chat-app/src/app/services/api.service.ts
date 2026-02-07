@@ -18,6 +18,11 @@ export class ApiService {
         return this.http.post(`${environment.apiUrl}/${endpoint}`, data, options);
     }
 
+    delete(endpoint: string) {
+        const url = `${environment.apiUrl}/${endpoint}`;
+        return this.http.delete(url);
+    }
+
     get(endpoint: string) {
         return this.http.get(`${environment.apiUrl}/${endpoint}`);
     }

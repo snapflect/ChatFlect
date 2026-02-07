@@ -12,6 +12,7 @@ import { Router } from '@angular/router';
 import { SoundService } from './services/sound.service';
 import { ChatService } from './services/chat.service';
 import { SyncService } from './services/sync.service';
+import { SignalStoreService, IdentityMismatchEvent } from './services/signal-store.service';
 
 @Component({
   selector: 'app-root',
@@ -29,7 +30,8 @@ export class AppComponent implements OnInit {
     private router: Router,
     private soundService: SoundService,
     private chatService: ChatService,
-    private syncService: SyncService // Init Sync Listener
+    private syncService: SyncService,
+    private signalStore: SignalStoreService // Inject for Epic 6
   ) { }
 
   async ngOnInit() {
@@ -60,6 +62,11 @@ export class AppComponent implements OnInit {
       // SoundService checks if user is already in this chat
       // Temporarily disabled to debug crash
       // this.soundService.playMessageSound(msg.chatId);
+    });
+
+    // Story 6.2: Global Identity Mismatch Alert
+    this.signalStore.identityMismatch$.subscribe(event => {
+      this.showIdentityMismatchAlert(event);
     });
 
     App.addListener('appStateChange', async ({ isActive }) => {
@@ -95,6 +102,37 @@ export class AppComponent implements OnInit {
         this.router.navigate(['/group-call']);
       }
     });
+  }
+
+  // Story 6.2: Identity Mismatch Alert Handler
+  private async showIdentityMismatchAlert(event: IdentityMismatchEvent) {
+    const alert = await this.alertCtrl.create({
+      header: 'Security Code Changed',
+      subHeader: `Contact: ${event.identifier}`,
+      message: `The security code for this contact has changed. This could mean they reinstalled the app, or it could indicate a security issue. Do you want to trust this new identity?`,
+      backdropDismiss: false,
+      cssClass: 'security-alert',
+      buttons: [
+        {
+          text: 'Block (Cancel)',
+          role: 'cancel',
+          cssClass: 'danger',
+          handler: () => {
+            console.log('User denied trust for', event.identifier);
+            // Key remains untrusted, future messages will fail
+          }
+        },
+        {
+          text: 'Trust New Key',
+          handler: async () => {
+            console.log('User trusting new key for', event.identifier);
+            await this.signalStore.forceTrustIdentity(event.identifier, event.newKey);
+          }
+        }
+      ]
+    });
+
+    await alert.present();
   }
 
   async performBiometricCheck() {

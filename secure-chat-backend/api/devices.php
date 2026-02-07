@@ -261,7 +261,7 @@ if ($method === 'POST') {
         //     exit;
         // }
 
-        $stmt = $conn->prepare("SELECT device_uuid, device_name, last_active, created_at, libsignal_device_id, status, revoked_at FROM user_devices WHERE user_id = ?");
+        $stmt = $conn->prepare("SELECT device_uuid, device_name, last_active, created_at, libsignal_device_id, status, revoked_at, signing_public_key FROM user_devices WHERE user_id = ?");
         $stmt->bind_param("s", $userId);
         $stmt->execute();
         $result = $stmt->get_result();
@@ -278,8 +278,9 @@ if ($method === 'POST') {
 
     // REVOKE DEVICE
     $data = json_decode(file_get_contents("php://input"), true);
-    $userId = isset($data['user_id']) ? trim(strtoupper($data['user_id'])) : '';
-    $deviceUuid = $data['device_uuid'] ?? '';
+    $userId = $data['user_id'] ?? $_GET['user_id'] ?? '';
+    $deviceUuid = $data['device_uuid'] ?? $_GET['device_uuid'] ?? '';
+    $userId = trim(strtoupper($userId));
 
     if (!$userId || !$deviceUuid) {
         http_response_code(400);
