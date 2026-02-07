@@ -215,6 +215,40 @@ try {
     exit;
 }
 
+// 5.5 SERVER SEQUENCE ASSIGNMENT (Epic 13: Ordering Guarantees)
+// Atomic sequence generation using INSERT ON DUPLICATE KEY UPDATE
+$serverSeq = null;
+$serverReceivedAt = date('Y-m-d H:i:s');
+
+try {
+    // Upsert to get next sequence atomically
+    $seqStmt = $conn->prepare("
+        INSERT INTO chat_sequences (chat_id, last_seq) 
+        VALUES (?, 1)
+        ON DUPLICATE KEY UPDATE last_seq = last_seq + 1
+    ");
+    $seqStmt->bind_param("s", $chatId);
+    $seqStmt->execute();
+    $seqStmt->close();
+
+    // Fetch the assigned sequence
+    $fetchSeq = $conn->prepare("SELECT last_seq FROM chat_sequences WHERE chat_id = ?");
+    $fetchSeq->bind_param("s", $chatId);
+    $fetchSeq->execute();
+    $seqResult = $fetchSeq->get_result();
+    if ($seqResult->num_rows > 0) {
+        $serverSeq = (int) $seqResult->fetch_assoc()['last_seq'];
+    }
+    $fetchSeq->close();
+} catch (Exception $e) {
+    error_log("Sequence generation failed: " . $e->getMessage());
+    // Continue without sequence (fallback to timestamp ordering)
+}
+
+// Add server fields to input for Firestore
+$input['server_seq'] = $serverSeq;
+$input['server_received_at'] = $serverReceivedAt;
+
 // 6. FIRESTORE WRITE (Via REST API)
 $accessToken = getAccessToken('../service-account.json');
 if (is_array($accessToken)) {
