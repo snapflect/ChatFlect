@@ -57,6 +57,9 @@ function handlePostKeys($userId, $conn)
 
     $deviceId = (int) $input['deviceId'];
     $regId = (int) $input['registrationId'];
+    // Story 3.1: Handle Key Version (Default to 1 for Backward Compat)
+    $keyVersion = isset($input['keyVersion']) ? (int) $input['keyVersion'] : 1;
+
     $identityKey = $input['identityKey'];
     $signedPreKey = $input['signedPreKey']; // { keyId, publicKey, signature }
     $otpks = $input['oneTimePreKeys'] ?? []; // Array of { keyId, publicKey }
@@ -73,6 +76,13 @@ function handlePostKeys($userId, $conn)
         if ($devCheck->get_result()->num_rows === 0) {
             throw new Exception("Device Ownership Mismatch. User $userId does not own Device ID $deviceId.");
         }
+
+        // Story 3.1: Sync key_version to user_devices (Ensure consistency)
+        // We only update if the new version is greater or equal? 
+        // For initial upload (register), it matches or sets. 
+        $updDev = $conn->prepare("UPDATE user_devices SET key_version = ?, last_active = NOW() WHERE user_id = ? AND libsignal_device_id = ?");
+        $updDev->bind_param("isi", $keyVersion, $userId, $deviceId);
+        $updDev->execute();
 
         // 2. Identity Key Immutability Check
         // Check if an identity key exists for this user/device

@@ -218,11 +218,21 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async removeAllPreKeys(): Promise<void> {
-        const allKeys = await keys();
-        const preKeys = allKeys.filter(k => String(k).startsWith('preKey_'));
-        for (const k of preKeys) {
-            await del(k);
+        await clear();
+    }
+
+    // --- Story 3.1: Key Versioning Support ---
+    async getLocalKeyVersion(): Promise<number> {
+        try {
+            const v = await get('local_key_version');
+            return v ? Number(v) : 1;
+        } catch (e) {
+            return 1;
         }
+    }
+
+    async setLocalKeyVersion(version: number): Promise<void> {
+        await set('local_key_version', version);
     }
 
     // --- Signed PreKeys ---

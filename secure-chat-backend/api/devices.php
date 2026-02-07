@@ -40,7 +40,10 @@ $migrations = [
     "ALTER TABLE user_devices ADD COLUMN signature TEXT",
     "ALTER TABLE user_devices ADD COLUMN bundle_version INT DEFAULT 1",
     "ALTER TABLE user_devices ADD COLUMN signed_at VARCHAR(40)",
-    "ALTER TABLE user_devices ADD COLUMN libsignal_device_id INT DEFAULT 1" // Standard Signal Device ID
+    "ALTER TABLE user_devices ADD COLUMN libsignal_device_id INT DEFAULT 1", // Standard Signal Device ID
+    // Story 3.1: Key Versioning
+    "ALTER TABLE user_devices ADD COLUMN key_version INT NOT NULL DEFAULT 1",
+    "ALTER TABLE user_devices ADD COLUMN rotated_at TIMESTAMP NULL DEFAULT NULL"
 ];
 
 foreach ($migrations as $sql) {
@@ -157,11 +160,12 @@ if ($method === 'POST') {
             }
         }
 
-        // Determine Signal Device ID (Auto-Increment per User)
+        // Determine Signal Device ID & Key Version
         $sigId = 1;
+        $keyVersion = 1;
 
-        // Check if device already exists to preserve its ID
-        $existingParams = $conn->prepare("SELECT libsignal_device_id FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+        // Check if device already exists to preserve ID and Version
+        $existingParams = $conn->prepare("SELECT libsignal_device_id, key_version FROM user_devices WHERE user_id = ? AND device_uuid = ?");
         $existingParams->bind_param("ss", $userId, $deviceUuid);
         $existingParams->execute();
         $exRes = $existingParams->get_result();
@@ -169,6 +173,7 @@ if ($method === 'POST') {
         if ($exRes->num_rows > 0) {
             $row = $exRes->fetch_assoc();
             $sigId = (int) $row['libsignal_device_id'];
+            $keyVersion = (int) $row['key_version']; // Preserve existing version
         } else {
             // New Device: Find max ID + 1
             $maxStmt = $conn->prepare("SELECT MAX(libsignal_device_id) as max_id FROM user_devices WHERE user_id = ?");
@@ -176,13 +181,14 @@ if ($method === 'POST') {
             $maxStmt->execute();
             $maxRes = $maxStmt->get_result()->fetch_assoc();
             $sigId = ($maxRes['max_id'] ?? 0) + 1;
+            $keyVersion = 1; // Start at v1
             // Cap at 10? Signal allows more, but our logic limits to 5 devices anyway.
         }
 
         // Upsert device
-        // FIX: Store signed_at timestamp and libsignal_device_id
-        $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token, signature, bundle_version, signed_at, libsignal_device_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) 
-                                ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, signature = ?, bundle_version = ?, signed_at = ?, libsignal_device_id = ?, last_active = NOW()");
+        // Story 3.1: Include key_version in INSERT/UPDATE
+        $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token, signature, bundle_version, signed_at, libsignal_device_id, key_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, signature = ?, bundle_version = ?, signed_at = ?, libsignal_device_id = ?, key_version = ?, last_active = NOW()");
 
         if (!$stmt) {
             http_response_code(500);
@@ -191,7 +197,7 @@ if ($method === 'POST') {
         }
 
         $stmt->bind_param(
-            "ssssssisissssisi", // types
+            "ssssssisiiisssisii", // types
             $userId,
             $deviceUuid,
             $publicKey,
@@ -200,7 +206,8 @@ if ($method === 'POST') {
             $signature,
             $bundleVersion,
             $timestamp,
-            $sigId, // new param
+            $sigId,
+            $keyVersion, // new param
 
             $publicKey, // update params
             $deviceName,
@@ -208,12 +215,18 @@ if ($method === 'POST') {
             $signature,
             $bundleVersion,
             $timestamp,
-            $sigId
+            $sigId,
+            $keyVersion
         );
 
         if ($stmt->execute()) {
             auditLog('device_registered', $userId, ['device_uuid' => $deviceUuid]);
-            echo json_encode(["status" => "success", "message" => "Device registered"]);
+            echo json_encode([
+                "status" => "success",
+                "message" => "Device registered",
+                "libsignal_device_id" => $sigId,
+                "key_version" => $keyVersion // Return version
+            ]);
         } else {
             http_response_code(500);
             echo json_encode(["error" => "Failed to register device: " . $stmt->error]);

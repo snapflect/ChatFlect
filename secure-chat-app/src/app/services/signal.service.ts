@@ -47,6 +47,7 @@ export class SignalService {
         }
 
         const deviceId = this.authService.getDeviceId() || 1; // Strict: Get from Auth
+        const keyVersion = 1; // Story 3.1: Initial Version
 
         // 5. Upload to Backend
         const bundle = {
@@ -61,7 +62,8 @@ export class SignalService {
                 keyId: k.keyId,
                 publicKey: this.arrayBufferToBase64(k.keyPair.pubKey)
             })),
-            deviceId: deviceId
+            deviceId: deviceId,
+            keyVersion: keyVersion // Story 3.1
         };
 
         // Authenticated HTTP Upload
@@ -69,6 +71,10 @@ export class SignalService {
             await this.http.post(`${environment.apiUrl}/keys`, bundle, {
                 withCredentials: true
             }).toPromise();
+
+            // Story 3.1: Store initialized version
+            await this.store.setLocalKeyVersion(keyVersion);
+
             console.log('Keys uploaded successfully');
         } catch (e) {
             console.error('Registration failed at backend', e);
