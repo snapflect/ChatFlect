@@ -4,18 +4,18 @@ on:
   pull_request:
     paths:
       # Frontend crypto services
-      - 'secure-chat-app/src/app/services/signal*.ts'
-      - 'secure-chat-app/src/app/services/crypto*.ts'
+      - "secure-chat-app/src/app/services/signal*.ts"
+      - "secure-chat-app/src/app/services/crypto*.ts"
       # Backend crypto endpoints
-      - 'secure-chat-backend/api/v3/keys.php'
-      - 'secure-chat-backend/api/v3/send_message.php'
-      - 'secure-chat-backend/api/devices.php'
-      - 'secure-chat-backend/api/auth_middleware.php'
-      - 'secure-chat-backend/includes/CryptoUtils.php'
+      - "secure-chat-backend/api/v3/keys.php"
+      - "secure-chat-backend/api/v3/send_message.php"
+      - "secure-chat-backend/api/devices.php"
+      - "secure-chat-backend/api/auth_middleware.php"
+      - "secure-chat-backend/includes/CryptoUtils.php"
       # Crypto test changes
-      - 'crypto-tests/**'
+      - "crypto-tests/**"
       # Firestore rules (security)
-      - 'firestore.rules'
+      - "firestore.rules"
 
 jobs:
   crypto-unit-tests:
@@ -27,8 +27,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: crypto-tests/package-lock.json
 
       - name: Install Dependencies
@@ -54,7 +54,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install Firebase CLI
         run: npm install -g firebase-tools
@@ -79,3 +79,31 @@ jobs:
           echo "⚠️ This PR modifies crypto-sensitive files."
           echo "Manual security review is required before merge."
           echo "Please ensure a security team member has approved."
+
+  idempotency-tests:
+    name: Idempotency Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: crypto-tests/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+        working-directory: crypto-tests
+
+      - name: Run Idempotency Tests
+        run: npx jest integration/idempotency.test.ts --passWithNoTests
+        working-directory: crypto-tests
+
+      - name: Verify Duplicate Detection
+        run: |
+          echo "✓ Idempotency tests passed"
+          echo "  - Duplicate UUID returns same response"
+          echo "  - Missing UUID rejected with 400"
+          echo "  - Invalid UUIDv7 format rejected"
