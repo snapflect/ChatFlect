@@ -3,7 +3,13 @@
 require_once '../auth_middleware.php';
 require_once '../db_connect.php';
 
-header("Access-Control-Allow-Origin: *");
+// Allow CORS (Strict for Cookies)
+$allowed = ['http://localhost:8100', 'http://localhost:4200', 'capacitor://localhost', 'http://localhost'];
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (in_array($origin, $allowed)) {
+    header("Access-Control-Allow-Origin: $origin");
+    header("Access-Control-Allow-Credentials: true");
+}
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 

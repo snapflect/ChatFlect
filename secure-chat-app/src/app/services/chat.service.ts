@@ -1,4 +1,6 @@
 import { Injectable, NgZone } from '@angular/core';
+import { SignalService } from './signal.service';
+import { SecureStorageService } from './secure-storage.service'; // Story 2.5 Fix
 import {
     collection,
     addDoc,
@@ -70,7 +72,9 @@ export class ChatService {
         private zone: NgZone,
         private storage: StorageService,
         private presence: PresenceService,
-        private progressService: TransferProgressService
+        private progressService: TransferProgressService,
+        private signalService: SignalService, // Story 2.5
+        private secureStorage: SecureStorageService // Story 2.5 Fix
     ) {
         // db initialized via property assignment
         this.initHistorySyncLogic();
@@ -202,6 +206,8 @@ export class ChatService {
         });
     }
 
+
+
     getSharedMedia(chatId: string): Observable<any[]> {
         // Shared Media must NEVER listen to all messages (memory risk)
         // Production-grade: filter by media types + hard limit
@@ -266,17 +272,21 @@ export class ChatService {
 
     /* -------------------- SECURE DISTRIBUTION -------------------- */
 
-    // --- Unified Secure Distribution (Replaces handleMediaFanout) ---
-    public async distributeSecurePayload(chatId: string, senderId: string, type: string, cipherText: string, ivBase64: string, sessionKey: CryptoKey, metadata: any = {}, replyTo: any = null) {
+    // Unified Distribute for Legacy / Media Fallback
+    private async distributeSecurePayload(chatId: string, senderId: string, type: string, cipherText: string, ivBase64: string, sessionKey: CryptoKey, metadata: any = {}, replyTo: any = null) {
+
+        // Minor Fix: Use Auth Service instead of localStorage
+        const myId = this.auth.getUserId().toUpperCase(); // Story 2.5 Cleanup
+
         try {
             const chatDoc = await this.getChatDoc(chatId);
+            if (!chatDoc.exists()) return;
             const participants = chatDoc.exists() ? (chatDoc.data() as any)['participants'] : [];
             const isGroup = chatDoc.exists() ? (chatDoc.data() as any)['isGroup'] : false;
 
             // 1. Encrypt Session Key for Each Recipient
             const keysMap: any = {};
             const senderIdNorm = String(senderId).trim().toUpperCase();
-            const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
 
             // My Key
             const myPubKey = localStorage.getItem('public_key');
@@ -459,19 +469,115 @@ export class ChatService {
                 }
             });
 
-            // 2. Generate Key & IV
-            const sessionKey = await this.crypto.generateSessionKey();
-            const iv = window.crypto.getRandomValues(new Uint8Array(12));
-            const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
+            // 2. Encryption Strategy (Story 2.5)
+            const chatDoc = await this.getChatDoc(chatId);
+            const isGroup = chatDoc.exists() ? (chatDoc.data() as any).isGroup : false;
+            let participants = chatDoc.exists() ? (chatDoc.data() as any).participants : [];
 
-            // 3. Encrypt Text
-            const cipherText = await this.crypto.encryptPayload(plainText, sessionKey, iv);
+            // Remove self from recipients list for 1:1 check
+            const myId = this.auth.getUserId().toUpperCase();
+            const recipients = participants.filter((p: string) => p.toUpperCase() !== myId);
 
-            // 4. Distribute (with tempId for reconciliation)
-            await this.distributeSecurePayload(chatId, senderId, 'text', cipherText, ivBase64, sessionKey, { tempId }, replyTo);
+            // Strategy: Try Signal for 1:1, use Legacy for Groups
+            let signalSuccess = false;
+
+            if (!isGroup && recipients.length === 1) {
+                try {
+                    const recipientId = recipients[0];
+                    const myDeviceId = Number(this.auth.getDeviceId() || 1);
+
+                    // P0 Fix: Resolve Recipient Device ID (Story 2.5)
+                    const recipientDeviceId = await this.signalService.getPrimaryDeviceId(recipientId);
+
+                    // 1. Encrypt for Receiver
+                    const signalReceiver = await this.signalService.encryptMessage(plainText, recipientId, recipientDeviceId);
+
+                    // 2. Encrypt for Self (Sync)
+                    const signalSender = await this.signalService.encryptMessage(plainText, myId, myDeviceId);
+
+                    // 3. Construct Wrapper
+                    // P1 Fix: Strict Message Type Mapping
+                    const msgType = signalReceiver.type === 3 ? 'PREKEY' : 'WHISPER';
+
+                    const payload: any = {
+                        id: tempId,
+                        type: 'signal', // UI type
+                        messageType: msgType,
+                        protocol: 'v3',
+                        senderUserId: myId,
+                        senderDeviceId: myDeviceId,
+                        receiverUserId: recipientId,
+                        receiverDeviceId: recipientDeviceId,
+                        timestamp: Date.now(),
+
+                        // Dual Ciphertext Storage (Clean Payload)
+                        ciphertext_to_receiver: {
+                            type: signalReceiver.type,
+                            body: signalReceiver.body,
+                            registrationId: signalReceiver.registrationId
+                        },
+                        ciphertext_to_sender: {
+                            type: signalSender.type,
+                            body: signalSender.body,
+                            registrationId: signalSender.registrationId
+                        },
+
+                        // Legacy fields kept for minimal UI compatibility
+                        senderId: myId
+                    };
+
+                    if (replyTo) payload.replyTo = replyTo;
+
+                    await this.addMessageDoc(chatId, payload);
+
+                    // Update Chat Metadata
+                    await this.updateChatMetadata(chatId, '🔒 Signal Message', myId, recipients);
+
+                    signalSuccess = true;
+
+                } catch (e: any) {
+                    // SECURITY: Do not fallback on Identity Mismatch
+                    if (e.toString().includes('Untrusted Identity') || e.toString().includes('integrity check failed')) {
+                        this.logger.error('Signal Security Error - Aborting Send', e);
+                        throw e; // Block downgrade
+                    }
+                    this.logger.warn('Signal Encryption Failed (non-security), falling back to Legacy', e);
+                    // Fall through to Legacy
+                }
+            }
+
+            if (!signalSuccess) {
+                // FALLBACK / LEGACY GROUP LOGIC
+                // 2. Generate Key & IV
+                const sessionKey = await this.crypto.generateSessionKey();
+                const iv = window.crypto.getRandomValues(new Uint8Array(12));
+                const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
+
+                // 3. Encrypt Text
+                const cipherText = await this.crypto.encryptPayload(plainText, sessionKey, iv);
+
+                // 4. Distribute
+                await this.distributeSecurePayload(chatId, senderId, 'text', cipherText, ivBase64, sessionKey, { tempId }, replyTo);
+            }
+
         } catch (e) {
             this.logger.error("Send Text Failed", e);
         }
+    }
+
+    private async updateChatMetadata(chatId: string, snippet: string, senderId: string, recipients: string[]) {
+        const updatePayload: any = {
+            lastMessage: snippet,
+            lastTimestamp: Date.now(),
+            lastSenderId: senderId
+        };
+        recipients.forEach((p: any) => {
+            if (String(p) !== String(senderId)) {
+                updatePayload[`unread_${p}`] = increment(1);
+            }
+        });
+        await this.updateChatDoc(chatId, updatePayload);
+        // this.sendPushNotification... (assume handled or add back)
     }
 
 
@@ -723,99 +829,14 @@ export class ChatService {
             const unsub = this.fsOnSnapshot(
                 q,
                 async (snapshot: any) => {
-                    const privateKeyStr = localStorage.getItem('private_key');
-                    const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
+                    const privateKeyStr = await this.secureStorage.getItem('private_key'); // P0 Fix: Secure Storage
 
                     const promises = snapshot.docs.map(async (d: any) => {
                         const data = d.data() as any;
                         const msgId = d.id;
 
-                        if (data['deletedFor'] && data['deletedFor'].includes(myId)) return null;
-                        if (data['expiresAt'] && data['expiresAt'] < Date.now()) return null;
-
-                        const senderId = String(data['senderId']).trim().toUpperCase();
-                        let decrypted: any = { type: 'text', text: "🔒 Decrypting...", state: 'DECRYPTING' };
-
-                        if (data['isDeleted']) {
-                            decrypted = { type: 'revoked', state: 'OK' };
-                        } else if (data['type'] === 'system_signal') {
-                            decrypted = { type: 'system', state: 'OK' };
-                        } else if (data['type'] === 'live_location') {
-                            decrypted = {
-                                type: 'live_location',
-                                lat: data['lat'],
-                                lng: data['lng'],
-                                expiresAt: data['expiresAt'],
-                                state: 'OK'
-                            };
-                        } else if (privateKeyStr) {
-                            try {
-                                if (data['keys'] && data['keys'][myId]) {
-                                    let encKey = data['keys'][myId];
-                                    if (typeof encKey === 'object') {
-                                        const devUuid = localStorage.getItem('device_uuid') || 'unknown';
-                                        encKey = encKey[devUuid] || encKey['primary'] || Object.values(encKey)[0];
-
-                                        if (devUuid !== 'unknown' && !data['keys'][myId][devUuid] && !data['keys'][myId]['primary']) {
-                                            this.logger.error("DEVICE_KEY_MISSING", { msgId, userId: myId, device: devUuid });
-                                            decrypted = { type: data['type'], text: "🔑 Key missing for this device", state: 'KEY_MISSING' };
-                                            throw new Error("DEVICE_KEY_MISSING");
-                                        }
-                                    }
-
-                                    const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
-                                    if (data['type'] === 'text') {
-                                        const plainText = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
-                                        decrypted = {
-                                            type: 'text',
-                                            text: plainText,
-                                            state: 'OK',
-                                            tempId: data['tempId'] || data['_tempId']
-                                        };
-                                    } else if (data['type'] === 'contact' || data['type'] === 'location') {
-                                        const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
-                                        decrypted = JSON.parse(jsonStr);
-                                        decrypted.type = data['type'];
-                                        decrypted.state = 'OK';
-                                    } else {
-                                        const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
-                                        const rawKeyBase64 = 'RAW:' + this.crypto.arrayBufferToBase64(rawKey);
-
-                                        decrypted = {
-                                            type: data['type'],
-                                            url: data['file_url'] || data['url'],
-                                            k: rawKeyBase64,
-                                            i: data['iv'],
-                                            caption: data['caption'] || '',
-                                            mime: data['mime'] || '',
-                                            viewOnce: data['viewOnce'],
-                                            tempId: data['tempId'] || data['_tempId'],
-                                            name: data['name'],
-                                            size: data['size'],
-                                            d: data['d'],
-                                            thumb: data['thumb'],
-                                            state: 'OK'
-                                        };
-                                    }
-                                } else {
-                                    decrypted = { type: data['type'], text: "🔑 Key missing", state: 'KEY_MISSING' };
-                                }
-                            } catch (e: any) {
-                                if (e.message !== "DEVICE_KEY_MISSING") {
-                                    this.logger.error("DECRYPT_FAILED", { msgId, error: e });
-                                    decrypted = { type: data['type'], text: "⚠️ Unable to decrypt", state: 'DECRYPT_FAILED' };
-                                }
-                            }
-                        }
-
+                        const decrypted = await this.processMessageDecryption(data, privateKeyStr);
                         const finalMsg = { id: msgId, ...data, text: decrypted };
-
-                        // ACTIVE CLEANUP
-                        if (decrypted && (decrypted.tempId || decrypted._tempId)) {
-                            const tId = decrypted.tempId || decrypted._tempId;
-                            this.removePending(chatId, tId);
-                        }
-
                         return finalMsg;
                     });
 
@@ -831,25 +852,26 @@ export class ChatService {
                         if (lastMsg) {
                             const lastTs = lastMsg.timestamp?.seconds ? lastMsg.timestamp.seconds * 1000 : lastMsg.timestamp;
                             const prevTs = this.lastKnownTimestamps.get(chatId) || 0;
-                            if (lastTs > prevTs && lastMsg.senderId !== myId) {
+                            // Safe senderId check
+                            const senderId = String(lastMsg.senderUserId || lastMsg.senderId || '').trim().toUpperCase();
+                            const myId = this.auth.getUserId().toUpperCase();
+
+                            if (lastTs > prevTs && senderId !== myId) {
                                 this.newMessage$.next({
                                     chatId,
-                                    senderId: lastMsg.senderId,
+                                    senderId: senderId,
                                     timestamp: lastTs
                                 });
                             }
                             this.lastKnownTimestamps.set(chatId, lastTs);
                         }
                     });
-                });
+                }
+            );
             return () => {
                 unsub();
                 this.logger.log('[ChatService] Messages listener torn down', { chatId, limitCount });
-                this.messageStreams.delete(cacheKey); // Optional: actively remove if refCount drops to 0? 
-                // Actually shareReplay with refCount will unsubscribe from source, but the observable instance remains in Map.
-                // It's better to keep it in Map so if someone resubscribes quickly, they get the SAME observable which re-subscribes to source.
-                // BUT if we want "reset state", keeping it is fine as long as source re-runs.
-                // However, if we utilize the buffer, instant replay happens.
+                this.messageStreams.delete(cacheKey);
             };
         }).pipe(
             shareReplay({ bufferSize: 1, refCount: true })
@@ -859,103 +881,170 @@ export class ChatService {
         return stream$;
     }
 
+    // --- Helper for Centralized Decryption (Story 2.5 Refactor) ---
+    private async processMessageDecryption(data: any, privateKeyStr: string | null): Promise<any> {
+        const myId = this.auth.getUserId().toUpperCase();
+
+        // P0 Fix: Robust Sender ID derivation
+        const senderId = String(data.senderUserId || data.senderId || '').trim().toUpperCase();
+
+        if (data['deletedFor'] && data['deletedFor'].includes(myId)) return null;
+        if (data['expiresAt'] && data['expiresAt'] < Date.now()) return null;
+
+        if (data['isDeleted']) {
+            return { type: 'revoked', state: 'OK' };
+        }
+
+        if (data['type'] === 'system_signal') {
+            return { type: 'system', state: 'OK' };
+        }
+
+        // --- 1. SIGNAL PROTOCOL (V3) ---
+        // Minor Fix: Stricter Protocol Check
+        if (data['protocol'] === 'v3' && data['type'] === 'signal') {
+            try {
+                const myDeviceId = this.auth.getDeviceId() || 1;
+                const isMeSender = senderId === myId;
+
+                let ciphertextBundle = null;
+                let remoteId = '';
+                let remoteDeviceId = 1;
+
+                if (isMeSender) {
+                    // I sent this. Decrypt "To Self" copy.
+                    // Remote Party = Myself. Remote Device = My Device.
+                    ciphertextBundle = data['ciphertext_to_sender'];
+                    remoteId = myId;
+                    remoteDeviceId = myDeviceId;
+                } else {
+                    // Someone sent this. Decrypt "To Receiver" copy.
+                    // Remote Party = Sender. Remote Device = Sender's Device.
+                    ciphertextBundle = data['ciphertext_to_receiver'];
+                    remoteId = senderId;
+                    // Handle data.senderDeviceId (ensure number)
+                    remoteDeviceId = Number(data.senderDeviceId) || 1;
+                }
+
+                if (!ciphertextBundle) {
+                    return { type: 'text', text: "🔒 Missing Ciphertext (V3)", state: 'DECRYPT_FAIL' };
+                }
+
+                const plain = await this.signalService.decryptMessage(ciphertextBundle, remoteId, remoteDeviceId);
+                return {
+                    type: 'text',
+                    text: plain,
+                    state: 'OK',
+                    securityLevel: 'SIGNAL_SECURED',
+                    // Minor Fix: Correct TempId Resolution
+                    tempId: data['tempId'] || data['_tempId'] || data['id']
+                };
+
+            } catch (e: any) {
+                console.error("Signal Decrypt Error", e);
+                // SECURITY: Detect Identity Mismatch
+                if (e.toString().includes('Untrusted Identity') || e.toString().includes('identity key changed')) {
+                    return { type: 'text', text: "🚨 Security Warning: Identity Changed", state: 'IDENTITY_MISMATCH' };
+                }
+                return { type: 'text', text: "🔒 Signal Decrypt Failed", state: 'DECRYPT_FAIL' };
+            }
+        }
+
+        // --- 2. LEGACY RSA (V1) ---
+        if (data['type'] === 'live_location') {
+            return {
+                type: 'live_location',
+                lat: data['lat'],
+                lng: data['lng'],
+                expiresAt: data['expiresAt'],
+                state: 'OK'
+            };
+        }
+
+        if (privateKeyStr) {
+            try {
+                if (data['keys'] && data['keys'][myId]) {
+                    let encKey = data['keys'][myId];
+
+                    // Handle device-specific keys map in legacy
+                    if (typeof encKey === 'object') {
+                        const devUuid = localStorage.getItem('device_uuid') || 'unknown';
+                        encKey = encKey[devUuid] || encKey['primary'] || Object.values(encKey)[0];
+
+                        if (devUuid !== 'unknown' && !data['keys'][myId][devUuid] && !data['keys'][myId]['primary']) {
+                            return { type: data['type'], text: "🔑 Key missing for this device", state: 'KEY_MISSING' };
+                        }
+                    }
+
+                    const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
+
+                    if (data['type'] === 'text') {
+                        const plainText = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                        return {
+                            type: 'text',
+                            text: plainText,
+                            state: 'OK',
+                            securityLevel: 'LEGACY_ENCRYPTED',
+                            tempId: data['tempId'] || data['_tempId']
+                        };
+                    } else if (data['type'] === 'contact' || data['type'] === 'location') {
+                        const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
+                        const obj = JSON.parse(jsonStr);
+                        obj.type = data['type'];
+                        obj.state = 'OK';
+                        obj.securityLevel = 'LEGACY_ENCRYPTED';
+                        return obj;
+                    } else {
+                        // Native Media
+                        const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
+                        const rawKeyBase64 = 'RAW:' + this.crypto.arrayBufferToBase64(rawKey);
+
+                        return {
+                            type: data['type'],
+                            url: data['file_url'] || data['url'],
+                            k: rawKeyBase64,
+                            i: data['iv'],
+                            caption: data['caption'] || '',
+                            mime: data['mime'] || '',
+                            viewOnce: data['viewOnce'],
+                            tempId: data['tempId'] || data['_tempId'],
+                            name: data['name'],
+                            size: data['size'],
+                            d: data['d'],
+                            thumb: data['thumb'],
+                            state: 'OK',
+                            securityLevel: 'LEGACY_ENCRYPTED'
+                        };
+                    }
+                } else {
+                    return { type: data['type'], text: "🔑 Key missing", state: 'KEY_MISSING' };
+                }
+            } catch (e: any) {
+                if (e.message !== "DEVICE_KEY_MISSING") {
+                    this.logger.error("DECRYPT_FAILED", { msgId: data.id, error: e });
+                }
+                return { type: data['type'], text: "⚠️ Unable to decrypt", state: 'DECRYPT_FAILED' };
+            }
+        }
+
+        return { type: 'text', text: "🔒 Locked", state: 'LOCKED' };
+    }
+
     async getOlderMessages(chatId: string, lastTimestamp: any, limitCount: number = 20): Promise<any[]> {
         const messagesRef = this.fsCollection('chats', chatId, 'messages');
-        // Fetch older: timestamp < lastTimestamp. Order by desc to get "nearest" older ones, then reverse.
-        // wait, we want "End Before" or "Start After" logic?
-        // Query: Order By Timestamp DESC (newest first). Start After "last known oldest". 
-        // Then reverse to ASC.
-        // Actually, if we have the "oldest" message currently shown, we want messages with timestamp < oldest.
-        // So: orderBy('timestamp', 'desc'), startAfter(oldestTimestamp), limit(limitCount)
-
-        // Ensure timestamp is compatible (Firestore Timestamp vs number)
-        // We assume lastTimestamp is the raw firestore value OR number.
-        // Best to use the document snapshot if possible, but timestamp field works usually.
-
         const q = this.fsQuery(messagesRef, orderBy('timestamp', 'desc'), startAfter(lastTimestamp), limit(limitCount));
         const snapshot = await getDocs(q);
 
-        const privateKeyStr = localStorage.getItem('private_key');
-        const myId = String(localStorage.getItem('user_id')).trim().toUpperCase();
+        const privateKeyStr = await this.secureStorage.getItem('private_key'); // P0 Fix: Secure Storage
 
         const promises = snapshot.docs.map(async (d: any) => {
             const data = d.data();
             const msgId = d.id;
-
-            // ... Reuse decryption logic (Refactor into helper ideally, keeping inline for now)
-            const senderId = String(data['senderId']).trim().toUpperCase();
-            let decrypted: any = { type: 'text', text: "🔒 Old Msg", state: 'DECRYPTING' }; // Default
-
-            // Fast Decrypt Copy-Paste (Minimal) - Refactored for DecryptState
-            if (data['isDeleted']) {
-                decrypted = { type: 'revoked', state: 'OK' };
-            } else if (data['type'] === 'system_signal') {
-                decrypted = { type: 'system', state: 'OK' };
-            } else if (privateKeyStr) {
-                try {
-                    if (data['keys'] && data['keys'][myId]) {
-                        let encKey = data['keys'][myId];
-                        if (typeof encKey === 'object') {
-                            const devUuid = localStorage.getItem('device_uuid') || 'unknown';
-                            encKey = encKey[devUuid] || encKey['primary'] || Object.values(encKey)[0];
-
-                            if (devUuid !== 'unknown' && !data['keys'][myId][devUuid] && !data['keys'][myId]['primary']) {
-                                decrypted = { type: data['type'], text: "🔑 Key missing for this device", state: 'KEY_MISSING' };
-                                throw new Error("DEVICE_KEY_MISSING");
-                            }
-                        }
-                        const sessionKey = await this.crypto.decryptAesKeyFromSender(encKey, privateKeyStr);
-                        if (data['type'] === 'text') {
-                            const plainText = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
-                            decrypted = { type: 'text', text: plainText, state: 'OK' };
-                        } else if (data['type'] === 'contact') {
-                            const jsonStr = await this.crypto.decryptPayload(data['ciphertext'], sessionKey, data['iv']);
-                            decrypted = JSON.parse(jsonStr);
-                            decrypted.type = 'contact';
-                            decrypted.state = 'OK';
-                        } else if (data['type'] === 'live_location') {
-                            decrypted = {
-                                type: 'live_location',
-                                lat: data['lat'],
-                                lng: data['lng'],
-                                expiresAt: data['expiresAt'],
-                                state: 'OK'
-                            };
-                        } else {
-                            const rawKey = await window.crypto.subtle.exportKey("raw", sessionKey);
-                            const rawKeyBase64 = 'RAW:' + this.crypto.arrayBufferToBase64(rawKey);
-                            decrypted = {
-                                type: data['type'],
-                                url: data['file_url'] || data['url'],
-                                k: rawKeyBase64,
-                                i: data['iv'],
-                                caption: data['caption'] || '',
-                                mime: data['mime'] || '',
-                                thumb: data['thumb'] || '',
-                                _tempId: data['_tempId'],
-                                name: data['name'],
-                                size: data['size'],
-                                d: data['d'],
-                                state: 'OK'
-                            };
-                        }
-                    } else {
-                        decrypted = { type: data['type'], text: "🔑 Key missing", state: 'KEY_MISSING' };
-                    }
-                } catch (e: any) {
-                    if (e.message !== "DEVICE_KEY_MISSING") {
-                        decrypted = { type: data['type'], text: "⚠️ Unable to decrypt", state: 'DECRYPT_FAILED' };
-                    }
-                }
-            }
-
-            const finalMsg = { id: msgId, ...data, text: decrypted };
-            return finalMsg;
+            const decrypted = await this.processMessageDecryption(data, privateKeyStr);
+            return { id: msgId, ...data, text: decrypted };
         });
 
         const results = await Promise.all(promises);
-        // Reverse to return in ASC order (Oldest -> Newer)
-        return results.filter(m => m !== null).reverse();
+        return results.filter(m => m !== null && m.text !== null).reverse();
     }
     async sendAudioMessage(chatId: string, audioBlob: Blob, senderId: string, duration: number) {
         try {

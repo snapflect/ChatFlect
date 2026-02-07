@@ -3,8 +3,13 @@
 require_once '../auth_middleware.php'; // Include existing JWT auth & CORS
 require_once '../db_connect.php';
 
-// Allow CORS
-header("Access-Control-Allow-Origin: *");
+// Allow CORS (Strict for Cookies)
+$allowed = ['http://localhost:8100', 'http://localhost:4200', 'capacitor://localhost', 'http://localhost'];
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if (in_array($origin, $allowed)) {
+    header("Access-Control-Allow-Origin: $origin");
+    header("Access-Control-Allow-Credentials: true");
+}
 header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 
@@ -61,10 +66,13 @@ function handlePostKeys($userId, $conn)
 
     try {
         // 1. Verify Device Ownership (Strict)
-        // Ensure user owns this device_uuid -> device_id mapping? 
-        // For MVP, if device_id=1, just check user_id. 
-        // If device_id > 1, we should check `user_devices` table.
-        // TODO: Add thorough check against `user_devices` here.
+        // Ensure user owns this device_uuid -> device_id mapping
+        $devCheck = $conn->prepare("SELECT 1 FROM user_devices WHERE user_id = ? AND libsignal_device_id = ? AND is_active = 1");
+        $devCheck->bind_param("si", $userId, $deviceId);
+        $devCheck->execute();
+        if ($devCheck->get_result()->num_rows === 0) {
+            throw new Exception("Device Ownership Mismatch. User $userId does not own Device ID $deviceId.");
+        }
 
         // 2. Identity Key Immutability Check
         // Check if an identity key exists for this user/device
@@ -81,7 +89,12 @@ function handlePostKeys($userId, $conn)
                 // Signal convention: If RegID differs, it might be a reinstall.
                 if ($existing['registration_id'] != $regId) {
                     // Reinstall Scenario: Allow overwrite, but LOG heavily.
-                    error_log("SECURITY WARNING: Identity Key Overwrite for User $userId Device $deviceId (Reinstall?)");
+                    $auditChange = $conn->prepare("INSERT INTO prekey_audit_log (actor_user_id, target_user_id, target_device_id, action_type, ip_address, metadata) VALUES (?, ?, ?, 'IDENTITY_CHANGE', ?, ?)");
+                    $meta = json_encode(["old_reg" => $existing['registration_id'], "new_reg" => $regId]);
+                    $ip = $_SERVER['REMOTE_ADDR'];
+                    $auditChange->bind_param("ssiss", $userId, $userId, $deviceId, $ip, $meta);
+                    $auditChange->execute();
+
                     // Proceed to update (Overwrite)
                     $upd = $conn->prepare("UPDATE identity_keys SET public_key = ?, registration_id = ?, updated_at = NOW() WHERE user_id = ? AND device_id = ?");
                     $upd->bind_param("sisi", $identityKey, $regId, $userId, $deviceId);
@@ -246,13 +259,21 @@ function handleGetKeys($myUserId, $conn)
  */
 function handleGetCount($userId, $conn)
 {
-    // For MVP, assume device_id = 1 if not passed, BUT strictness suggests we should know the device.
-    // The JWT might eventually encode device_id, but for now we look up active device or assume 1.
-    $deviceId = 1;
+    if (!isset($_GET['deviceId'])) {
+        http_response_code(400);
+        echo json_encode(["error" => "deviceId required"]);
+        exit;
+    }
+    $deviceId = (int) $_GET['deviceId'];
 
-    // Proper way: Client sends deviceId in query or we infer from session
-    if (isset($_GET['deviceId'])) {
-        $deviceId = (int) $_GET['deviceId'];
+    // Strict Ownership Check
+    $devCheck = $conn->prepare("SELECT 1 FROM user_devices WHERE user_id = ? AND libsignal_device_id = ?");
+    $devCheck->bind_param("si", $userId, $deviceId);
+    $devCheck->execute();
+    if ($devCheck->get_result()->num_rows === 0) {
+        http_response_code(403);
+        echo json_encode(["error" => "Access Denied to Device Keys"]);
+        exit;
     }
 
     $stmt = $conn->prepare("SELECT COUNT(*) as count FROM pre_keys WHERE user_id = ? AND device_id = ? AND consumed_at IS NULL");

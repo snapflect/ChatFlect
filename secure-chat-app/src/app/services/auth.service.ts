@@ -262,9 +262,11 @@ export class AuthService {
             const publicKeyStr = await this.crypto.exportKey(keys.publicKey);
             const privateKeyStr = await this.crypto.exportKey(keys.privateKey);
 
-            // Store Private Key Locally (Critical for decryption)
-            localStorage.setItem('private_key', privateKeyStr);
-            localStorage.setItem('public_key', publicKeyStr);
+            // Store Private Key Locally (Critical for decryption) -> Now Secure
+            await this.secureStorage.setItem('private_key', privateKeyStr);
+            await this.secureStorage.setItem('public_key', publicKeyStr);
+            // Redundant plaintext copy REMOVED for security
+            // localStorage.setItem('public_key', publicKeyStr); // Optional: keep public key accessible if needed sync
 
             // 2. Call API to confirm
             const response: any = await this.api.post('profile.php', {
@@ -316,8 +318,8 @@ export class AuthService {
             const privateKeyStr = await this.crypto.exportKey(keys.privateKey);
 
             // Store Private Key Locally
-            localStorage.setItem('private_key', privateKeyStr);
-            localStorage.setItem('public_key', publicKeyStr);
+            await this.secureStorage.setItem('private_key', privateKeyStr);
+            await this.secureStorage.setItem('public_key', publicKeyStr);
 
             // 3. Send to backend for verification/registration
             const googleUserAny = googleUser as any;
@@ -384,11 +386,14 @@ export class AuthService {
 
         this.signOutGoogle();
         this.mediaService.clearCache('LOGOUT');
+        this.mediaService.clearCache('LOGOUT');
         localStorage.removeItem('user_id');
         localStorage.removeItem('id_token'); // Just in case
         localStorage.removeItem('is_profile_complete');
-        localStorage.removeItem('private_key');
-        localStorage.removeItem('public_key');
+
+        await this.secureStorage.removeItem('private_key');
+        await this.secureStorage.removeItem('public_key');
+
         localStorage.removeItem('user_first_name');
         localStorage.removeItem('refresh_token'); // Just in case
         localStorage.removeItem('blocked_users');
@@ -403,6 +408,15 @@ export class AuthService {
     isAuthenticated(): boolean {
         const val = this.userIdSource.value;
         return !!(val && val.trim() !== '' && val.toUpperCase() === val);
+    }
+
+    getUserId(): string {
+        return this.userIdSource.value || '';
+    }
+
+    getDeviceId(): number {
+        const stored = localStorage.getItem('signal_device_id');
+        return stored ? parseInt(stored, 10) : 1;
     }
 
     async updateProfile(data: { first_name?: string, last_name?: string, short_note?: string, photo_url?: string }) {
@@ -499,9 +513,9 @@ export class AuthService {
         const pub = await this.crypto.exportKey(keys.publicKey);
         const priv = await this.crypto.exportKey(keys.privateKey);
 
-        // 2. Update Local Storage
-        localStorage.setItem('public_key', pub);
-        localStorage.setItem('private_key', priv);
+        // 2. Update Local Storage -> Secure Storage
+        await this.secureStorage.setItem('public_key', pub);
+        await this.secureStorage.setItem('private_key', priv);
 
         // 3. Sync with Server (Update Device Record)
         await this.registerDevice(userId);

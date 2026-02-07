@@ -32,14 +32,15 @@ $createTableQuery = "CREATE TABLE IF NOT EXISTS user_devices (
 )";
 $conn->query($createTableQuery);
 
-// Migration: Ensure fcm_token, device_name, signature, bundle_version exist
+// Migration: Ensure fcm_token, device_name, signature, bundle_version, libsignal_device_id exist
 // Using try-catch with error suppression for "duplicate column" scenarios
 $migrations = [
     "ALTER TABLE user_devices ADD COLUMN fcm_token TEXT",
     "ALTER TABLE user_devices ADD COLUMN device_name VARCHAR(100) DEFAULT 'Unknown Device'",
     "ALTER TABLE user_devices ADD COLUMN signature TEXT",
     "ALTER TABLE user_devices ADD COLUMN bundle_version INT DEFAULT 1",
-    "ALTER TABLE user_devices ADD COLUMN signed_at VARCHAR(40)"
+    "ALTER TABLE user_devices ADD COLUMN signed_at VARCHAR(40)",
+    "ALTER TABLE user_devices ADD COLUMN libsignal_device_id INT DEFAULT 1" // Standard Signal Device ID
 ];
 
 foreach ($migrations as $sql) {
@@ -156,10 +157,32 @@ if ($method === 'POST') {
             }
         }
 
+        // Determine Signal Device ID (Auto-Increment per User)
+        $sigId = 1;
+
+        // Check if device already exists to preserve its ID
+        $existingParams = $conn->prepare("SELECT libsignal_device_id FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+        $existingParams->bind_param("ss", $userId, $deviceUuid);
+        $existingParams->execute();
+        $exRes = $existingParams->get_result();
+
+        if ($exRes->num_rows > 0) {
+            $row = $exRes->fetch_assoc();
+            $sigId = (int) $row['libsignal_device_id'];
+        } else {
+            // New Device: Find max ID + 1
+            $maxStmt = $conn->prepare("SELECT MAX(libsignal_device_id) as max_id FROM user_devices WHERE user_id = ?");
+            $maxStmt->bind_param("s", $userId);
+            $maxStmt->execute();
+            $maxRes = $maxStmt->get_result()->fetch_assoc();
+            $sigId = ($maxRes['max_id'] ?? 0) + 1;
+            // Cap at 10? Signal allows more, but our logic limits to 5 devices anyway.
+        }
+
         // Upsert device
-        // FIX: Store signed_at timestamp
-        $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token, signature, bundle_version, signed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
-                                ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, signature = ?, bundle_version = ?, signed_at = ?, last_active = NOW()");
+        // FIX: Store signed_at timestamp and libsignal_device_id
+        $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token, signature, bundle_version, signed_at, libsignal_device_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                                ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, signature = ?, bundle_version = ?, signed_at = ?, libsignal_device_id = ?, last_active = NOW()");
 
         if (!$stmt) {
             http_response_code(500);
@@ -168,7 +191,7 @@ if ($method === 'POST') {
         }
 
         $stmt->bind_param(
-            "ssssssissssssis",
+            "ssssssisississisi", // types
             $userId,
             $deviceUuid,
             $publicKey,
@@ -177,12 +200,15 @@ if ($method === 'POST') {
             $signature,
             $bundleVersion,
             $timestamp,
-            $publicKey,
+            $sigId, // new param
+
+            $publicKey, // update params
             $deviceName,
             $fcmToken,
             $signature,
             $bundleVersion,
-            $timestamp
+            $timestamp,
+            $sigId
         );
 
         if ($stmt->execute()) {
@@ -205,13 +231,14 @@ if ($method === 'POST') {
         }
 
         // SECURITY FIX (J4): Validate user can only list their own devices
-        if (strtoupper($userId) !== strtoupper($authUserId)) {
-            http_response_code(403);
-            echo json_encode(["error" => "Forbidden - Cannot list devices for other users"]);
-            exit;
-        }
+        // UPDATE (Story 2.5): Allow listing other users' devices for Signal Protocol discovery
+        // if (strtoupper($userId) !== strtoupper($authUserId)) {
+        //     http_response_code(403);
+        //     echo json_encode(["error" => "Forbidden - Cannot list devices for other users"]);
+        //     exit;
+        // }
 
-        $stmt = $conn->prepare("SELECT device_uuid, device_name, last_active, created_at FROM user_devices WHERE user_id = ?");
+        $stmt = $conn->prepare("SELECT device_uuid, device_name, last_active, created_at, libsignal_device_id FROM user_devices WHERE user_id = ?");
         $stmt->bind_param("s", $userId);
         $stmt->execute();
         $result = $stmt->get_result();
