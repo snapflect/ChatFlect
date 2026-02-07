@@ -1,0 +1,142 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===========================================
+    // HELPER FUNCTIONS
+    // ===========================================
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user is chat participant
+    function isParticipant(chatId) {
+      return isAuthenticated()
+             && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
+
+    // Check if user owns this document
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // STRICT: Check if device is active (not revoked)
+    // Requires device_uuid in custom claims OR device registry doc
+    function isDeviceActive() {
+      let deviceUuid = request.auth.token.device_uuid;
+      let uid = request.auth.uid;
+      return deviceUuid != null
+             && exists(/databases/$(database)/documents/device_registry/$(uid)/devices/$(deviceUuid))
+             && get(/databases/$(database)/documents/device_registry/$(uid)/devices/$(deviceUuid)).data.status == 'active';
+    }
+
+    // ===========================================
+    // CHATS COLLECTION (Metadata)
+    // ===========================================
+    match /chats/{chatId} {
+      // STRICT: Read-only for participants
+      // Only backend (Admin SDK) should write metadata
+      allow read: if isParticipant(chatId);
+      allow write: if false; // Backend only via Admin SDK
+
+      // -----------------------------------------
+      // MESSAGES SUBCOLLECTION (E2EE payloads)
+      // -----------------------------------------
+      match /messages/{msgId} {
+        // STRICT: Participants can read
+        // STRICT: Only backend writes (via send_message.php with Admin SDK)
+        allow read: if isParticipant(chatId);
+        allow create, update, delete: if false; // Backend Admin SDK only
+      }
+
+      // -----------------------------------------
+      // LIVE LOCATIONS SUBCOLLECTION
+      // -----------------------------------------
+      match /locations/{locId} {
+        // Participants can read
+        // Only owner can write their own location
+        allow read: if isParticipant(chatId);
+        allow create: if isParticipant(chatId)
+                      && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if resource.data.userId == request.auth.uid;
+      }
+    }
+
+    // ===========================================
+    // USERS COLLECTION (Profile & Contacts)
+    // ===========================================
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /contacts/{contactId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /blocked/{blockedId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // Per-user sync requests (internal device signaling)
+      match /sync_requests/{reqId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // ===========================================
+    // SYNC REQUESTS (CRITICAL: Key Handover)
+    // ===========================================
+    match /sync_requests/{sessionId} {
+      // Any authenticated user can create (requester)
+      allow create: if isAuthenticated();
+      // Only target user can read and cleanup
+      allow read: if isAuthenticated()
+                  && resource.data.targetUserId == request.auth.uid;
+      allow update, delete: if isAuthenticated()
+                            && resource.data.targetUserId == request.auth.uid;
+    }
+
+    // ===========================================
+    // PRESENCE STATUS
+    // ===========================================
+    match /status/{userId} {
+      // Owner can write their status
+      allow write: if isOwner(userId);
+      // All authenticated users can read (for presence UI)
+      allow read: if isAuthenticated();
+    }
+
+    // ===========================================
+    // DEVICE REGISTRY (Epic 7 - Revocation Enforcement)
+    // ===========================================
+    match /device_registry/{uid} {
+      // Read-only for owner (to check own devices)
+      allow read: if isOwner(uid);
+      allow write: if false; // Backend Admin SDK only
+
+      match /devices/{deviceUuid} {
+        allow read: if isOwner(uid);
+        allow write: if false; // Backend Admin SDK only
+      }
+    }
+
+    // ===========================================
+    // LOCATION AUDIT TRAIL
+    // ===========================================
+    match /location_audit/{auditId} {
+      // Anyone can create audit entry
+      allow create: if isAuthenticated();
+      // No client reads (Admin SDK only for auditing)
+      allow read, update, delete: if false;
+    }
+
+    // ===========================================
+    // DEFAULT DENY
+    // ===========================================
+    // Catch-all: deny everything not explicitly allowed
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
