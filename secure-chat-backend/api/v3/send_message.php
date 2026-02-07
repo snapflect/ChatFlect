@@ -89,14 +89,49 @@ if (empty($signingPubKeyB64)) {
     exit;
 }
 
+// Helper: Convert Raw ECDSA Signature (r|s) to ASN.1 DER
+function signatureRawToDer($sig)
+{
+    if (strlen($sig) !== 64)
+        return false;
+    $r = substr($sig, 0, 32);
+    $s = substr($sig, 32, 32);
+
+    // Add leading zero if MSB is 1 to indicate positive integer
+    if (ord($r[0]) >= 0x80)
+        $r = chr(0x00) . $r;
+    if (ord($s[0]) >= 0x80)
+        $s = chr(0x00) . $s;
+
+    $rLen = chr(strlen($r));
+    $sLen = chr(strlen($s));
+
+    // Sequence: 0x30 + TotalLen + (Integer + Len + r) + (Integer + Len + s)
+    $der = chr(0x02) . $rLen . $r . chr(0x02) . $sLen . $s;
+    $totalLen = chr(strlen($der));
+    return chr(0x30) . $totalLen . $der;
+}
+
 // Verify ECDSA Signature
 try {
     // Strict Base64 Decoding
     $sigBin = base64_decode($clientSig, true);
-    $pubKeyBin = base64_decode($signingPubKeyB64, true);
 
-    if ($sigBin === false || $pubKeyBin === false) {
-        throw new Exception("Invalid Base64 Encoding");
+    // PEM Generation
+    // We strictly use signingPubKeyB64 as source of truth for PEM
+    // Validate it is valid base64 first
+    if (base64_decode($signingPubKeyB64, true) === false) {
+        throw new Exception("Invalid Key Encoding");
+    }
+
+    if ($sigBin === false) {
+        throw new Exception("Invalid Signature Encoding");
+    }
+
+    // Convert Raw (WebCrypto) to DER (OpenSSL)
+    $derSig = signatureRawToDer($sigBin);
+    if (!$derSig) {
+        throw new Exception("Invalid Raw Signature Length");
     }
 
     // Format as PEM for OpenSSL
@@ -105,10 +140,9 @@ try {
         "-----END PUBLIC KEY-----\n";
 
     // OpenSSL Verify (SHA256)
-    $verified = openssl_verify($rawBody, $sigBin, $pem, OPENSSL_ALGO_SHA256);
+    $verified = openssl_verify($rawBody, $derSig, $pem, OPENSSL_ALGO_SHA256);
 
     if ($verified !== 1) {
-        // 0 = Fail, -1 = Error
         error_log("Signature Mismatch (ECDSA): ID=$msgId User=$userId Device=$deviceUuid OpenSSL=$verified");
         http_response_code(401);
         echo json_encode(["error" => "Integrity check failed: Invalid Signature"]);
@@ -121,27 +155,23 @@ try {
     exit;
 }
 
-// 4. NONCE UNIQUENESS (Replay Protection)
-$stmt = $conn->prepare("SELECT message_id FROM message_replay_log WHERE message_id = ?");
-$stmt->bind_param("s", $msgId);
-$stmt->execute();
-if ($stmt->get_result()->num_rows > 0) {
-    http_response_code(409);
-    echo json_encode(["error" => "Replay detected: Message ID already exists"]);
-    exit;
-}
-$stmt->close();
+// 4. NONCE UNIQUENESS (Replay Protection - Strict INSERT Only)
+// Removed redundant SELECT. Rely on Unique Constraint.
 
 // 5. PERSIST NONCE (Optimistic Lock)
 try {
     $ins = $conn->prepare("INSERT INTO message_replay_log (message_id, sender_id, device_uuid) VALUES (?, ?, ?)");
     $ins->bind_param("sss", $msgId, $userId, $deviceUuid);
     if (!$ins->execute()) {
-        throw new Exception("Duplicate entry race condition");
+        // Checking error code specifically for duplicate could be better, but exception covers it
+        if ($conn->errno === 1062) { // 1062 = Duplicate entry
+            throw new Exception("Duplicate entry");
+        }
+        throw new Exception("Insert failed");
     }
 } catch (Exception $e) {
     http_response_code(409);
-    echo json_encode(["error" => "Replay detected (Race condition)"]);
+    echo json_encode(["error" => "Replay detected: Message ID already exists"]);
     exit;
 }
 
@@ -211,17 +241,17 @@ if ($httpCode >= 400) {
     $del->execute();
 
     http_response_code(500);
-    echo json_encode(["error" => "Firestore Write Failed", "details" => $fsResult]);
+    echo json_encode(["error" => "Firestore Write Failed", "details" => json_decode($fsResult)]);
     exit;
 }
 
 
 // 7. METADATA UPDATE (Strict Backend Responsibility)
-// Update lastTimestamp in chats/{chatId}
+// Update lastTimestamp in chats/{chatId} using SERVER TIME
 $metaUrl = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/chats/$chatId?updateMask.fieldPaths=lastTimestamp";
 $metaBody = [
     "fields" => [
-        "lastTimestamp" => ["integerValue" => (string) $timestamp] // timestamp is from input (validated)
+        "lastTimestamp" => ["integerValue" => (string) $serverTime] // STRICT: Use Server Time
     ]
 ];
 // Use PATCH for partial update
@@ -234,10 +264,12 @@ curl_setopt($chM, CURLOPT_HTTPHEADER, [
     "Content-Type: application/json"
 ]);
 curl_setopt($chM, CURLOPT_RETURNTRANSFER, true);
-// Fire and forget (or log warning). Don't fail the message if metadata update fails (eventual consistency).
 $resM = curl_exec($chM);
 curl_close($chM);
 
-echo $fsResult; // Return the message object execution result
-
-echo json_encode(["status" => "success", "id" => $msgId]);
+// STRICT FIX: Single JSON Response
+echo json_encode([
+    "status" => "success",
+    "id" => $msgId,
+    "firestore_result" => json_decode($fsResult)
+]);

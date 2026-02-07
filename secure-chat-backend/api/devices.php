@@ -198,22 +198,37 @@ if ($method === 'POST') {
             exit;
         }
 
+        // STRICT FIX: Correct bind_param count and types (20 types, 20 variables)
+        // INSERT: ssssssIsIss (11)
+        // UPDATE: sssIsIss (9)
+        // Total: "ssssssisiss" . "ssssisiss"
         $stmt->bind_param(
-            $bundleVersion,
-            $timestamp,
-            $sigId,
-            $keyVersion, // new param
+            "ssssssisiss" . "ssssisiss",
 
-            $publicKey, // update params
+            // INSERT Values (11)
+            $userId,
+            $deviceUuid,
+            $publicKey,
             $deviceName,
             $fcmToken,
             $signature,
-            $bundleVersion,
+            $bundleVersion, // i
             $timestamp,
-            $sigId,
-            $keyVersion
-        );
+            $sigId, // i
+            $keyVersion, // i
+            $signingPubKey,
 
+            // UPDATE Values (9)
+            $publicKey,
+            $deviceName,
+            $fcmToken,
+            $signature,
+            $bundleVersion, // i
+            $timestamp,
+            $sigId, // i
+            $keyVersion, // i
+            $signingPubKey
+        );
         if ($stmt->execute()) {
             auditLog('device_registered', $userId, ['device_uuid' => $deviceUuid]);
             echo json_encode([
