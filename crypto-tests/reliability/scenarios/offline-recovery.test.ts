@@ -7,8 +7,8 @@
  */
 
 import { ChaosEngine, DEFAULT_CHAOS_CONFIG } from '../chaos-harness';
-import { OutboxService } from '../../secure-chat-app/src/app/services/outbox.service';
-import { MessageOrderingService } from '../../secure-chat-app/src/app/services/message-ordering.service';
+import { OutboxService } from '../../../secure-chat-app/src/app/services/outbox.service';
+import { MessageOrderingService } from '../../../secure-chat-app/src/app/services/message-ordering.service';
 import { of } from 'rxjs';
 
 // Mock dependencies

@@ -35,9 +35,21 @@ jobs:
                   cd crypto-tests
                   CHAOS_SEED=${{ github.run_id }} npm test reliability/scenarios/protocol-abuse.test.ts
 
+            - name: Run Chaos Tests (Crash Recovery)
+              run: |
+                  cd crypto-tests
+                  CHAOS_SEED=${{ github.run_id }} npm test reliability/scenarios/crash-recovery.test.ts
+
+            - name: Save Chaos Metadata
+              if: always()
+              run: |
+                  echo "{\"seed\": \"${{ github.run_id }}\", \"timestamp\": \"$(date)\"}" > crypto-tests/chaos-metadata.json
+
             - name: Upload Chaos Logs
               if: always()
               uses: actions/upload-artifact@v3
               with:
                   name: chaos-logs
-                  path: crypto-tests/chaos-metrics.json
+                  path: |
+                      crypto-tests/chaos-metrics.json
+                      crypto-tests/chaos-metadata.json

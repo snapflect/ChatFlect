@@ -4,7 +4,7 @@
  */
 
 import { ChaosEngine } from '../chaos-harness';
-import { OutboxService } from '../../secure-chat-app/src/app/services/outbox.service';
+import { OutboxService } from '../../../secure-chat-app/src/app/services/outbox.service';
 
 // Mock HTTP with validation logic
 const mockBackend = {

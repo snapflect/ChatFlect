@@ -2,7 +2,7 @@
 module.exports = {
     preset: 'ts-jest',
     testEnvironment: 'node',
-    roots: ['<rootDir>/unit', '<rootDir>/integration'],
+    roots: ['<rootDir>/unit', '<rootDir>/integration', '<rootDir>/reliability'],
     testMatch: ['**/*.test.ts'],
     collectCoverageFrom: [
         '../secure-chat-app/src/app/services/signal*.ts',
