@@ -1,6 +1,15 @@
 import { Injectable } from '@angular/core';
 import { LoggingService } from './logging.service';
 
+export interface KeyBundle {
+    user_id: string;
+    device_uuid: string;
+    public_key: string;
+    timestamp: string;
+    version: number;
+    signature?: string;
+}
+
 @Injectable({
     providedIn: 'root'
 })
@@ -63,6 +72,78 @@ export class CryptoService {
             key
         );
         return this.arrayBufferToBase64(exported);
+    }
+
+    // --- TRUST ANCHOR: Backend Identity Key (Pinned) ---
+    // In production, this keys should come from environment.ts or config
+    // CORRESPONDS TO secure-chat-backend/keys/backend_identity.pem (Generated via Node.js)
+    private static BACKEND_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvTo0PM9Dj/Kasz2ht9DR
+UrZSdWMjRZETxWX1bgmdAM721N+Kq7adPaCYaOfviWoo4+Q+yfwxJQTcQ3l4fUIR
+vTfCGu7weuw58LVDjJygrw9mG6xe21R/K97sqo399i0o7buqhzr1i9g9TXQ+gYOD
+pPR7vuspdTKH97x0kMA2230jYWznyxcLlzhEKNfPPglwCGHAnhKgek2rCBOG2Yin
+uqrKtTRX2Fr/YPm1eOWV9uLUN94UbHWamH+Sq7m2C5142tep7GBTyBX28ELs1b2O
+cZoEdr4BPVaAc5fU0OOCsUDGwaa49adZ99q4ol7oZp4rowhxWnWTrYoDVxwoJvkD
+swIDAQAB
+-----END PUBLIC KEY-----`;
+
+    // --- Key Verification Logic (TASK 1.7-C) ---
+
+    async verifyKeyBundle(bundle: KeyBundle): Promise<boolean> {
+        if (!bundle.signature) {
+            this.logger.warn(`Unsigned Key Bundle for ${bundle.user_id}`);
+            return false; // Hard-fail Phase 2
+        }
+
+        try {
+            // 1. Reconstruct Canonical String
+            // Format: user_id|device_uuid|public_key|timestamp|version
+            const cleanKey = bundle.public_key.replace(/(\r\n|\n|\r)/gm, "").replace("-----BEGIN PUBLIC KEY-----", "").replace("-----END PUBLIC KEY-----", "").trim();
+            const payload = `${bundle.user_id}|${bundle.device_uuid}|${cleanKey}|${bundle.timestamp}|${bundle.version}`;
+
+            // 2. Import Backend Verification Key
+            const verifyKey = await this.importVerificationKey(CryptoService.BACKEND_PUBLIC_KEY);
+
+            // 3. Verify Signature
+            const isValid = await window.crypto.subtle.verify(
+                "RSASSA-PKCS1-v1_5",
+                verifyKey,
+                this.hexToArrayBuffer(bundle.signature),
+                new TextEncoder().encode(payload)
+            );
+
+            if (!isValid) {
+                this.logger.error(`Signature verification failed for ${bundle.user_id}`);
+            }
+
+            return isValid;
+
+        } catch (e) {
+            this.logger.error("Bundle verification error", e);
+            return false;
+        }
+    }
+
+    private hexToArrayBuffer(hex: string): ArrayBuffer {
+        if (!hex) return new ArrayBuffer(0);
+        const typedArray = new Uint8Array(hex.match(/[\da-f]{2}/gi)!.map(function (h) {
+            return parseInt(h, 16);
+        }));
+        return typedArray.buffer;
+    }
+
+    async importVerificationKey(pem: string): Promise<CryptoKey> {
+        const binaryDer = this.base64ToArrayBuffer(pem.replace(/(\r\n|\n|\r)/gm, "").replace("-----BEGIN PUBLIC KEY-----", "").replace("-----END PUBLIC KEY-----", ""));
+        return window.crypto.subtle.importKey(
+            "spki",
+            binaryDer,
+            {
+                name: "RSASSA-PKCS1-v1_5",
+                hash: "SHA-256"
+            },
+            true,
+            ["verify"]
+        );
     }
 
     async importKey(keyStr: string, type: "public" | "private"): Promise<CryptoKey> {
