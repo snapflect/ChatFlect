@@ -203,7 +203,7 @@ export class ChatService {
         // 2. Outbox Stream (Pending)
         const outboxStream = this.outbox.getQueue().pipe(
             map(queue => queue
-                .filter(m => m.chat_id === chatId)
+                .filter(m => m.chat_id === chatId && m.state !== 'SENT') // FIX: Exclude SENT, let relay stream handle them
                 .map(m => ({
                     id: m.message_uuid,
                     senderId: this.auth.getUserId(),

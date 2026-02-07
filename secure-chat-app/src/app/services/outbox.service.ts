@@ -8,7 +8,7 @@
 
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, from, Observable, of, throwError } from 'rxjs';
+import { BehaviorSubject, firstValueFrom, from, Observable, of, throwError } from 'rxjs';
 import { catchError, concatMap, delay, filter, map, retryWhen, scan, take, tap } from 'rxjs/operators';
 import * as idb from 'idb-keyval';
 import { v7 as uuidv7 } from 'uuid';
@@ -192,14 +192,12 @@ export class OutboxService {
     }
 
     private async sendToBackend(msg: OutboxMessage): Promise<SendResult> {
-        return this.relay.sendMessage(msg.chat_id, msg.encrypted_payload, msg.message_uuid)
+        const obs$ = this.relay.sendMessage(msg.chat_id, msg.encrypted_payload, msg.message_uuid)
             .pipe(
                 map(res => ({
                     success: res.success,
                     server_seq: res.server_seq,
                     message_uuid: msg.message_uuid,
-                    // server_received_at from relay response would be nice, but interface might differ
-                    // relay response has timestamp
                 })),
                 catchError(err => {
                     return of({
@@ -208,7 +206,9 @@ export class OutboxService {
                         message_uuid: msg.message_uuid
                     });
                 })
-            ).toPromise() as Promise<SendResult>;
+            );
+
+        return await firstValueFrom(obs$) as SendResult;
     }
 
     // ===========================================
@@ -226,28 +226,22 @@ export class OutboxService {
     }
 
     private async markSent(uuid: string, serverSeq: number, serverReceivedAt?: string) {
-        const queue = this.queue$.value;
-        // Remove from queue completely once sent? 
-        // Or keep until ACK? 
-        // For now: Mark SENT and keep for cleanup/history or remove to save space.
-        // Spec says: SENT -> DELIVERED. So keep it.
+        // Update state to SENT (don't delete, preserve history/retry info)
+        await this.updateMessageState(uuid, 'SENT', {
+            sent_at: Date.now()
+            // potentially store serverSeq if we want to cross-ref
+        });
 
-        const index = queue.findIndex((m) => m.message_uuid === uuid);
-        if (index === -1) return;
-
-        // We can arguably remove it from Outbox as it's now "Sent" and responsibility moves to Chat History
-        const newQueue = queue.filter(m => m.message_uuid !== uuid);
-        await this.saveQueue(newQueue);
-
-        // Notify listeners (ChatService) - implementation detail
-        // For now the Queue observable update handles UI removal
+        // Cleanup: We can keep SENT messages for a while or until DELIVERED (via pull)
+        // For failover safety, we keep them.
     }
 
     private async handleFailure(msg: OutboxMessage, error: string) {
         const retryCount = msg.retry_count + 1;
 
         // Exponential backoff
-        const delayIndex = Math.min(retryCount, RETRY_DELAYS.length - 1);
+        // Fix: Index should start at 0 for retry 1
+        const delayIndex = Math.min(retryCount - 1, RETRY_DELAYS.length - 1);
         const delayMs = RETRY_DELAYS[delayIndex];
         const nextRetry = Date.now() + delayMs;
 

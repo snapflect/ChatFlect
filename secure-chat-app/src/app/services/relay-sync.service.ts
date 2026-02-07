@@ -1,5 +1,5 @@
 import { Injectable, OnDestroy } from '@angular/core';
-import { BehaviorSubject, Observable, Subscription, timer, Subject } from 'rxjs';
+import { BehaviorSubject, Observable, Subscription, timer, Subject, of } from 'rxjs';
 import { switchMap, tap, takeUntil, filter, catchError } from 'rxjs/operators';
 import { RelayService, RelayMessage } from './relay.service';
 import { MessageOrderingService } from './message-ordering.service';
@@ -42,6 +42,10 @@ export class RelaySyncService implements OnDestroy {
         }
 
         this.stopPolling(); // Stop previous
+
+        // Fix 1: Reset stop signal for new session
+        this.stopPolling$ = new Subject<void>();
+
         this.activeChatId = chatId;
         this.startPollingInternal();
     }
@@ -62,7 +66,8 @@ export class RelaySyncService implements OnDestroy {
                 return this.relay.fetchMessages(chatId, currentSeq).pipe(
                     catchError(err => {
                         console.warn('[RelaySync] Poll Error:', err.message);
-                        return []; // Keep stream alive
+                        // Fix 2: Return valid Observable structure
+                        return of({ messages: [] });
                     })
                 );
             }),
