@@ -19,17 +19,46 @@ export class SignalService {
         this.store = store;
     }
 
-    // --- 1. Registration Flow ---
+    // --- ECDSA Signing (Epic 5 Strict) ---
+
+    async getOrCreateSigningKey(): Promise<CryptoKeyPair> {
+        let keyPair = await this.store.loadSigningKey();
+        if (!keyPair) {
+            keyPair = await window.crypto.subtle.generateKey(
+                {
+                    name: "ECDSA",
+                    namedCurve: "P-256"
+                },
+                true,
+                ["sign", "verify"]
+            ) as CryptoKeyPair;
+            await this.store.saveSigningKey(keyPair);
+        }
+        return keyPair;
+    }
+
+    async signPayload(payload: string): Promise<string> {
+        const keyPair = await this.getOrCreateSigningKey();
+        const enc = new TextEncoder();
+        const signature = await window.crypto.subtle.sign(
+            {
+                name: "ECDSA",
+                hash: { name: "SHA-256" },
+            },
+            keyPair.privateKey,
+            enc.encode(payload)
+        );
+        return this.arrayBufferToBase64(signature);
+    }
+
+    // Updated Registration Flow
     async register(): Promise<void> {
-        // 1. Generate Identity Key Pair
+        // ... (existing signal key gen) ...
         const registrationId = libsignal.KeyHelper.generateRegistrationId();
         const identityKeyPair = await libsignal.KeyHelper.generateIdentityKeyPair();
-
-        // 2. Generate Signed PreKey (Rotate ID)
         const signedPreKeyId = await this.store.getNextSignedPreKeyId();
         const signedPreKey = await libsignal.KeyHelper.generateSignedPreKey(identityKeyPair, signedPreKeyId);
 
-        // 3. Generate One-Time PreKeys (Batch of 100)
         const count = 100;
         const startId = await this.store.reservePreKeyIds(count);
         const preKeys = [];
@@ -39,17 +68,20 @@ export class SignalService {
             preKeys.push(key);
         }
 
-        // 4. Store Locally
         await this.store.setLocalIdentity(identityKeyPair, registrationId);
         await this.store.storeSignedPreKey(signedPreKeyId, signedPreKey.keyPair);
         for (const key of preKeys) {
             await this.store.storePreKey(key.keyId, key.keyPair);
         }
 
-        const deviceId = this.authService.getDeviceId() || 1; // Strict: Get from Auth
-        const keyVersion = 1; // Story 3.1: Initial Version
+        const deviceId = this.authService.getDeviceId() || 1;
+        const keyVersion = 1;
 
-        // 5. Upload to Backend
+        // Generate ECDSA Signing Key
+        const signingKeyPair = await this.getOrCreateSigningKey();
+        const signingPubExp = await window.crypto.subtle.exportKey('spki', signingKeyPair.publicKey);
+        const signingPubB64 = this.arrayBufferToBase64(signingPubExp);
+
         const bundle = {
             registrationId: registrationId,
             identityKey: this.arrayBufferToBase64(identityKeyPair.pubKey),
@@ -63,22 +95,19 @@ export class SignalService {
                 publicKey: this.arrayBufferToBase64(k.keyPair.pubKey)
             })),
             deviceId: deviceId,
-            keyVersion: keyVersion // Story 3.1
+            keyVersion: keyVersion,
+            signing_public_key: signingPubB64 // New Field
         };
 
-        // Authenticated HTTP Upload
         try {
-            await this.http.post(`${environment.apiUrl}/keys`, bundle, {
+            await this.http.post(`${environment.apiUrl}/devices?action=register`, bundle, {
                 withCredentials: true
             }).toPromise();
 
-            // Story 3.1: Store initialized version
             await this.store.setLocalKeyVersion(keyVersion);
-
             console.log('Keys uploaded successfully');
         } catch (e) {
             console.error('Registration failed at backend', e);
-            // Rollback? For now just throw.
             throw e;
         }
     }
@@ -205,29 +234,6 @@ export class SignalService {
         } catch (e) {
             console.error(`Decryption failed from ${remoteUserId}:${remoteDeviceId}`, e);
             throw e; // Bubble up for "Decryption Error" UI
-        }
-    }
-
-    // --- 5. Anti-Tamper Signing (Epic 5 Strict) ---
-    async signPayload(payload: string): Promise<string> {
-        // 1. Get Identity Key
-        const identityKeyPair = await this.store.getIdentityKeyPair();
-        if (!identityKeyPair) {
-            throw new Error('Identity Key not found');
-        }
-
-        // 2. Sign
-        const messageBuffer = new TextEncoder().encode(payload).buffer;
-        try {
-            // Bypass TS check for Curve.calculateSignature if types are incomplete
-            const signature = await (libsignal as any).Curve.calculateSignature(
-                identityKeyPair.privKey,
-                messageBuffer
-            );
-            return this.arrayBufferToBase64(signature);
-        } catch (e) {
-            console.error('Signing failed', e);
-            throw new Error('Signing failed');
         }
     }
 

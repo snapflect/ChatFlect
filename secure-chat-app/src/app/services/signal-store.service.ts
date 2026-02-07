@@ -317,4 +317,42 @@ export class SignalStoreService implements SignalProtocolStore {
         await set('identityKey', encKey);
         await set('registrationId', registrationId);
     }
+
+    // --- ECDSA Signing Key (Epic 5 Strict) ---
+    async saveSigningKey(keyPair: CryptoKeyPair): Promise<void> {
+        const pub = await window.crypto.subtle.exportKey('jwk', keyPair.publicKey);
+        const priv = await window.crypto.subtle.exportKey('jwk', keyPair.privateKey);
+        const data = { pub, priv };
+        const enc = await this.encryptData(data);
+        await set('ecdsa_signing_key', enc);
+    }
+
+    async loadSigningKey(): Promise<CryptoKeyPair | null> {
+        const enc = await get('ecdsa_signing_key');
+        if (!enc) return null;
+
+        try {
+            const data = await this.decryptData(enc);
+            if (!data || !data.pub || !data.priv) return null;
+
+            const publicKey = await window.crypto.subtle.importKey(
+                'jwk',
+                data.pub,
+                { name: 'ECDSA', namedCurve: 'P-256' },
+                true,
+                ['verify']
+            );
+            const privateKey = await window.crypto.subtle.importKey(
+                'jwk',
+                data.priv,
+                { name: 'ECDSA', namedCurve: 'P-256' },
+                true,
+                ['sign']
+            );
+            return { publicKey, privateKey };
+        } catch (e) {
+            console.error('Failed to load ECDSA signing key', e);
+            return null;
+        }
+    }
 }

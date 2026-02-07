@@ -70,9 +70,10 @@ if ($method === 'POST') {
     if ($action === 'register') {
         $userId = isset($data['user_id']) ? trim(strtoupper($data['user_id'])) : ''; // v16.0 Zero-Trust Normalization
         $deviceUuid = $data['device_uuid'] ?? '';
-        $publicKey = $data['public_key'] ?? '';
+        $publicKey = $data['public_key'] ?? ''; // Signal Identity Key
         $deviceName = $data['device_name'] ?? 'Mobile Device';
         $fcmToken = $data['fcm_token'] ?? null;
+        $signingPubKey = $data['signing_public_key'] ?? null; // STRICT FIX (Epic 5): ECDSA Key
 
         if (!$userId || !$deviceUuid || !$publicKey) {
             http_response_code(400);
@@ -187,8 +188,9 @@ if ($method === 'POST') {
 
         // Upsert device
         // Story 3.1: Include key_version in INSERT/UPDATE
-        $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token, signature, bundle_version, signed_at, libsignal_device_id, key_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, signature = ?, bundle_version = ?, signed_at = ?, libsignal_device_id = ?, key_version = ?, last_active = NOW()");
+        // Epic 5: Include signing_public_key
+        $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token, signature, bundle_version, signed_at, libsignal_device_id, key_version, signing_public_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, signature = ?, bundle_version = ?, signed_at = ?, libsignal_device_id = ?, key_version = ?, signing_public_key = ?, last_active = NOW()");
 
         if (!$stmt) {
             http_response_code(500);
@@ -197,13 +199,6 @@ if ($method === 'POST') {
         }
 
         $stmt->bind_param(
-            "ssssssisiiisssisii", // types
-            $userId,
-            $deviceUuid,
-            $publicKey,
-            $deviceName,
-            $fcmToken,
-            $signature,
             $bundleVersion,
             $timestamp,
             $sigId,

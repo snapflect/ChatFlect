@@ -55,7 +55,7 @@ if (abs($serverTime - $timestamp) > $skewLimit) {
     exit;
 }
 
-// 3.5 SIGNATURE VERIFICATION (STRICT FIX: Ed25519 Identity Signature)
+// 3.5 SIGNATURE VERIFICATION (STRICT FIX: ECDSA P-256)
 $headers = getallheaders();
 $clientSig = $headers['X-Signal-Metadata-Signature'] ?? $headers['x-signal-metadata-signature'] ?? '';
 
@@ -65,8 +65,9 @@ if (empty($clientSig)) {
     exit;
 }
 
-// Fetch Device Identity Key
-$stmtKey = $conn->prepare("SELECT public_key FROM user_devices WHERE user_id = ? AND device_uuid = ? AND status = 'active'");
+// Fetch Device Signing Key
+// STRICT: Only use signing_public_key (ECDSA). Do not fall back to Signal Key.
+$stmtKey = $conn->prepare("SELECT signing_public_key FROM user_devices WHERE user_id = ? AND device_uuid = ? AND status = 'active'");
 $stmtKey->bind_param("ss", $userId, $deviceUuid);
 $stmtKey->execute();
 $resKey = $stmtKey->get_result();
@@ -74,39 +75,41 @@ $resKey = $stmtKey->get_result();
 if ($resKey->num_rows === 0) {
     $stmtKey->close();
     http_response_code(403);
-    echo json_encode(["error" => "Device not recognized or inactive"]);
+    echo json_encode(["error" => "Device not recognized or active"]);
     exit;
 }
 
 $rowKey = $resKey->fetch_assoc();
-$devicePubKeyB64 = $rowKey['public_key']; // Expected to be Base64
+$signingPubKeyB64 = $rowKey['signing_public_key'];
 $stmtKey->close();
 
-// Verify Ed25519 Signature
-// PHP Sodium extension required
-if (!function_exists('sodium_crypto_sign_verify_detached')) {
-    error_log("CRITICAL: Sodium extension missing for signature verification");
-    http_response_code(500);
-    echo json_encode(["error" => "Server crypto configuration error"]);
+if (empty($signingPubKeyB64)) {
+    http_response_code(426); // Upgrade Required
+    echo json_encode(["error" => "Security Upgrade: Re-registration required for signing"]);
     exit;
 }
 
+// Verify ECDSA Signature
 try {
-    $sigBin = base64_decode($clientSig);
-    $pubKeyBin = base64_decode($devicePubKeyB64);
+    // Strict Base64 Decoding
+    $sigBin = base64_decode($clientSig, true);
+    $pubKeyBin = base64_decode($signingPubKeyB64, true);
 
-    // LibSignal Identity Keys have a type byte (0x05) prefix? 
-    // Usually yes (DJB type). Sodium expects raw 32 bytes for Ed25519.
-    // If key has prefix (33 bytes), strip first byte.
-    if (strlen($pubKeyBin) === 33) {
-        $pubKeyBin = substr($pubKeyBin, 1);
+    if ($sigBin === false || $pubKeyBin === false) {
+        throw new Exception("Invalid Base64 Encoding");
     }
 
-    // Message is the Raw Body
-    $verified = sodium_crypto_sign_verify_detached($sigBin, $rawBody, $pubKeyBin);
+    // Format as PEM for OpenSSL
+    $pem = "-----BEGIN PUBLIC KEY-----\n" .
+        chunk_split($signingPubKeyB64, 64, "\n") .
+        "-----END PUBLIC KEY-----\n";
 
-    if (!$verified) {
-        error_log("Signature Mismatch: ID=$msgId User=$userId Device=$deviceUuid");
+    // OpenSSL Verify (SHA256)
+    $verified = openssl_verify($rawBody, $sigBin, $pem, OPENSSL_ALGO_SHA256);
+
+    if ($verified !== 1) {
+        // 0 = Fail, -1 = Error
+        error_log("Signature Mismatch (ECDSA): ID=$msgId User=$userId Device=$deviceUuid OpenSSL=$verified");
         http_response_code(401);
         echo json_encode(["error" => "Integrity check failed: Invalid Signature"]);
         exit;
@@ -119,19 +122,17 @@ try {
 }
 
 // 4. NONCE UNIQUENESS (Replay Protection)
-// Check if message_id already processed
 $stmt = $conn->prepare("SELECT message_id FROM message_replay_log WHERE message_id = ?");
 $stmt->bind_param("s", $msgId);
 $stmt->execute();
 if ($stmt->get_result()->num_rows > 0) {
-    http_response_code(409); // Conflict
+    http_response_code(409);
     echo json_encode(["error" => "Replay detected: Message ID already exists"]);
     exit;
 }
 $stmt->close();
 
 // 5. PERSIST NONCE (Optimistic Lock)
-// Log immediately to block race conditions
 try {
     $ins = $conn->prepare("INSERT INTO message_replay_log (message_id, sender_id, device_uuid) VALUES (?, ?, ?)");
     $ins->bind_param("sss", $msgId, $userId, $deviceUuid);
@@ -145,11 +146,13 @@ try {
 }
 
 // 6. FIRESTORE WRITE (Via REST API)
-// Authenticate as Service Account
 $accessToken = getAccessToken('../service-account.json');
 if (is_array($accessToken)) {
-    // START COMPENSATION: Rollback Nonce
-    $conn->query("DELETE FROM message_replay_log WHERE message_id = '$msgId'");
+    // START COMPENSATION: Rollback Nonce (Strict Prepared Statement)
+    $del = $conn->prepare("DELETE FROM message_replay_log WHERE message_id = ?");
+    $del->bind_param("s", $msgId);
+    $del->execute();
+    $del->close();
     // END COMPENSATION
 
     http_response_code(500);
@@ -157,27 +160,27 @@ if (is_array($accessToken)) {
     exit;
 }
 
-$projectId = 'chatflect'; // Hardcoded or fetch from config
-$firestoreUrl = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/chats/$chatId/messages/$msgId";
-// Note: updateMask is complex via REST.
-// Simplification: Just write the message document. Metadata update is separate or via Cloud Function.
-// We strictly write the message doc here.
-
+$projectId = 'chatflect';
+$firestoreUrl = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/chats/$chatId/messages/$msgId"; // PUT implies create/replace
 
 // STRICT FIX: Correct Firestore Type Mapping
 function mapToFirestoreValue($val)
 {
-    if (is_int($val) || is_float($val))
-        return ["integerValue" => (string) $val];
+    if (is_int($val))
+        return ["integerValue" => (string) $val]; // Int64 string
+    if (is_float($val))
+        return ["doubleValue" => $val];        // Double number (not string!)
     if (is_bool($val))
         return ["booleanValue" => $val];
     if (is_array($val)) {
         // Detect Associative vs Indexed Array
         $isAssoc = array_keys($val) !== range(0, count($val) - 1);
+        if (empty($val))
+            $isAssoc = false; // Empty array -> arrayValue usually
+
         if ($isAssoc) {
             return ["mapValue" => ["fields" => array_map('mapToFirestoreValue', $val)]];
         } else {
-            // It's a list/array
             return ["arrayValue" => ["values" => array_map('mapToFirestoreValue', $val)]];
         }
     }
@@ -187,9 +190,10 @@ function mapToFirestoreValue($val)
 $firestoreFields = array_map('mapToFirestoreValue', $input);
 $firestoreBody = ["fields" => $firestoreFields];
 
+// Write Message (Result Checked Later)
 $ch = curl_init();
-curl_setopt($ch, CURLOPT_URL, $firestoreUrl); // PUT to create/overwrite
-curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PATCH'); // Use PATCH to upsert
+curl_setopt($ch, CURLOPT_URL, $firestoreUrl);
+curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($firestoreBody));
 curl_setopt($ch, CURLOPT_HTTPHEADER, [
     "Authorization: Bearer $accessToken",
@@ -201,12 +205,39 @@ $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 
 if ($httpCode >= 400) {
-    // STRICT FIX: Compensation - Rollback Nonce if Firestore fails
-    $conn->query("DELETE FROM message_replay_log WHERE message_id = '$msgId'");
+    // STRICT FIX: Compensation - Rollback Nonce (Prepared)
+    $del = $conn->prepare("DELETE FROM message_replay_log WHERE message_id = ?");
+    $del->bind_param("s", $msgId);
+    $del->execute();
 
     http_response_code(500);
     echo json_encode(["error" => "Firestore Write Failed", "details" => $fsResult]);
     exit;
 }
+
+
+// 7. METADATA UPDATE (Strict Backend Responsibility)
+// Update lastTimestamp in chats/{chatId}
+$metaUrl = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/chats/$chatId?updateMask.fieldPaths=lastTimestamp";
+$metaBody = [
+    "fields" => [
+        "lastTimestamp" => ["integerValue" => (string) $timestamp] // timestamp is from input (validated)
+    ]
+];
+// Use PATCH for partial update
+$chM = curl_init();
+curl_setopt($chM, CURLOPT_URL, $metaUrl);
+curl_setopt($chM, CURLOPT_CUSTOMREQUEST, 'PATCH');
+curl_setopt($chM, CURLOPT_POSTFIELDS, json_encode($metaBody));
+curl_setopt($chM, CURLOPT_HTTPHEADER, [
+    "Authorization: Bearer $accessToken",
+    "Content-Type: application/json"
+]);
+curl_setopt($chM, CURLOPT_RETURNTRANSFER, true);
+// Fire and forget (or log warning). Don't fail the message if metadata update fails (eventual consistency).
+$resM = curl_exec($chM);
+curl_close($chM);
+
+echo $fsResult; // Return the message object execution result
 
 echo json_encode(["status" => "success", "id" => $msgId]);
