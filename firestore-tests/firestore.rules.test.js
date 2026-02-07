@@ -109,9 +109,10 @@ describe("Firestore Security Rules", () => {
             await assertFails(db.collection(`chats/${CHAT_AB}/messages`).get());
         });
 
-        it("should ALLOW reading messages for participant with active device (User A)", async () => {
+        // PHASE 3 UPDATE: DIRECT READS DENIED FOR EVERYONE
+        it("should DENY reading messages even for participant with active device (User A)", async () => {
             const db = userWithDevice(USER_A, DEVICE_A_ACTIVE).firestore();
-            await assertSucceeds(db.collection(`chats/${CHAT_AB}/messages`).get());
+            await assertFails(db.collection(`chats/${CHAT_AB}/messages`).get());
         });
     });
 

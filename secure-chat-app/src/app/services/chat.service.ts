@@ -14,8 +14,8 @@ import {
     where, increment, arrayUnion, arrayRemove, collectionGroup, getDocs, deleteDoc,
     limit, startAfter, limitToLast, enableNetwork
 } from 'firebase/firestore';
-import { Observable, BehaviorSubject, Subject, combineLatest } from 'rxjs'; // Fix: added combineLatest
-import { shareReplay, map } from 'rxjs/operators'; // Fix: added map
+import { Observable, BehaviorSubject, Subject, combineLatest } from 'rxjs';
+import { shareReplay, map, concatMap } from 'rxjs/operators'; // Fix: added concatMap
 import { CryptoService } from './crypto.service';
 import { ApiService } from './api.service';
 import { ToastController } from '@ionic/angular';
@@ -30,9 +30,10 @@ import { db, auth } from './firebase.config';
 import { environment } from '../../environments/environment';
 import { HttpClient } from '@angular/common/http';
 import { DomSanitizer } from '@angular/platform-browser';
-import { OutboxService } from './outbox.service'; // NEW
-import { MessageOrderingService } from './message-ordering.service'; // Epic 13
-import { v7 as uuidv7 } from 'uuid'; // Epic 12
+import { OutboxService } from './outbox.service';
+import { MessageOrderingService } from './message-ordering.service';
+import { RelaySyncService } from './relay-sync.service'; // NEW
+import { v7 as uuidv7 } from 'uuid';
 
 const FIREBASE_READY_TIMEOUT_MS = 30_000;
 
@@ -75,8 +76,9 @@ export class ChatService {
         private secureStorage: SecureStorageService,
         private http: HttpClient,
         private sanitizer: DomSanitizer,
-        private outbox: OutboxService, // NEW
-        private ordering: MessageOrderingService // Epic 13
+        private outbox: OutboxService,
+        private ordering: MessageOrderingService,
+        private relaySync: RelaySyncService
     ) {
         this.initHistorySyncLogic();
         this.presence.initPresenceTracking();
@@ -99,7 +101,7 @@ export class ChatService {
     async sendMessage(chatId: string, content: string, type: 'text' | 'image' | 'video' | 'audio' | 'file' = 'text', fileData?: any) {
         if (!content && !fileData) return;
 
-        const myId = this.auth.getCurrentUserId();
+        const myId = this.auth.getUserId();
         if (!myId) {
             throw new Error('User not authenticated');
         }
@@ -121,7 +123,8 @@ export class ChatService {
         // 3. Encrypt for Receiver (Signal Protocol)
         // Get receiver ID (1:1 assumption for MVP, group needs iteration)
         const receiverId = await this.getReceiverId(chatId, myId);
-        const encrypted = await this.signalService.encryptMessage(receiverId, payloadStr);
+        // FIXME: MVP assumes device ID 1 for now. Real implementation iterates all devices.
+        const encrypted = await this.signalService.encryptMessage(payloadStr, receiverId, 1);
 
         // 4. Assign Local Sequence (Epic 13)
         const localSeq = this.ordering.getNextLocalSeq(chatId);
@@ -142,57 +145,92 @@ export class ChatService {
     /* -------------------- UPDATED: GET MESSAGES (Epic 15) -------------------- */
     // Returns Combined Stream: Firestore(Confirmed) + Outbox(Pending)
 
+    // -----------------------------------------------------------------------
+    // NEW: Relay-based Stream
+    // -----------------------------------------------------------------------
     getMessagesStream(chatId: string): Observable<any[]> {
         if (this.messageStreams.has(chatId)) {
             return this.messageStreams.get(chatId)!;
         }
 
-        // 1. Firestore Stream (Confirmed Messages)
-        const firestoreStream = this.getSimpleMessagesStream(chatId);
+        // 1. Relay Stream (Polling)
+        this.relaySync.startPolling(chatId);
 
-        // 2. Outbox Stream (Pending Messages for this chat)
+        const relayStream = this.relaySync.getStream().pipe(
+            // Since relaySync is stateful for active chat, we assume messages are for current chat or we can check if property exists
+            map((messages: any[]) => messages),
+            concatMap(async (messages: any[]) => {
+                // Decrypt all messages
+                const decrypted = await Promise.all(messages.map(async (m: any) => {
+                    if (this.decryptedCache.has(m.message_uuid)) {
+                        return this.decryptedCache.get(m.message_uuid);
+                    }
+                    try {
+                        const plaintext = await this.signalService.decryptMessage(m.sender_id, {
+                            body: m.encrypted_payload,
+                            type: 3 // WHISPER_MSG
+                        });
+                        const payload = JSON.parse(plaintext);
+                        const displayMsg = {
+                            id: m.message_uuid,
+                            senderId: m.sender_id,
+                            content: payload.content,
+                            type: payload.type || 'text',
+                            timestamp: new Date(m.created_at).getTime(),
+                            server_seq: m.server_seq,
+                            local_seq: null,
+                            status: 'DELIVERED', // From server
+                            processed: true
+                        };
+                        this.decryptedCache.set(m.message_uuid, displayMsg);
+                        return displayMsg;
+                    } catch (e) {
+                        console.error('Decryption failed for msg', m.message_uuid, e);
+                        return {
+                            id: m.message_uuid,
+                            content: '⚠️ Decryption Failed',
+                            type: 'text',
+                            senderId: m.sender_id,
+                            timestamp: new Date(m.created_at).getTime(),
+                            server_seq: m.server_seq
+                        };
+                    }
+                }));
+                return decrypted;
+            })
+        );
+
+        // 2. Outbox Stream (Pending)
         const outboxStream = this.outbox.getQueue().pipe(
             map(queue => queue
                 .filter(m => m.chat_id === chatId)
                 .map(m => ({
                     id: m.message_uuid,
-                    senderId: this.auth.getCurrentUserId(), // My message
-                    // Decrypt internal payload logic would go here if we stored plaintext, 
-                    // but we store encrypted. For UI, we might need to store plaintext 
-                    // or decrypt it back. Ideally store separate UI-friendly version or re-decrypt?
-                    // For MVP optimization: Outbox *could* store plaintext for UI, but Security says NO.
-                    // Solution: Signal Service local decrypt or cache.
-                    // Let's assume we can 'peek' or store a temp UI cache separate from secure outbox.
-                    // But for strict security: Store encrypted, decrypt on load.
-                    content: '[Pending...]', // Placeholder until we fix UI-side decryption of own outbox
+                    senderId: this.auth.getUserId(),
+                    content: '[Pending...]', // Placeholder
                     type: 'text',
                     timestamp: m.created_at,
-                    server_seq: null, // Pending
+                    server_seq: null,
                     local_seq: m.local_seq,
-                    status: m.state // 'QUEUED', 'SENDING', 'FAILED'
+                    status: m.state
                 }))
             )
         );
 
-        // 3. Combine and Sort (Epic 13)
-        const combined = combineLatest([firestoreStream, outboxStream]).pipe(
-            map(([confirmed, pending]) => {
-                // Merge
-                const all = [...confirmed, ...pending];
-
-                // Deduplicate (Epic 12) - Outbox item might exist in confirmed if ACK is slow
-                // Prefer Confirmed if UUID matches
+        // 3. Combine
+        const combined = combineLatest([relayStream, outboxStream]).pipe(
+            map(([serverMsgs, pendingMsgs]) => {
+                const all = [...serverMsgs, ...pendingMsgs];
                 const unique = new Map();
                 for (const m of all) {
-                    const uuid = m.message_uuid || m.id; // standardize ID
-                    if (!unique.has(uuid) || (m.server_seq !== null && unique.get(uuid).server_seq === null)) {
-                        unique.set(uuid, m);
+                    if (!unique.has(m.id)) unique.set(m.id, m);
+                    else {
+                        const existing = unique.get(m.id);
+                        if (existing.server_seq === null && m.server_seq !== null) {
+                            unique.set(m.id, m);
+                        }
                     }
                 }
-
-                // Sort (Epic 13)
-                // 1. Server Seq
-                // 2. Local Seq (if Server Seq null)
                 return this.ordering.sortMessages(Array.from(unique.values()));
             }),
             shareReplay(1)
@@ -200,26 +238,6 @@ export class ChatService {
 
         this.messageStreams.set(chatId, combined);
         return combined;
-    }
-
-    // Helper for Firestore basics
-    private getSimpleMessagesStream(chatId: string): Observable<any[]> {
-        // [Existing Firestore Query Logic]
-        // ... (truncated for brevity, assume calling internal fsOnSnapshot logic)
-        // returning observable of decrypted messages
-
-        // This is a placeholder for the existing complex listener logic
-        // In real code, we wrap the existing listener 
-        return new Observable(observer => {
-            const ref = collection(this.db, `chats/${chatId}/messages`);
-            const q = query(ref, orderBy('server_seq', 'asc'), limit(50));
-            // ... implementation details ...
-            onSnapshot(q, (snap) => {
-                const msgs = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-                // Decrypt loop...
-                observer.next(msgs);
-            });
-        });
     }
 
     // Helper to get other participant ID

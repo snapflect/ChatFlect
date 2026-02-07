@@ -47,6 +47,8 @@ const OUTBOX_STORE_KEY = 'chat_outbox_queue';
 const MAX_RETRIES = 10;
 const RETRY_DELAYS = [2000, 5000, 10000, 30000, 60000, 120000]; // 2s -> 2m cap
 
+import { RelayService } from './relay.service';
+
 @Injectable({
     providedIn: 'root',
 })
@@ -55,7 +57,7 @@ export class OutboxService {
     private isProcessing = false;
     private online$ = new BehaviorSubject<boolean>(navigator.onLine);
 
-    constructor(private http: HttpClient) {
+    constructor(private http: HttpClient, private relay: RelayService) {
         this.init();
     }
 
@@ -188,23 +190,19 @@ export class OutboxService {
     }
 
     private async sendToBackend(msg: OutboxMessage): Promise<SendResult> {
-        const payload = {
-            message_uuid: msg.message_uuid,
-            chat_id: msg.chat_id,
-            receiver_id: msg.receiver_id,
-            encrypted_payload: msg.encrypted_payload,
-            created_at: msg.created_at
-        };
-
-        return this.http.post<SendResult>('/api/v3/send_message.php', payload)
+        return this.relay.sendMessage(msg.chat_id, msg.encrypted_payload, msg.message_uuid)
             .pipe(
-                map(res => ({ ...res, success: true, message_uuid: msg.message_uuid })),
+                map(res => ({
+                    success: res.success,
+                    server_seq: res.server_seq,
+                    message_uuid: msg.message_uuid,
+                    // server_received_at from relay response would be nice, but interface might differ
+                    // relay response has timestamp
+                })),
                 catchError(err => {
-                    // Idempotency check: returns 200 OK with duplicate:true if already sent
-                    // This is already handled by backend returning 200, so HTTP error is a real fail
                     return of({
                         success: false,
-                        error: err.message,
+                        error: err.message || 'Relay Error',
                         message_uuid: msg.message_uuid
                     });
                 })

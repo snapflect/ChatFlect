@@ -49,9 +49,9 @@ service cloud.firestore {
       // MESSAGES SUBCOLLECTION (E2EE payloads)
       // -----------------------------------------
       match /messages/{msgId} {
-        // STRICT: Participants with active device can read
-        allow read: if isParticipant(chatId) && isDeviceActive();
-        allow create, update, delete: if false; // Backend Admin SDK only
+        // PHASE 3: Relay Backend Only
+        // Clients must use /relay/pull API. Direct Firestore access denied.
+        allow read, write: if false; 
       }
 
       // -----------------------------------------
