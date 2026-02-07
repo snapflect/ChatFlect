@@ -29,7 +29,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // 1. Authenticate
 $authData = requireAuth();
 $userId = $authData['user_id'];
-$deviceUuid = $authData['device_uuid'] ?? 'unknown';
+$deviceUuid = $authData['device_uuid'] ?? null;
+
+// STRICT: Require device_uuid
+if (empty($deviceUuid)) {
+    http_response_code(400);
+    echo json_encode(["error" => "MISSING_DEVICE_UUID", "message" => "Device UUID is required"]);
+    exit;
+}
 
 // 1.5 DEVICE ACTIVE CHECK (Phase 1 Security Control)
 // Ensure requesting device is active (not revoked)
@@ -77,7 +84,6 @@ if ($fromSeq > $toSeq) {
 
 // RANGE LIMITS (Abuse Prevention)
 $maxRangeSize = 500;
-$maxSeqWindow = 10000; // Prevent requesting ancient messages en masse
 
 if ($toSeq - $fromSeq > $maxRangeSize) {
     http_response_code(400);
@@ -165,7 +171,7 @@ $queryBody = [
             ]
         ],
         "orderBy" => [["field" => ["fieldPath" => "server_seq"], "direction" => "ASCENDING"]],
-        "limit" => 100
+        "limit" => $maxRangeSize
     ]
 ];
 
