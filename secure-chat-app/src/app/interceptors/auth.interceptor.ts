@@ -17,9 +17,10 @@ export class AuthInterceptor implements HttpInterceptor {
 
     intercept(request: HttpRequest<unknown>, next: HttpHandler): Observable<HttpEvent<unknown>> {
         const userId = localStorage.getItem('user_id');
-        const idToken = localStorage.getItem('id_token');
+        // Cookie Migration: Stop reading token from LocalStorage
+        // const idToken = localStorage.getItem('id_token'); 
 
-        let authReq = this.addAuthHeader(request, userId, idToken);
+        let authReq = this.addAuthHeader(request, userId, null);
 
         return next.handle(authReq).pipe(
             catchError((error: HttpErrorResponse) => {
@@ -55,12 +56,16 @@ export class AuthInterceptor implements HttpInterceptor {
     private addAuthHeader(request: HttpRequest<any>, userId: string | null, token: string | null): HttpRequest<any> {
         if (!userId) return request;
 
-        const authToken = token || userId;
+        const headers: any = {
+            'X-User-ID': userId
+        };
+
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
         return request.clone({
-            setHeaders: {
-                'Authorization': `Bearer ${authToken}`,
-                'X-User-ID': userId
-            }
+            setHeaders: headers
         });
     }
 }

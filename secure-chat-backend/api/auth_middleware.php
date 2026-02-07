@@ -151,16 +151,21 @@ function getXUserIdHeader()
  */
 function authenticateRequest()
 {
-    // 1. Get header
-    $authHeader = getAuthorizationHeader() ?: getXUserIdHeader();
-    if (!$authHeader)
-        return null;
+    // 1. Get token from Cookie (Priority)
+    $token = $_COOKIE['auth_token'] ?? null;
 
-    // 2. Remove 'Bearer ' prefix
-    if (stripos($authHeader, 'Bearer ') === 0) {
-        $token = substr($authHeader, 7);
-    } else {
-        $token = $authHeader;
+    // 2. Fallback: Get header
+    if (!$token) {
+        $authHeader = getAuthorizationHeader() ?: getXUserIdHeader();
+        if (!$authHeader)
+            return null;
+
+        // Remove 'Bearer ' prefix
+        if (stripos($authHeader, 'Bearer ') === 0) {
+            $token = substr($authHeader, 7);
+        } else {
+            $token = $authHeader;
+        }
     }
     $token = trim($token);
 

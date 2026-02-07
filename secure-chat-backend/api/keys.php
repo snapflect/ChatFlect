@@ -20,14 +20,23 @@ if (isset($_GET['user_id'])) {
     auditLog('KEY_FETCH', $authUserId, ['target_user' => $uid]);
 
     // 1. Try fetching device keys
-    $stmt = $conn->prepare("SELECT device_uuid, public_key FROM user_devices WHERE user_id = ?");
+    $stmt = $conn->prepare("SELECT device_uuid, public_key, signature, bundle_version, last_active FROM user_devices WHERE user_id = ?");
     $stmt->bind_param("s", $uid);
     $stmt->execute();
     $resDevices = $stmt->get_result();
 
     $deviceKeys = [];
     while ($row = $resDevices->fetch_assoc()) {
-        $deviceKeys[$row['device_uuid']] = $row['public_key'];
+        // Construct the bundle object
+        $bundle = [
+            'public_key' => $row['public_key'],
+            'version' => (int) ($row['bundle_version'] ?? 1),
+            'timestamp' => $row['last_active'], // Use last_active as timestamp for now
+            'signature' => $row['signature'] ?? null
+        ];
+
+        // Return full bundle object keyed by UUID
+        $deviceKeys[$row['device_uuid']] = $bundle;
     }
 
     // 2. Fetch primary key (legacy fallback or primary device)

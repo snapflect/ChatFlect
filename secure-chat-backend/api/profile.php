@@ -139,6 +139,27 @@ if ($method === 'POST') {
         // 5. Cache Session for instant auth
         CacheService::cacheSession($jti, $userId, ['device' => $deviceUuid]);
 
+        // 6. Set HTTP-Only Cookie
+        $cookieExpires = strtotime($expires);
+        setcookie('auth_token', $jti, [
+            'expires' => $cookieExpires,
+            'path' => '/api',
+            'domain' => '', // Current domain
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'Strict'
+        ]);
+
+        $refreshExpires = time() + (86400 * 30); // 30 Days
+        setcookie('refresh_token', $refreshToken, [
+            'expires' => $refreshExpires,
+            'path' => '/api',
+            'domain' => '',
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'Strict'
+        ]);
+
         // Audit log successful login
         auditLog(AUDIT_LOGIN_SUCCESS, $userId, ['method' => 'email_otp', 'is_new_user' => $isNewUser]);
 
