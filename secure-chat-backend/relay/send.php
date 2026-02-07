@@ -129,6 +129,74 @@ try {
 
     $conn->commit();
 
+    // 6. Push Notification Logic (Wake Signal) - Epic 20
+    // Done AFTER commit to ensure message exists.
+    try {
+        require_once __DIR__ . '/../includes/fcm_helper.php';
+
+        // 1. Identify Receiver(s)
+        // We need to know who the OTHER participants are.
+        $partStmt = $conn->prepare("SELECT user_id FROM chat_participants WHERE chat_id = ? AND user_id != ?");
+
+        if ($partStmt) {
+            $partStmt->bind_param("ss", $chatId, $userId);
+            $partStmt->execute();
+            $res = $partStmt->get_result();
+
+            while ($row = $res->fetch_assoc()) {
+                $receiverId = $row['user_id'];
+
+                // 2. Check Presence
+                $presStmt = $conn->prepare("SELECT status, last_seen FROM presence WHERE user_id = ?");
+                $presStmt->bind_param("s", $receiverId);
+                $presStmt->execute();
+                $presRes = $presStmt->get_result();
+                $pres = $presRes->fetch_assoc();
+                $presStmt->close();
+
+                $shouldPush = false;
+                if (!$pres) {
+                    $shouldPush = true; // No presence = Offline
+                } else {
+                    $isOffline = $pres['status'] === 'offline';
+                    $lastSeen = strtotime($pres['last_seen']);
+                    $isBg = (time() - $lastSeen) > 60; // 60s threshold
+
+                    if ($isOffline || $isBg) {
+                        $shouldPush = true;
+                    }
+                }
+
+                if ($shouldPush) {
+                    // 3. Fetch Tokens
+                    $tokenStmt = $conn->prepare("SELECT token FROM push_tokens WHERE user_id = ? AND is_active = 1");
+                    $tokenStmt->bind_param("s", $receiverId);
+                    $tokenStmt->execute();
+                    $tRes = $tokenStmt->get_result();
+                    $tokens = [];
+                    while ($t = $tRes->fetch_assoc()) {
+                        $tokens[] = $t['token'];
+                    }
+                    $tokenStmt->close();
+
+                    if (!empty($tokens)) {
+                        // 4. Send Wake Signal
+                        FCMHelper::sendWakeSignal($tokens);
+
+                        // 5. Update Rate Limit
+                        $updStmt = $conn->prepare("UPDATE push_tokens SET last_sent_at = NOW() WHERE user_id = ? AND is_active = 1");
+                        $updStmt->bind_param("s", $receiverId);
+                        $updStmt->execute();
+                        $updStmt->close();
+                    }
+                }
+            }
+            $partStmt->close();
+        }
+    } catch (Exception $e) {
+        error_log("[Relay] Push Trigger Warning: " . $e->getMessage());
+    }
+
     // Return Success
     echo json_encode([
         "success" => true,
