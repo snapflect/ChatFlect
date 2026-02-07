@@ -1,0 +1,31 @@
+# CODEOWNERS for ChatFlect Repository
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# ===========================================
+# CRYPTO & SECURITY - Require @snapflect approval
+# ===========================================
+
+# Frontend crypto services
+/secure-chat-app/src/app/services/signal*.ts @snapflect
+/secure-chat-app/src/app/services/crypto*.ts @snapflect
+/secure-chat-app/src/app/services/secure-storage.service.ts @snapflect
+
+# Backend crypto endpoints
+/secure-chat-backend/api/v3/keys.php @snapflect
+/secure-chat-backend/api/v3/send_message.php @snapflect
+/secure-chat-backend/api/devices.php @snapflect
+/secure-chat-backend/api/auth_middleware.php @snapflect
+/secure-chat-backend/includes/CryptoUtils.php @snapflect
+
+# Backend keys
+/secure-chat-backend/keys/ @snapflect
+
+# Firestore security rules
+/firestore.rules @snapflect
+
+# Crypto test suite
+/crypto-tests/ @snapflect
+/firestore-tests/ @snapflect
+
+# Migrations affecting security tables
+/secure-chat-backend/migrations/ @snapflect
