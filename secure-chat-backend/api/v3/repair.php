@@ -31,6 +31,27 @@ $authData = requireAuth();
 $userId = $authData['user_id'];
 $deviceUuid = $authData['device_uuid'] ?? 'unknown';
 
+// 1.5 DEVICE ACTIVE CHECK (Phase 1 Security Control)
+// Ensure requesting device is active (not revoked)
+$stmtDevice = $conn->prepare("SELECT status FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+$stmtDevice->bind_param("ss", $userId, $deviceUuid);
+$stmtDevice->execute();
+$deviceResult = $stmtDevice->get_result();
+
+if ($deviceResult->num_rows === 0) {
+    http_response_code(403);
+    echo json_encode(["error" => "DEVICE_NOT_REGISTERED", "message" => "Device is not registered"]);
+    exit;
+}
+
+$deviceRow = $deviceResult->fetch_assoc();
+if ($deviceRow['status'] !== 'active') {
+    http_response_code(403);
+    echo json_encode(["error" => "DEVICE_REVOKED", "message" => "Device has been revoked. Please re-register."]);
+    exit;
+}
+$stmtDevice->close();
+
 // 2. Parse Query Parameters
 $chatId = $_GET['chatId'] ?? null;
 $fromSeq = isset($_GET['fromSeq']) ? (int) $_GET['fromSeq'] : null;
@@ -54,9 +75,23 @@ if ($fromSeq > $toSeq) {
     exit;
 }
 
-if ($toSeq - $fromSeq > 100) {
+// RANGE LIMITS (Abuse Prevention)
+$maxRangeSize = 500;
+$maxSeqWindow = 10000; // Prevent requesting ancient messages en masse
+
+if ($toSeq - $fromSeq > $maxRangeSize) {
     http_response_code(400);
-    echo json_encode(["error" => "RANGE_TOO_LARGE", "message" => "Maximum 100 messages per repair request"]);
+    echo json_encode([
+        "error" => "RANGE_TOO_LARGE",
+        "message" => "Maximum $maxRangeSize messages per repair request",
+        "max_range" => $maxRangeSize
+    ]);
+    exit;
+}
+
+if ($fromSeq < 1) {
+    http_response_code(400);
+    echo json_encode(["error" => "INVALID_FROM_SEQ", "message" => "fromSeq must be >= 1"]);
     exit;
 }
 
@@ -166,8 +201,10 @@ foreach ($results as $item) {
     $doc = $item['document'];
     $fields = $doc['fields'] ?? [];
 
+    // Include message_uuid for client-side deduplication
     $msg = [
         "id" => basename($doc['name']),
+        "message_uuid" => $fields['message_uuid']['stringValue'] ?? null,
         "server_seq" => isset($fields['server_seq']['integerValue'])
             ? (int) $fields['server_seq']['integerValue']
             : null,
@@ -175,7 +212,8 @@ foreach ($results as $item) {
             ? (int) $fields['timestamp']['integerValue']
             : 0,
         "encrypted_payload" => $fields['encrypted']['stringValue'] ?? null,
-        "sender_id" => $fields['senderId']['stringValue'] ?? null
+        "sender_id" => $fields['senderId']['stringValue'] ?? null,
+        "server_received_at" => $fields['server_received_at']['stringValue'] ?? null
     ];
 
     $messages[] = $msg;
