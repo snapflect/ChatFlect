@@ -38,7 +38,8 @@ $migrations = [
     "ALTER TABLE user_devices ADD COLUMN fcm_token TEXT",
     "ALTER TABLE user_devices ADD COLUMN device_name VARCHAR(100) DEFAULT 'Unknown Device'",
     "ALTER TABLE user_devices ADD COLUMN signature TEXT",
-    "ALTER TABLE user_devices ADD COLUMN bundle_version INT DEFAULT 1"
+    "ALTER TABLE user_devices ADD COLUMN bundle_version INT DEFAULT 1",
+    "ALTER TABLE user_devices ADD COLUMN signed_at VARCHAR(40)"
 ];
 
 foreach ($migrations as $sql) {
@@ -91,27 +92,10 @@ if ($method === 'POST') {
 
         // --- SECURITY FIX (E1): Generate Signed Key Bundle ---
         $bundleVersion = 2;
-        $timestamp = date('c'); // ISO 8601
+        $timestamp = date('c'); // ISO 8601, Exact time of signing
 
         // Canonical payload: user_id|device_uuid|public_key|timestamp|version
-        // Ideally timestamp should be stored too, but schema update for timestamp might be tricky if we re-use existing columns.
-        // For simple MVP we will just sign the static fields + version.
-        // To strictly follow spec, we should store the timestamp that was signed. 
-        // For now, let's use the 'created_at' or current time, but this might cause verification issues if clock skews.
-        // Let's stick to signing user|uuid|key|version for robustness if timestamp storage is missing.
-        // Wait, spec says timestamp is required. Let's add timestamp column or piggyback on last_active? 
-        // Best to add `signed_at` column. For now, let's update schema above to include `signed_at`.
-
-        // Actually, let's update the migration above to include signed_at first.
-        // I will do that in a separate step or just assume current time for now and update Spec to relax timestamp if needed?
-        // No, replay protection needs timestamp.
-        // I will add `signed_at` to migration in next tool call or assume I can't change it easily in one go.
-        // I'll stick to signing `user_id|device_uuid|public_key|version` for this iteration to avoid schema complexity 
-        // if I can't easily add another column right now without breaking flow.
-        // Actually, I can just add `signed_at` column in the migration array above! 
-        // I will use `last_active` as the timestamp for now to keep it simple, or better yet,
-        // let's add `signed_at` column.
-
+        // We MUST store this exact timestamp ($timestamp) to allow verification later.
         $canonicalData = CryptoUtils::createCanonicalString($userId, $deviceUuid, $publicKey, $timestamp, $bundleVersion);
         $signature = CryptoUtils::signPayload($canonicalData);
 
@@ -173,8 +157,9 @@ if ($method === 'POST') {
         }
 
         // Upsert device
-        $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token) VALUES (?, ?, ?, ?, ?) 
-                                ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, last_active = NOW()");
+        // FIX: Store signed_at timestamp
+        $stmt = $conn->prepare("INSERT INTO user_devices (user_id, device_uuid, public_key, device_name, fcm_token, signature, bundle_version, signed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
+                                ON DUPLICATE KEY UPDATE public_key = ?, device_name = ?, fcm_token = ?, signature = ?, bundle_version = ?, signed_at = ?, last_active = NOW()");
 
         if (!$stmt) {
             http_response_code(500);
@@ -182,7 +167,23 @@ if ($method === 'POST') {
             exit;
         }
 
-        $stmt->bind_param("ssssssss", $userId, $deviceUuid, $publicKey, $deviceName, $fcmToken, $publicKey, $deviceName, $fcmToken);
+        $stmt->bind_param(
+            "ssssssissssssis",
+            $userId,
+            $deviceUuid,
+            $publicKey,
+            $deviceName,
+            $fcmToken,
+            $signature,
+            $bundleVersion,
+            $timestamp,
+            $publicKey,
+            $deviceName,
+            $fcmToken,
+            $signature,
+            $bundleVersion,
+            $timestamp
+        );
 
         if ($stmt->execute()) {
             auditLog('device_registered', $userId, ['device_uuid' => $deviceUuid]);

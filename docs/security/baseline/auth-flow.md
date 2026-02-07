@@ -16,8 +16,9 @@ ChatFlect uses a hybrid authentication model. Identity is established via the **
     - Backend validates OTP.
     - Backend stores the Public Key for the user.
     - Backend generates a **JWT ID Token** and a **Refresh Token**.
-    - Backend returns these tokens plus the `user_id`.
-4.  **Local Storage**: Client saves `user_id`, `id_token`, `refresh_token`, and the private key of the pair.
+    - Backend sets these as **HTTP-Only, Secure, SameSite=Strict Cookies**.
+    - Backend returns the `user_id`.
+4.  **Local Storage**: Client saves `user_id` and the private key of the pair. **Tokens are NOT stored in LocalStorage.**
 
 ### 2.2 Firebase Bridge (Custom Token Exchange)
 To access Firestore and FCM, the client must authenticate with Firebase:
@@ -28,9 +29,9 @@ To access Firestore and FCM, the client must authenticate with Firebase:
 5.  Firebase verifies the token and issues a standard Firebase ID Token.
 
 ### 2.3 Token Usage & Interceptors
-- **Client Side**: Every outgoing API request is intercepted by `AuthInterceptor`. It attaches the `Authorization: Bearer <id_token>` and `X-User-ID` headers.
+- **Client Side**: `AuthInterceptor` no longer attaches the `Authorization` header by default. The browser automatically sends the **HttpOnly Cookie** with the request.
 - **Backend Side**: `auth_middleware.php` intercepts requests:
-    1.  Extracts the token from headers.
+    1.  Extracts the token from **Cookie** (Primary) or Header (Fallback).
     2.  Check Cache: Uses `CacheService` for fast validation of active sessions.
     3.  Slow Path: Validates JWT signature and expiration.
     4.  Identity Resolution: Maps Google `sub` to a local `user_id` if necessary.
@@ -50,10 +51,10 @@ sequenceDiagram
     C->>B: API Request (with Expired Token)
     B-->>C: 401 Unauthorized
     Note over C: Interceptor catches 401
-    C->>R: POST /refresh_token.php (with refresh_token)
-    R->>R: Validate & Rotate Refresh Token
-    R-->>C: New id_token + New refresh_token
-    C->>C: Update Local Storage
+    C->>R: POST /refresh_token.php (Browser sends refresh_token cookie)
+    R->>R: Validate & Rotate Refresh Token (CSRF Protected)
+    R-->>C: Set-Cookie: new auth_token + new refresh_token
+    C->>C: No LocalStorage update required
     C->>B: Retry original API Request (New Token)
     B-->>C: 200 OK
 ```

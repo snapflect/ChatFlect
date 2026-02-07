@@ -6,6 +6,9 @@
 require 'db.php';
 require_once 'auth_middleware.php';
 
+// SECURITY FIX (Review 1.7): CSRF Protection
+validateCSRF();
+
 header('Content-Type: application/json');
 
 // 1. Get Token (from Cookie or Header)

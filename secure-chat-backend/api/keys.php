@@ -20,7 +20,7 @@ if (isset($_GET['user_id'])) {
     auditLog('KEY_FETCH', $authUserId, ['target_user' => $uid]);
 
     // 1. Try fetching device keys
-    $stmt = $conn->prepare("SELECT device_uuid, public_key, signature, bundle_version, last_active FROM user_devices WHERE user_id = ?");
+    $stmt = $conn->prepare("SELECT device_uuid, public_key, signature, bundle_version, last_active, signed_at FROM user_devices WHERE user_id = ?");
     $stmt->bind_param("s", $uid);
     $stmt->execute();
     $resDevices = $stmt->get_result();
@@ -31,7 +31,7 @@ if (isset($_GET['user_id'])) {
         $bundle = [
             'public_key' => $row['public_key'],
             'version' => (int) ($row['bundle_version'] ?? 1),
-            'timestamp' => $row['last_active'], // Use last_active as timestamp for now
+            'timestamp' => $row['signed_at'] ?? $row['last_active'], // Prefer signed_at for verification
             'signature' => $row['signature'] ?? null
         ];
 

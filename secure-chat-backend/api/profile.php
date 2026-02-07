@@ -44,6 +44,9 @@ if ($method === 'POST' && json_last_error() !== JSON_ERROR_NONE) {
 }
 
 if ($method === 'POST') {
+    // SECURITY FIX (Review 1.7): CSRF Protection for Login/Profile Actions
+    validateCSRF();
+
     /* ---------- OTP CONFIRM (UNCHANGED) ---------- */
     /* ---------- OTP CONFIRM (HYBRID) ---------- */
     if (isset($data->action) && $data->action === 'confirm_otp') {

@@ -9,6 +9,10 @@ require_once 'auth_middleware.php';
 $json = file_get_contents("php://input");
 $data = json_decode($json);
 
+// SECURITY FIX (Review 1.7): CSRF Protection
+// Refresh Token endpoint relies on Cookies, so it MUST be protected against CSRF
+validateCSRF();
+
 // 0. Get Refresh Token from Cookie or Body
 $refreshToken = $data->refresh_token ?? $_COOKIE['refresh_token'] ?? null;
 $userId = sanitizeUserId($data->user_id);
