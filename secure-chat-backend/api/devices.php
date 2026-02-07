@@ -191,7 +191,7 @@ if ($method === 'POST') {
         }
 
         $stmt->bind_param(
-            "ssssssisississisi", // types
+            "ssssssisissssisi", // types
             $userId,
             $deviceUuid,
             $publicKey,
