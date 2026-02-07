@@ -108,7 +108,6 @@ export class SignalStoreService implements SignalProtocolStore {
         }
     }
 
-    // --- ID Generation ---
     async getNextPreKeyId(): Promise<number> {
         return this.reservePreKeyIds(1);
     }
@@ -119,11 +118,8 @@ export class SignalStoreService implements SignalProtocolStore {
         return current;
     }
 
-    async getNextSignedPreKeyId(): Promise<number> {
-        const current = (await get('nextSignedPreKeyId')) || 1;
-        await set('nextSignedPreKeyId', current + 1);
-        return current;
-    }
+    // Duplicate getNextSignedPreKeyId removed here. 
+    // It is implemented correctly at the bottom of the file with signedPreKey methods.
 
     // --- Identity Key (Encrypted) ---
     async getIdentityKeyPair(): Promise<any> {
@@ -218,7 +214,15 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async removeAllPreKeys(): Promise<void> {
-        await clear();
+        // Strict Fix: Do NOT use clear(). Only remove prekeys.
+        const allKeys = await keys();
+        const targetKeys = allKeys.filter(k =>
+            String(k).startsWith('preKey_') ||
+            String(k).startsWith('signedPreKey_')
+        );
+        for (const k of targetKeys) {
+            await del(k);
+        }
     }
 
     // --- Story 3.1: Key Versioning Support ---
@@ -235,7 +239,26 @@ export class SignalStoreService implements SignalProtocolStore {
         await set('local_key_version', version);
     }
 
+    async getLastRotationTimestamp(): Promise<number | undefined> {
+        return await get('last_rotation_timestamp');
+    }
+
+    async setLastRotationTimestamp(ts: number): Promise<void> {
+        await set('last_rotation_timestamp', ts);
+    }
+
     // --- Signed PreKeys ---
+    async getNextSignedPreKeyId(): Promise<number> {
+        const current = (await get('nextSignedPreKeyId')) || 1;
+        // Do not auto-increment here if we want manual control, 
+        // but consistent with getNextPreKeyId, we usually standard increment.
+        return current;
+    }
+
+    async setNextSignedPreKeyId(id: number): Promise<void> {
+        await set('nextSignedPreKeyId', id);
+    }
+
     async getSignedPreKey(keyId: string | number): Promise<any> {
         return this.loadSignedPreKey(keyId);
     }

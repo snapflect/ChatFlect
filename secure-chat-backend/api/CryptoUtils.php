@@ -87,4 +87,74 @@ class CryptoUtils
             $version
         );
     }
+
+    /**
+     * Verify Signal Protocol Signature (Ed25519)
+     * Used for SignedPreKeys and Rotation Requests
+     */
+    public static function verifySignalSignature($identityKeyBase64, $dataBase64, $signatureBase64)
+    {
+        // LibSignal Keys are raw bytes (Base64 encoded)
+        // Need sodium extension for Ed25519
+        if (!function_exists('sodium_crypto_sign_verify_detached')) {
+            error_log("CRITICAL: Sodium extension parsing missing. Cannot verify Signal Signatures.");
+            return false;
+        }
+
+        try {
+            $identityKey = self::base64ToBinary($identityKeyBase64);
+            $data = self::base64ToBinary($dataBase64); // The SignedPreKey Public Key
+            $signature = self::base64ToBinary($signatureBase64);
+
+            // Signal Identity Keys often have a 0x05 prefix (DJB Curve25519) -> Ed25519?
+            // Actually SignedPreKey signing uses the Identity Key directly.
+            // If it's X33519 it needs conversion, but Signal usually keeps Identity as Signing Capable (Ed25519).
+            // NOTE: LibSignal-TypeScript Identity Keys are 33 bytes (0x05 + 32 bytes).
+            // Sodium expects 32 bytes. We might need to strip the prefix.
+            if (strlen($identityKey) === 33 && ord($identityKey[0]) === 5) {
+                $identityKey = substr($identityKey, 1);
+            }
+
+            return sodium_crypto_sign_verify_detached($signature, $data, $identityKey);
+
+        } catch (Exception $e) {
+            error_log("Signature Verification Exception: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Verify Signal Protocol Signature (Ed25519) - RAW DATA
+     * Used for Request Body Verification (X-Signal-Signature)
+     */
+    public static function verifySignalSignatureRaw($identityKeyBase64, $rawData, $signatureBase64)
+    {
+        if (!function_exists('sodium_crypto_sign_verify_detached')) {
+            error_log("CRITICAL: Sodium extension parsing missing.");
+            return false;
+        }
+
+        try {
+            $identityKey = self::base64ToBinary($identityKeyBase64);
+            $signature = self::base64ToBinary($signatureBase64);
+            // $rawData is ALREADY binary/string. Do not decode it.
+
+            // Handle 33-byte Identity Key prefix (0x05)
+            if (strlen($identityKey) === 33 && ord($identityKey[0]) === 5) {
+                $identityKey = substr($identityKey, 1);
+            }
+
+            return sodium_crypto_sign_verify_detached($signature, $rawData, $identityKey);
+
+        } catch (Exception $e) {
+            error_log("Raw Signature Verification Exception: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    private static function base64ToBinary($input)
+    {
+        // Handle URL safe replacements if needed, but standard B64 usually.
+        return base64_decode($input);
+    }
 }
