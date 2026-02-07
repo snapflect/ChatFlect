@@ -22,27 +22,54 @@ export class BackupPage implements OnInit {
     }
 
     async createBackup() {
-        const loading = await this.loadingCtrl.create({ message: 'Generating Backup...' });
+        const alert = await this.alertCtrl.create({
+            header: 'Encrypt Backup',
+            message: 'Please enter a password to encrypt your backup file.',
+            inputs: [
+                {
+                    name: 'password',
+                    type: 'password',
+                    placeholder: 'Password (min 8 chars)'
+                }
+            ],
+            buttons: [
+                {
+                    text: 'Cancel',
+                    role: 'cancel'
+                },
+                {
+                    text: 'Create',
+                    handler: (data) => {
+                        this.doCreateBackup(data.password);
+                    }
+                }
+            ]
+        });
+        await alert.present();
+    }
+
+    async doCreateBackup(password: string) {
+        if (!password || password.length < 8) {
+            this.showToast('Password must be at least 8 characters');
+            return;
+        }
+
+        const loading = await this.loadingCtrl.create({ message: 'Generating Encrypted Backup...' });
         await loading.present();
 
         try {
-            const blob = await this.backupService.createBackup();
-            const reader = new FileReader();
-            reader.onloadend = async () => {
-                const base64data = reader.result as string;
+            const blob = await this.backupService.createBackup(password);
 
-                // Save to Filesystem (Downloads folder?) or Share
-                // For Web/Simplicity: Trigger download anchor
-                this.downloadBlob(blob, `snapflect_backup_${new Date().getTime()}.json`);
+            // Trigger download
+            this.downloadBlob(blob, `snapflect_secure_backup_${new Date().getTime()}.bin`); // .bin for binary
 
-                loading.dismiss();
-                this.showToast('Backup Created & Downloaded!');
-            };
-            reader.readAsDataURL(blob);
-
-        } catch (e) {
             loading.dismiss();
-            this.showToast('Backup Failed');
+            this.showToast('Backup Created & Downloaded!');
+
+        } catch (e: any) {
+            loading.dismiss();
+            const msg = e.message || 'Backup Failed';
+            this.showToast(msg);
         }
     }
 
@@ -61,7 +88,7 @@ export class BackupPage implements OnInit {
         // Trigger File Input
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.json';
+        input.accept = '.bin,.json'; // Accept both for now
         input.onchange = (e: any) => this.processRestore(e);
         input.click();
     }
@@ -70,27 +97,62 @@ export class BackupPage implements OnInit {
         const file = event.target.files[0];
         if (!file) return;
 
+        const alert = await this.alertCtrl.create({
+            header: 'Decrypt Backup',
+            message: 'Enter the password to decrypt this backup.',
+            inputs: [
+                {
+                    name: 'password',
+                    type: 'password',
+                    placeholder: 'Password'
+                }
+            ],
+            buttons: [
+                {
+                    text: 'Cancel',
+                    role: 'cancel'
+                },
+                {
+                    text: 'Restore',
+                    handler: (data) => {
+                        this.doRestoreBackup(file, data.password);
+                    }
+                }
+            ]
+        });
+        await alert.present();
+    }
+
+    async doRestoreBackup(file: File, password: string) {
         const loading = await this.loadingCtrl.create({ message: 'Restoring...' });
         await loading.present();
 
-        const reader = new FileReader();
-        reader.onload = async (e: any) => {
-            const json = e.target.result;
-            const success = await this.backupService.restoreBackup(json);
+        try {
+            const success = await this.backupService.restoreBackup(file, password);
             loading.dismiss();
 
             if (success) {
                 const alert = await this.alertCtrl.create({
                     header: 'Restore Successful',
-                    message: 'Your keys have been restored. Please restart the app or re-login.',
-                    buttons: ['OK']
+                    message: 'Your keys have been restored. The app will now reload.',
+                    buttons: [
+                        {
+                            text: 'OK',
+                            handler: () => {
+                                window.location.reload();
+                            }
+                        }
+                    ]
                 });
                 await alert.present();
             } else {
-                this.showToast('Invalid Backup File');
+                this.showToast('Restore returned false');
             }
-        };
-        reader.readAsText(file);
+        } catch (e: any) {
+            loading.dismiss();
+            const msg = e.message || 'Restore Failed';
+            this.showToast(msg);
+        }
     }
 
     async showToast(msg: string) {
