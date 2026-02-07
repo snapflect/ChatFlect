@@ -108,15 +108,9 @@ export class RotationService {
         }
     }
 
-    private async signRequest(privKey: ArrayBuffer, data: string): Promise<string> {
-        const dataBytes = new TextEncoder().encode(data);
-        // LibSignal TypeScript: Curve.calculateSignature(privKey, message)
-        const sig = await libsignal.Curve.calculateSignature(
-            Buffer.from(privKey),
-            Buffer.from(dataBytes)
-        );
-        return this.arrayBufferToBase64(sig);
-    }
+
+
+
 
     private arrayBufferToBase64(buffer: ArrayBuffer): string {
         let binary = '';
@@ -126,5 +120,25 @@ export class RotationService {
             binary += String.fromCharCode(bytes[i]);
         }
         return window.btoa(binary);
+    }
+
+    /**
+     * Story 3.3: Sync Rotation Timestamp from Server
+     * This ensures local state matches backend truth (preventing spam).
+     */
+    async syncRotationTimestampFromServer(deviceId: number): Promise<void> {
+        try {
+            const res: any = await this.api.get(`v3/get_rotation_history.php?deviceId=${deviceId}`).toPromise();
+            if (res && res.history && res.history.length > 0) {
+                const last = res.history[0]; // Ordered by DESC
+                if (last.rotated_at) {
+                    const serverTs = new Date(last.rotated_at).getTime();
+                    await this.store.setLastRotationTimestamp(serverTs);
+                    this.logger.log(`Synced rotation timestamp from server: ${last.rotated_at}`);
+                }
+            }
+        } catch (e) {
+            this.logger.error('Failed to sync rotation history', e);
+        }
     }
 }

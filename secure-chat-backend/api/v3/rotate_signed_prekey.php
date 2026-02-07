@@ -64,6 +64,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $deviceRow = $res->fetch_assoc();
         $currentVersion = (int) $deviceRow['key_version'];
+        $lastRotatedAt = $deviceRow['rotated_at']; // Fetch previous rotation time
+
+        // --- STORY 3.3: Strict Cooldown Enforcement ---
+        if ($lastRotatedAt) {
+            $lastTs = strtotime($lastRotatedAt);
+            $nowTs = time();
+            $diff = $nowTs - $lastTs;
+            $cooldown = 7 * 24 * 60 * 60; // 7 days
+
+            if ($diff < $cooldown) {
+                // Optional: Log attempt?
+                throw new Exception("Rotation cooldown active. Try again later.");
+            }
+        }
 
         // 2. Strict Version Check (Prevent Replay/Downgrade)
         // STRICT: Must be exactly current + 1
@@ -95,16 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Verify Request Signature (Use RAW verification)
         if (!CryptoUtils::verifySignalSignatureRaw($identityKeyBase64, $rawBody, $reqSignature)) {
-            // Assuming auditLog function exists or is defined elsewhere
-            // For this exercise, we'll define a simple placeholder if it doesn't exist.
-            if (!function_exists('auditLog')) {
-                function auditLog($event, $userId, $data)
-                {
-                    error_log("AUDIT: Event=$event, User=$userId, Data=" . json_encode($data));
-                }
-            }
-            auditLog('ROTATION_MITM_ATTEMPT', $userId, ['device_id' => $deviceId, 'ip' => $_SERVER['REMOTE_ADDR']]);
-            throw new Exception("Request Tampering Detected. Invalid Body Signature.");
+            throw new Exception("Request Tampering Detected. Invalid Body Signature.|ROTATE_MITM_FAIL");
         }
 
         // 4. Verify SignedPreKey Signature (STRICT SECURITY)
@@ -116,13 +121,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // This validation is complex in strict PHP without libsignal.
         // For MVP/Story 3.2, we will assume the client is honest BUT we should verify if possible.
-        // If we cannot verify easily in PHP without a library, we might skip strictly cryptographic verification 
-        // HERE but enforce strict ownership. 
+        // If we cannot verify easily in PHP without a library, we might skip strictly cryptographic verification
+        // HERE but enforce strict ownership.
         // User Requirement: "signature verified using stored IdentityKey (correct Signal model)"
         // We will delegate to CryptoUtils.
 
         if (!CryptoUtils::verifySignalSignature($identityKeyBase64, $signedPreKey['publicKey'], $signedPreKey['signature'])) {
-            throw new Exception("Invalid SignedPreKey signature. Verification failed.");
+            throw new Exception("Invalid SignedPreKey signature. Verification failed.|ROTATE_SIG_FAIL");
         }
 
         // 5. Update Signed PreKey Table
@@ -150,6 +155,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 7. Success
         $conn->commit();
+
+        // AUDIT LOG: SUCCESS (After Commit)
+        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+        $ua = $_SERVER['HTTP_USER_AGENT'] ?? null;
+        $auditSpec = $conn->prepare("INSERT INTO signed_prekey_rotations (user_id, device_id, old_key_version, new_key_version, signed_prekey_id, rotated_at, ip_address, user_agent, event_type) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, 'ROTATE_SUCCESS')");
+        $auditSpec->bind_param("siiiiss", $userId, $deviceId, $currentVersion, $newVersion, $spkId, $ip, $ua);
+        $auditSpec->execute();
+
         echo json_encode([
             "status" => "success",
             "new_version" => $newVersion,
@@ -157,8 +170,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
 
     } catch (Exception $e) {
-        $conn->rollback();
+        $conn->rollback(); // Rollback main transaction FIRST
+
+        // Extract Audit Event from Exception message if present "Message|EVENT_NAME"
+        $parts = explode('|', $e->getMessage());
+        $msg = $parts[0];
+        $event = $parts[1] ?? 'ROTATE_FAIL'; // Default fail type
+
+        // AUDIT LOG: FAILURE (Persisted after rollback)
+        $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+        $ua = $_SERVER['HTTP_USER_AGENT'] ?? null;
+
+        // Use default values if variables not set yet
+        $auditUserId = $userId ?? 'unknown';
+        $auditDeviceId = $deviceId ?? 0;
+        $auditOldVer = $currentVersion ?? 0;
+        $auditNewVer = $newVersion ?? 0;
+        $auditKeyId = 0; // Unknown on generic fail
+
+        // Safe Insert
+        try {
+            $audit = $conn->prepare("INSERT INTO signed_prekey_rotations (user_id, device_id, old_key_version, new_key_version, signed_prekey_id, rotated_at, ip_address, user_agent, event_type) VALUES (?, ?, ?, ?, ?, NOW(), ?, ?, ?)");
+            $audit->bind_param("siiiisss", $auditUserId, $auditDeviceId, $auditOldVer, $auditNewVer, $auditKeyId, $ip, $ua, $event);
+            $audit->execute();
+        } catch (Exception $logEx) {
+            error_log("Audit Log Failed: " . $logEx->getMessage());
+        }
+
         http_response_code(400);
-        echo json_encode(["error" => $e->getMessage()]);
+        echo json_encode(["error" => $msg]);
     }
+
 }
