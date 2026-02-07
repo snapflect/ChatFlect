@@ -44,7 +44,9 @@ export interface SendResult {
 // Constants
 // ===========================================
 const OUTBOX_STORE_KEY = 'chat_outbox_queue';
-const MAX_RETRIES = 10;
+// Epic 18 Refinement: Increase retries to support extended Relay downtime (Failover Mode)
+// 1000 retries * 2 min max delay ~= 33 hours of persistence
+const MAX_RETRIES = 1000;
 const RETRY_DELAYS = [2000, 5000, 10000, 30000, 60000, 120000]; // 2s -> 2m cap
 
 import { RelayService } from './relay.service';
