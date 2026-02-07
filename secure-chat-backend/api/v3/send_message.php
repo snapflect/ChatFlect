@@ -228,7 +228,10 @@ try {
         ON DUPLICATE KEY UPDATE last_seq = last_seq + 1
     ");
     $seqStmt->bind_param("s", $chatId);
-    $seqStmt->execute();
+
+    if (!$seqStmt->execute()) {
+        throw new Exception("Sequence upsert failed: " . $conn->error);
+    }
     $seqStmt->close();
 
     // Fetch the assigned sequence
@@ -236,13 +239,34 @@ try {
     $fetchSeq->bind_param("s", $chatId);
     $fetchSeq->execute();
     $seqResult = $fetchSeq->get_result();
+
     if ($seqResult->num_rows > 0) {
         $serverSeq = (int) $seqResult->fetch_assoc()['last_seq'];
+    } else {
+        throw new Exception("Sequence fetch returned no rows");
     }
     $fetchSeq->close();
+
+    // FAIL-FAST: Ensure sequence was assigned
+    if ($serverSeq === null || $serverSeq <= 0) {
+        throw new Exception("Invalid sequence assigned: $serverSeq");
+    }
 } catch (Exception $e) {
-    error_log("Sequence generation failed: " . $e->getMessage());
-    // Continue without sequence (fallback to timestamp ordering)
+    error_log("CRITICAL: Sequence generation failed for chat=$chatId: " . $e->getMessage());
+
+    // FAIL-FAST: Rollback nonce and reject message
+    $del = $conn->prepare("DELETE FROM message_replay_log WHERE message_id = ?");
+    $del->bind_param("s", $msgId);
+    $del->execute();
+    $del->close();
+
+    http_response_code(500);
+    echo json_encode([
+        "error" => "SEQUENCE_ASSIGNMENT_FAILED",
+        "message" => "Could not assign message order. Please retry.",
+        "retry" => true
+    ]);
+    exit;
 }
 
 // Add server fields to input for Firestore
