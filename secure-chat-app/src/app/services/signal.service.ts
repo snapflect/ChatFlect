@@ -208,9 +208,35 @@ export class SignalService {
         }
     }
 
+    // --- 5. Anti-Tamper Signing (Epic 5 Strict) ---
+    async signPayload(payload: string): Promise<string> {
+        // 1. Get Identity Key
+        const identityKeyPair = await this.store.getIdentityKeyPair();
+        if (!identityKeyPair) {
+            throw new Error('Identity Key not found');
+        }
+
+        // 2. Sign
+        const messageBuffer = new TextEncoder().encode(payload).buffer;
+        try {
+            // Bypass TS check for Curve.calculateSignature if types are incomplete
+            const signature = await (libsignal as any).Curve.calculateSignature(
+                identityKeyPair.privKey,
+                messageBuffer
+            );
+            return this.arrayBufferToBase64(signature);
+        } catch (e) {
+            console.error('Signing failed', e);
+            throw new Error('Signing failed');
+        }
+    }
+
     // Helper: Base64 to ArrayBuffer
     private base64ToArrayBuffer(base64: string | undefined | null): ArrayBuffer {
-        if (!base64) return new ArrayBuffer(0);
+        return this.base64ToArrayBuffer_Safe(base64 || '');
+    }
+
+    private base64ToArrayBuffer_Safe(base64: string): ArrayBuffer {
         const binary_string = window.atob(base64);
         const len = binary_string.length;
         const bytes = new Uint8Array(len);

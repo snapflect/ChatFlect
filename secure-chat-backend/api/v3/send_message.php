@@ -26,8 +26,10 @@ $authData = requireAuth();
 $userId = $authData['user_id'];
 $deviceUuid = $authData['device_uuid'] ?? 'unknown';
 
-// 2. Parse Input
-$input = json_decode(file_get_contents("php://input"), true);
+// 2. Parse Input (STRICT FIX: Read php://input ONCE)
+$rawBody = file_get_contents("php://input");
+$input = json_decode($rawBody, true);
+
 if (!$input || !isset($input['id'])) {
     http_response_code(400);
     echo json_encode(["error" => "Invalid payload"]);
@@ -53,21 +55,66 @@ if (abs($serverTime - $timestamp) > $skewLimit) {
     exit;
 }
 
-// 3.5 SIGNATURE VERIFICATION (Anti-Tamper - Story 5.2)
+// 3.5 SIGNATURE VERIFICATION (STRICT FIX: Ed25519 Identity Signature)
 $headers = getallheaders();
 $clientSig = $headers['X-Signal-Metadata-Signature'] ?? $headers['x-signal-metadata-signature'] ?? '';
-$rawBody = file_get_contents("php://input");
 
-// In production, fetch this from Environment/Secret Manager
-$integritySecret = 'CHATFLECT_APP_INTEGRITY_SECRET_V1';
-
-$expectedSig = hash_hmac('sha256', $rawBody, $integritySecret);
-
-if (!hash_equals($expectedSig, $clientSig)) {
-    // Audit warning?
-    error_log("Signature Mismatch: ID=$msgId User=$userId Expected=$expectedSig Got=$clientSig");
+if (empty($clientSig)) {
     http_response_code(401);
-    echo json_encode(["error" => "Integrity check failed: Invalid Signature"]);
+    echo json_encode(["error" => "Missing Integrity Signature"]);
+    exit;
+}
+
+// Fetch Device Identity Key
+$stmtKey = $conn->prepare("SELECT public_key FROM user_devices WHERE user_id = ? AND device_uuid = ? AND status = 'active'");
+$stmtKey->bind_param("ss", $userId, $deviceUuid);
+$stmtKey->execute();
+$resKey = $stmtKey->get_result();
+
+if ($resKey->num_rows === 0) {
+    $stmtKey->close();
+    http_response_code(403);
+    echo json_encode(["error" => "Device not recognized or inactive"]);
+    exit;
+}
+
+$rowKey = $resKey->fetch_assoc();
+$devicePubKeyB64 = $rowKey['public_key']; // Expected to be Base64
+$stmtKey->close();
+
+// Verify Ed25519 Signature
+// PHP Sodium extension required
+if (!function_exists('sodium_crypto_sign_verify_detached')) {
+    error_log("CRITICAL: Sodium extension missing for signature verification");
+    http_response_code(500);
+    echo json_encode(["error" => "Server crypto configuration error"]);
+    exit;
+}
+
+try {
+    $sigBin = base64_decode($clientSig);
+    $pubKeyBin = base64_decode($devicePubKeyB64);
+
+    // LibSignal Identity Keys have a type byte (0x05) prefix? 
+    // Usually yes (DJB type). Sodium expects raw 32 bytes for Ed25519.
+    // If key has prefix (33 bytes), strip first byte.
+    if (strlen($pubKeyBin) === 33) {
+        $pubKeyBin = substr($pubKeyBin, 1);
+    }
+
+    // Message is the Raw Body
+    $verified = sodium_crypto_sign_verify_detached($sigBin, $rawBody, $pubKeyBin);
+
+    if (!$verified) {
+        error_log("Signature Mismatch: ID=$msgId User=$userId Device=$deviceUuid");
+        http_response_code(401);
+        echo json_encode(["error" => "Integrity check failed: Invalid Signature"]);
+        exit;
+    }
+} catch (Exception $e) {
+    error_log("Crypto Error: " . $e->getMessage());
+    http_response_code(401);
+    echo json_encode(["error" => "Integrity check failed: Crypto Error"]);
     exit;
 }
 
@@ -83,7 +130,7 @@ if ($stmt->get_result()->num_rows > 0) {
 }
 $stmt->close();
 
-// 5. PERSIST NONCE
+// 5. PERSIST NONCE (Optimistic Lock)
 // Log immediately to block race conditions
 try {
     $ins = $conn->prepare("INSERT INTO message_replay_log (message_id, sender_id, device_uuid) VALUES (?, ?, ?)");
@@ -101,6 +148,10 @@ try {
 // Authenticate as Service Account
 $accessToken = getAccessToken('../service-account.json');
 if (is_array($accessToken)) {
+    // START COMPENSATION: Rollback Nonce
+    $conn->query("DELETE FROM message_replay_log WHERE message_id = '$msgId'");
+    // END COMPENSATION
+
     http_response_code(500);
     echo json_encode($accessToken);
     exit;
@@ -108,16 +159,28 @@ if (is_array($accessToken)) {
 
 $projectId = 'chatflect'; // Hardcoded or fetch from config
 $firestoreUrl = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/chats/$chatId/messages/$msgId";
+// Note: updateMask is complex via REST.
+// Simplification: Just write the message document. Metadata update is separate or via Cloud Function.
+// We strictly write the message doc here.
 
-// Firestore REST Format is strict. We need to map JSON payload to Firestore Value format.
+
+// STRICT FIX: Correct Firestore Type Mapping
 function mapToFirestoreValue($val)
 {
     if (is_int($val) || is_float($val))
         return ["integerValue" => (string) $val];
     if (is_bool($val))
         return ["booleanValue" => $val];
-    if (is_array($val))
-        return ["mapValue" => ["fields" => array_map('mapToFirestoreValue', $val)]];
+    if (is_array($val)) {
+        // Detect Associative vs Indexed Array
+        $isAssoc = array_keys($val) !== range(0, count($val) - 1);
+        if ($isAssoc) {
+            return ["mapValue" => ["fields" => array_map('mapToFirestoreValue', $val)]];
+        } else {
+            // It's a list/array
+            return ["arrayValue" => ["values" => array_map('mapToFirestoreValue', $val)]];
+        }
+    }
     return ["stringValue" => (string) $val];
 }
 
@@ -138,10 +201,9 @@ $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 
 if ($httpCode >= 400) {
-    // Write Failed - Rollback Nonce?
-    // Ideally yes, but replay log prevents retry.
-    // If we fail to write to FS, the client should generate a NEW ID to retry.
-    // So keeping the nonce as "burned" is actually safer for Replay attacks.
+    // STRICT FIX: Compensation - Rollback Nonce if Firestore fails
+    $conn->query("DELETE FROM message_replay_log WHERE message_id = '$msgId'");
+
     http_response_code(500);
     echo json_encode(["error" => "Firestore Write Failed", "details" => $fsResult]);
     exit;

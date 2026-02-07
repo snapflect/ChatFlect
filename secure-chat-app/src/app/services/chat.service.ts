@@ -36,6 +36,9 @@ import { TransferProgressService } from './transfer-progress.service';
 import { HttpEventType } from '@angular/common/http';
 import { SecureMediaService } from './secure-media.service';
 import { db, auth } from './firebase.config';
+import { environment } from '../../environments/environment';
+import { HttpClient } from '@angular/common/http';
+import { DomSanitizer } from '@angular/platform-browser';
 
 const FIREBASE_READY_TIMEOUT_MS = 30_000;
 
@@ -74,7 +77,9 @@ export class ChatService {
         private presence: PresenceService,
         private progressService: TransferProgressService,
         private signalService: SignalService, // Story 2.5
-        private secureStorage: SecureStorageService // Story 2.5 Fix
+        private secureStorage: SecureStorageService, // Story 2.5 Fix
+        private http: HttpClient,
+        private sanitizer: DomSanitizer
     ) {
         // db initialized via property assignment
         this.initHistorySyncLogic();
@@ -182,43 +187,14 @@ export class ChatService {
     async addMessageDoc(chatId: string, payload: any) {
         await this.waitForFirebaseReady();
 
-        try {
-            await setDoc(doc(this.db, 'chats', chatId), {
-                lastTimestamp: Date.now()
-            }, { merge: true });
-        } catch (e) {
-            console.warn('Ensure Chat Doc Failed', e);
-        }
-
-        // P0 (Epic 5): Route via Backend Gatekeeper for Replay Protection
+        // P0 (Epic 5): Route via Backend Gatekeeper with SIGNAL SIGNATURE
         const payloadStr = JSON.stringify(payload);
-        const signature = await this.computeIntegritySignature(payloadStr);
+        const signature = await this.signalService.signPayload(payloadStr);
 
         return await this.api.post('v3/send_message.php?chat_id=' + chatId, payloadStr, false, {
             'X-Signal-Metadata-Signature': signature,
             'Content-Type': 'application/json'
         }).toPromise();
-    }
-
-    // Epic 5: Anti-Tamper Signature
-    private async computeIntegritySignature(payload: string): Promise<string> {
-        const enc = new TextEncoder();
-        const secret = environment.integritySecret || '';
-        const key = await window.crypto.subtle.importKey(
-            'raw',
-            enc.encode(secret),
-            { name: 'HMAC', hash: 'SHA-256' },
-            false,
-            ['sign']
-        );
-        const signature = await window.crypto.subtle.sign(
-            'HMAC',
-            key,
-            enc.encode(payload)
-        );
-        return Array.from(new Uint8Array(signature))
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
     }
 
     getChatDetails(chatId: string) {

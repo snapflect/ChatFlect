@@ -11,11 +11,16 @@ function getAccessToken($serviceAccountPath)
     if (!$keys)
         return ["error" => "Invalid service account JSON"];
 
-    $jwtHeader = base64_encode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+    function urlSafeBase64Encode($data)
+    {
+        return str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($data));
+    }
+
+    $jwtHeader = urlSafeBase64Encode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
     $now = time();
-    $jwtClaim = base64_encode(json_encode([
+    $jwtClaim = urlSafeBase64Encode(json_encode([
         'iss' => $keys['client_email'],
-        'scope' => 'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/firebase.messaging', // Added datastore scope
+        'scope' => 'https://www.googleapis.com/auth/datastore https://www.googleapis.com/auth/firebase.messaging',
         'aud' => 'https://oauth2.googleapis.com/token',
         'exp' => $now + 3600,
         'iat' => $now
@@ -25,7 +30,7 @@ function getAccessToken($serviceAccountPath)
     $input = "$jwtHeader.$jwtClaim";
     $privateKey = $keys['private_key'];
     openssl_sign($input, $signature, $privateKey, 'SHA256');
-    $jwtSignature = base64_encode($signature);
+    $jwtSignature = urlSafeBase64Encode($signature);
     $jwt = "$input.$jwtSignature";
 
     // Exchange for Access Token

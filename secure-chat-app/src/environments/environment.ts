@@ -9,6 +9,5 @@ export const environment = {
     appId: "1:1036135506512:web:f231fa787fcf0335f82755"
   },
   apiUrl: 'https://chat.snapflect.com/api',
-  googleClientId: '1036135506512-1fj8d144k2i3k9aikpn34lu27ut1bhht.apps.googleusercontent.com',
-  integritySecret: 'CHATFLECT_APP_INTEGRITY_SECRET_V1'
+  googleClientId: '1036135506512-1fj8d144k2i3k9aikpn34lu27ut1bhht.apps.googleusercontent.com'
 };
