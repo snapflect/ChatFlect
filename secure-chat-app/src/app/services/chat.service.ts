@@ -190,13 +190,36 @@ export class ChatService {
             console.warn('Ensure Chat Doc Failed', e);
         }
 
-        return await setDoc(
-            doc(this.db, 'chats', chatId, 'messages', payload.id),
-            payload
-        );
+        // P0 (Epic 5): Route via Backend Gatekeeper for Replay Protection
+        const payloadStr = JSON.stringify(payload);
+        const signature = await this.computeIntegritySignature(payloadStr);
+
+        return await this.api.post('v3/send_message.php?chat_id=' + chatId, payloadStr, false, {
+            'X-Signal-Metadata-Signature': signature,
+            'Content-Type': 'application/json'
+        }).toPromise();
     }
 
-    // Old getMessages removed. New implementation is below.
+    // Epic 5: Anti-Tamper Signature
+    private async computeIntegritySignature(payload: string): Promise<string> {
+        const enc = new TextEncoder();
+        const secret = environment.integritySecret || '';
+        const key = await window.crypto.subtle.importKey(
+            'raw',
+            enc.encode(secret),
+            { name: 'HMAC', hash: 'SHA-256' },
+            false,
+            ['sign']
+        );
+        const signature = await window.crypto.subtle.sign(
+            'HMAC',
+            key,
+            enc.encode(payload)
+        );
+        return Array.from(new Uint8Array(signature))
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+    }
 
     getChatDetails(chatId: string) {
         return new Observable(observer => {

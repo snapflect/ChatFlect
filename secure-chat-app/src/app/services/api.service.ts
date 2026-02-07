@@ -8,10 +8,11 @@ import { environment } from 'src/environments/environment';
 export class ApiService {
     constructor(private http: HttpClient) { }
 
-    post(endpoint: string, data: any, reportProgress: boolean = false) {
+    post(endpoint: string, data: any, reportProgress: boolean = false, headers?: any) {
         const options: any = {
             reportProgress: reportProgress,
-            observe: reportProgress ? 'events' : 'body'
+            observe: reportProgress ? 'events' : 'body',
+            headers: headers
         };
 
         return this.http.post(`${environment.apiUrl}/${endpoint}`, data, options);
