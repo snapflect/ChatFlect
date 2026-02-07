@@ -96,7 +96,13 @@ function validateFirebaseToken($token)
     }
     $stmt->close();
 
-    return $resolvedId ?: $sub;
+    $finalUserId = $resolvedId ?: $sub;
+
+    // Extract Device UUID (Story 4.1)
+    // Custom tokens / Sessions should have 'device_uuid' claim or 'claims' array
+    $deviceUuid = $payload['device_uuid'] ?? $payload['claims']['device_uuid'] ?? null;
+
+    return ['user_id' => $finalUserId, 'device_uuid' => $deviceUuid];
 }
 
 /**
@@ -148,6 +154,7 @@ function getXUserIdHeader()
 
 /**
  * Authenticate the request
+ * Returns ['user_id' => string, 'device_uuid' => string|null] or null
  */
 function authenticateRequest()
 {
@@ -170,20 +177,25 @@ function authenticateRequest()
     $token = trim($token);
 
     // 3. PRIORITY CACHE CHECK (Fast Path)
+    // Cache service stores array: ['user_id' => ..., 'metadata' => ['device_uuid' => ...]]
     $cached = CacheService::getSession($token);
     if ($cached && isset($cached['user_id'])) {
-        return $cached['user_id'];
+        // Normalize CACHE return
+        return [
+            'user_id' => $cached['user_id'],
+            'device_uuid' => $cached['device_uuid'] ?? $cached['metadata']['device_uuid'] ?? null
+        ];
     }
 
     // 4. Fallback: Full JWT/DB Validation (Slow Path)
-    $userId = validateFirebaseToken($token);
+    $authResult = validateFirebaseToken($token); // Now returns array or null
 
     // 5. If successful, cache it for next time
-    if ($userId) {
-        CacheService::cacheSession($token, $userId);
+    if ($authResult && isset($authResult['user_id'])) {
+        CacheService::cacheSession($token, $authResult['user_id'], ['device_uuid' => $authResult['device_uuid']]);
     }
 
-    return $userId;
+    return $authResult; // Array or null
 }
 
 /**
@@ -218,13 +230,18 @@ function isUserBlocked($userId)
 }
 
 /**
- * Require authentication - returns 401 if not authenticated
+ * Require authentication - returns user_id string if success, exits if fail.
  */
 function requireAuth($requestUserId = null)
 {
-    $authUserId = authenticateRequest();
+    $authContext = authenticateRequest(); // Now returns array {user_id, device_uuid}
 
-    if ($authUserId === null) {
+    // Backward compatibility: If it returned scalar (unlikely with new code but safe)
+    if (is_scalar($authContext)) {
+        $authContext = ['user_id' => $authContext, 'device_uuid' => null];
+    }
+
+    if (!$authContext || empty($authContext['user_id'])) {
         $authHeader = getAuthorizationHeader();
         $xUserId = getXUserIdHeader();
         $debugInfo = [
@@ -243,6 +260,9 @@ function requireAuth($requestUserId = null)
         exit;
     }
 
+    $authUserId = $authContext['user_id'];
+    $deviceUuid = $authContext['device_uuid'] ?? null;
+
     // v12: Enforce Rate Limit (Prioritized User > Device > IP)
     enforceRateLimit($authUserId);
 
@@ -256,6 +276,65 @@ function requireAuth($requestUserId = null)
         ]);
         exit;
     }
+
+    // --- STRICT DEVICE TRUST ENFORCEMENT (Epic 4, Story 4.1) ---
+    // 1. Zero-Trust: Token MUST have a bound device_uuid
+    if (!$deviceUuid) {
+        // Allow migration period? The user said "Denying JWT without device_uuid will break ALL existing users"
+        // But also said "Update user_devices SET status='active'".
+        // AND "If JWT missing device_uuid -> deny".
+        // SO strict zero trust means we DENY.
+        // Exception: Is this the 'firebase_auth.php' exchange endpoint?
+        // firebase_auth.php calls requireAuth(). 
+        // If the INPUT token to firebase_auth.php is a RAW ID TOKEN, it won't have device_uuid.
+        // So we MUST allow raw tokens IF the script is firebase_auth.php?
+        // Or refactor firebase_auth.php to NOT call requireAuth() but do its own validation?
+        // 'firebase_auth.php' line 21: $userId = requireAuth();
+
+        $scriptName = basename($_SERVER['SCRIPT_NAME']);
+        if ($scriptName === 'firebase_auth.php' || $scriptName === 'register.php') {
+            // Allow raw tokens for exchange/registration
+        } else {
+            auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'missing_device_binding']);
+            http_response_code(403);
+            echo json_encode(["error" => "Device Binding Required. Please re-authenticate."]);
+            exit;
+        }
+    } else {
+        // 2. Strict DB Status Check
+        global $conn;
+        // Use a lightweight check or cache?
+        // We should check DB to respect revocation INSTANTLY.
+        // Caching verification might delay revocation.
+        // But checking DB on every request is heavy?
+        // User Requirement: "enforce revoked devices cannot access endpoints"
+        // User Requirement: "status != 'active' -> reject"
+
+        $stmt = $conn->prepare("SELECT status, revoked_at FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+        $stmt->bind_param("ss", $authUserId, $deviceUuid);
+        $stmt->execute();
+        $res = $stmt->get_result();
+
+        if ($res->num_rows === 0) {
+            // Device not found (spoofed UUID?)
+            auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'device_not_found', 'device' => $deviceUuid]);
+            http_response_code(403);
+            echo json_encode(["error" => "Device not recognized."]);
+            exit;
+        }
+
+        $devRow = $res->fetch_assoc();
+        if ($devRow['status'] !== 'active' || $devRow['revoked_at'] !== null) {
+            auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'device_revoked_or_pending', 'device' => $deviceUuid, 'status' => $devRow['status']]);
+            http_response_code(403);
+            echo json_encode([
+                "error" => "Device not trusted.",
+                "status" => $devRow['status']
+            ]);
+            exit;
+        }
+    }
+
 
     // Verify it matches the requested user ID if one was provided
     if ($requestUserId !== null && $authUserId !== $requestUserId) {

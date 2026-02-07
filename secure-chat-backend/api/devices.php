@@ -251,7 +251,7 @@ if ($method === 'POST') {
         //     exit;
         // }
 
-        $stmt = $conn->prepare("SELECT device_uuid, device_name, last_active, created_at, libsignal_device_id FROM user_devices WHERE user_id = ?");
+        $stmt = $conn->prepare("SELECT device_uuid, device_name, last_active, created_at, libsignal_device_id, status, revoked_at FROM user_devices WHERE user_id = ?");
         $stmt->bind_param("s", $userId);
         $stmt->execute();
         $result = $stmt->get_result();

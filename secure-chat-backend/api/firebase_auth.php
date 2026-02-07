@@ -17,10 +17,41 @@ require_once 'SimpleJWT.php';
 enforceRateLimit(null, 10, 60); // 10 req/min/IP
 header('Content-Type: application/json');
 
-// 1. Verify User is logged in via PHP backend
+// 1. Verify User is logged in via PHP backend (Session or Bearer)
 $userId = requireAuth(); // Returns user_id string or exits with 401
 
-// 2. Load Service Account Key
+// 2. Validate Device Binding (Strict Zero-Trust)
+$rawInput = file_get_contents("php://input");
+$input = json_decode($rawInput, true);
+$deviceUuid = $input['device_uuid'] ?? null;
+
+if (!$deviceUuid) {
+    http_response_code(400);
+    echo json_encode(["error" => "device_uuid required for token binding"]);
+    exit;
+}
+
+// 3. Verify Device Ownership & Status in DB
+global $conn;
+$stmt = $conn->prepare("SELECT status, revoked_at FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+$stmt->bind_param("ss", $userId, $deviceUuid);
+$stmt->execute();
+$res = $stmt->get_result();
+
+if ($res->num_rows === 0) {
+    http_response_code(403);
+    echo json_encode(["error" => "Device not registered"]);
+    exit;
+}
+
+$row = $res->fetch_assoc();
+if ($row['status'] !== 'active' || $row['revoked_at'] !== null) {
+    http_response_code(403);
+    echo json_encode(["error" => "Device is not active or has been revoked"]);
+    exit;
+}
+
+// 4. Load Service Account Key
 $keyPath = __DIR__ . '/service-account.json';
 if (!file_exists($keyPath)) {
     http_response_code(500);
@@ -36,13 +67,14 @@ if (!$serviceAccount || !isset($serviceAccount['client_email']) || !isset($servi
 }
 
 try {
-    // 3. Generate Token
+    // 5. Generate Token
     // v16.0: Ensure UID is normalized
     $firebaseUid = strtoupper(trim($userId));
 
-    // Optional: Add claims like 'role' or 'premium'
+    // Add claims: Role + DEVICE BINDING
     $claims = [
-        'is_verified' => true
+        'is_verified' => true,
+        'device_uuid' => $deviceUuid // Critical for Story 4.1
     ];
 
     $token = SimpleJWT::createCustomToken(
@@ -55,7 +87,8 @@ try {
     echo json_encode([
         "status" => "success",
         "firebase_token" => $token,
-        "uid" => $firebaseUid
+        "uid" => $firebaseUid,
+        "device_bind" => $deviceUuid
     ]);
 
 } catch (Exception $e) {

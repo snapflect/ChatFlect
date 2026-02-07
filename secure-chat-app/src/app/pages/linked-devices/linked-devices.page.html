@@ -34,10 +34,21 @@
         <h2>{{ device.device_name }}</h2>
         <p>Last active: {{ device.last_active }}</p>
         <p *ngIf="device.device_uuid === currentDeviceUuid" class="current-device-label">This Device</p>
+        <ion-badge *ngIf="device.status"
+          [color]="device.status === 'active' ? 'success' : (device.status === 'revoked' ? 'medium' : 'warning')">
+          {{ device.status | titlecase }}
+        </ion-badge>
+        <p *ngIf="device.revoked_at" style="font-size: 0.8em; color: var(--ion-color-medium);">Revoked: {{
+          device.revoked_at }}</p>
       </ion-label>
 
-      <ion-button *ngIf="device.device_uuid !== currentDeviceUuid" fill="clear" color="danger"
-        (click)="confirmRevoke(device)">
+      <ion-button *ngIf="device.status !== 'active' && device.status !== 'revoked'" fill="clear" color="success"
+        (click)="approveDevice(device)">
+        Approve
+      </ion-button>
+
+      <ion-button *ngIf="device.device_uuid !== currentDeviceUuid && device.status !== 'revoked'" fill="clear"
+        color="danger" (click)="confirmRevoke(device)">
         Log Out
       </ion-button>
     </ion-item>
