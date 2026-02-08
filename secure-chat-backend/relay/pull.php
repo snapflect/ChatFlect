@@ -8,7 +8,10 @@
  */
 
 require_once '../api/auth_middleware.php';
+require_once '../includes/logger.php';
 require_once '../api/db_connect.php';
+
+$pullStart = microtime(true);
 
 // CORS (Standard)
 $allowed = ['http://localhost:8100', 'http://localhost:4200', 'capacitor://localhost', 'http://localhost'];
@@ -22,6 +25,8 @@ if (in_array($origin, $allowed)) {
 $authData = requireAuth();
 $userId = $authData['user_id'];
 $deviceUuid = $authData['device_uuid'] ?? null;
+RequestContext::setUser($userId, $deviceUuid);
+logInfo('PULL_START', ['since_seq' => $_GET['since_seq'] ?? 0]);
 
 if (empty($deviceUuid)) {
     http_response_code(403);
@@ -174,12 +179,22 @@ if ($stmtR) {
 }
 
 // 5. Response
+$pullMs = round((microtime(true) - $pullStart) * 1000, 2);
+$msgCount = count($messages);
+if ($msgCount > 0) {
+    logPerf('PULL_SUCCESS', $pullMs, ['message_count' => $msgCount, 'last_seq' => $maxSeq]);
+} else {
+    logInfo('PULL_EMPTY', ['since_seq' => $sinceSeq]);
+}
+
 echo json_encode([
     "messages" => $messages,
     "receipts" => $receipts,
     "last_seq" => $maxSeq,
     "last_receipt_id" => $maxReceiptId,
-    "has_more" => (count($messages) >= $limit || count($receipts) >= $limit)
+    "has_more" => (count($messages) >= $limit || count($receipts) >= $limit),
+    "request_id" => getRequestId()
 ]);
 
 $conn->close();
+

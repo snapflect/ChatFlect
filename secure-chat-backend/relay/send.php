@@ -8,7 +8,11 @@
  */
 
 require_once '../api/auth_middleware.php';
+require_once '../includes/logger.php';
 require_once '../api/db_connect.php';
+
+// Set user context for logging
+$sendStart = microtime(true);
 
 // CORS
 $allowed = ['http://localhost:8100', 'http://localhost:4200', 'capacitor://localhost', 'http://localhost'];
@@ -29,6 +33,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $authData = requireAuth();
 $userId = $authData['user_id'];
 $deviceUuid = $authData['device_uuid'] ?? null;
+RequestContext::setUser($userId, $deviceUuid);
+logInfo('SEND_START', ['chat_id' => $_POST['chat_id'] ?? 'unknown']);
 
 if (empty($deviceUuid)) {
     http_response_code(403);
@@ -215,24 +221,24 @@ try {
     }
 
     // Return Success
+    $sendMs = round((microtime(true) - $sendStart) * 1000, 2);
+    logPerf('SEND_SUCCESS', $sendMs, ['chat_id' => $chatId, 'server_seq' => $nextSeq]);
     echo json_encode([
         "success" => true,
         "server_seq" => $nextSeq,
-        "timestamp" => date('Y-m-d H:i:s')
+        "timestamp" => date('Y-m-d H:i:s'),
+        "request_id" => getRequestId()
     ]);
 
 } catch (Exception $e) {
     $conn->rollback();
-    // Check for duplicate key (race condition managed by lock, but double safety)
-    if ($conn->errno === 1062) { // Duplicate entry
-        // Retry logic or fail fast?
-        // With 'FOR UPDATE' lock, this shouldn't happen for sequence, 
-        // but could happen for message_uuid if race between check & insert.
-        http_response_code(409); // Conflict
-        echo json_encode(["error" => "CONFLICT", "message" => "Duplicate or race condition"]);
+    logError('SEND_FAIL', ['error' => $e->getMessage(), 'chat_id' => $chatId ?? 'unknown']);
+    if ($conn->errno === 1062) {
+        http_response_code(409);
+        echo json_encode(["error" => "CONFLICT", "message" => "Duplicate or race condition", "request_id" => getRequestId()]);
     } else {
         http_response_code(500);
-        echo json_encode(["error" => "DB_ERROR", "message" => $e->getMessage()]);
+        echo json_encode(["error" => "DB_ERROR", "message" => $e->getMessage(), "request_id" => getRequestId()]);
     }
 }
 

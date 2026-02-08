@@ -2,6 +2,8 @@
 // includes/rate_limiter.php
 // Epic 23: Rate Limiting Framework
 
+require_once __DIR__ . '/logger.php';
+
 if (!function_exists('checkRateLimit')) {
 
     /**
@@ -62,11 +64,18 @@ if (!function_exists('checkRateLimit')) {
                 "limit" => $limit,
                 "window_sec" => $window,
                 "retry_after_sec" => $retryAfter,
-                "message" => "Too many requests. Please wait."
+                "message" => "Too many requests. Please wait.",
+                "request_id" => RequestContext::getRequestId()
             ]);
 
-            // Log Abuse
-            error_log("[RATE_LIMIT] Blocked $keyType:$keyValue on $endpoint ($count >= $limit)");
+            // Log Abuse (Structured)
+            logSecurity('RATE_LIMIT_HIT', [
+                'key_type' => $keyType,
+                'key_value' => $keyValue,
+                'endpoint' => $endpoint,
+                'count' => $count,
+                'limit' => $limit
+            ]);
 
             // Epic 26: Create RATE_LIMIT_BLOCK alert for escalation (after 2x violations)
             // With 30-min cooldown to prevent alert spam
