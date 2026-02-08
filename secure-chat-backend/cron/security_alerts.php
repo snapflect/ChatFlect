@@ -50,4 +50,40 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
     ]);
 }
 
+// HF-51.4: Statistical Anomaly Detection
+// Detect sudden spikes comparing current hour vs 24h average
+$events = ['DECRYPT_FAIL', 'DEVICE_REVOKED', 'AUTH_FAIL'];
+
+foreach ($events as $evt) {
+    // 1. Avg per hour (last 24h)
+    $stmtAvg = $pdo->prepare("
+        SELECT COUNT(*) / 24 
+        FROM security_audit_log 
+        WHERE event_type = ? AND created_at > NOW() - INTERVAL 24 HOUR
+    ");
+    $stmtAvg->execute([$evt]);
+    $avg = $stmtAvg->fetchColumn();
+
+    // 2. Current Hour
+    $stmtCurr = $pdo->prepare("
+        SELECT COUNT(*) 
+        FROM security_audit_log 
+        WHERE event_type = ? AND created_at > NOW() - INTERVAL 1 HOUR
+    ");
+    $stmtCurr->execute([$evt]);
+    $curr = $stmtCurr->fetchColumn();
+
+    // Threshold: 3x Average + Min Noise Floor (10)
+    $threshold = max($avg * 3, 10);
+
+    if ($curr > $threshold) {
+        echo "[ALERT] Anomaly Detected: $evt spike ($curr vs avg $avg).\n";
+        $logger->log('ALERT_ANOMALY_SPIKE', 'WARNING', [
+            'event' => $evt,
+            'current' => $curr,
+            'avg' => $avg
+        ]);
+    }
+}
+
 echo "Scan Complete.\n";

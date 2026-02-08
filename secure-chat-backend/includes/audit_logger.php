@@ -33,6 +33,20 @@ class AuditLogger
             $meta = isset($context['meta']) ? json_encode($context['meta']) : null;
 
             $stmt->execute([$eventType, $severity, $userId, $deviceId, $ip, $meta]);
+
+            // HF-51.3: External SIEM Forwarding
+            // Forward CRITICAL events to Syslog (consumed by Splunk/Datadog agent)
+            if ($severity === 'CRITICAL' || $severity === 'BLOCKER') {
+                openlog("ChatFlectSecurity", LOG_PID | LOG_PERROR, LOG_USER);
+                syslog(LOG_CRIT, json_encode([
+                    'evt' => $eventType,
+                    'uid' => $userId,
+                    'dev' => $deviceId,
+                    'meta' => $context
+                ]));
+                closelog();
+            }
+
         } catch (Exception $e) {
             // Fallback to system error log if DB audit fails (Critical fail-safe)
             error_log("[AUDIT FAILURE] Could not log event $eventType: " . $e->getMessage());
