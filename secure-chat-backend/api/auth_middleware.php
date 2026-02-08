@@ -2,11 +2,15 @@
 require_once 'db.php';
 require_once 'audit_log.php';
 require_once 'rate_limiter.php'; // v12
+require_once __DIR__ . '/../includes/deprecation.php'; // Epic 34
 
 // v15.2: Ensure consistent JSON headers for all functional endpoints
 if (basename($_SERVER['SCRIPT_NAME']) !== 'serve.php') {
     header('Content-Type: application/json; charset=utf-8');
 }
+
+// Epic 34: Apply API version and deprecation headers
+applyVersionHeaders();
 
 /**
  * Authentication Middleware
