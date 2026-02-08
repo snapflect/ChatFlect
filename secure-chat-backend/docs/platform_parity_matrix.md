@@ -8,41 +8,41 @@ This document defines the required security and behavioral parity across all Cha
 ---
 
 ## 1. Crypto Parity
-| Capability | Android | iOS | Web | Notes |
-|---|---|---|---|---|
-| **Key Generation** | REQUIRED | REQUIRED | REQUIRED | Must use platform secure RNG |
-| **Forward Secrecy** | REQUIRED | REQUIRED | REQUIRED | Signal-aligned ratchet |
-| **Replay Protection** | REQUIRED | REQUIRED | REQUIRED | Duplicate nonce/messageId rejection |
-| **Ciphertext Integrity** | REQUIRED | REQUIRED | REQUIRED | Tamper rejection (AEAD) |
-| **Message Auth** | REQUIRED | REQUIRED | REQUIRED | Signature verification |
-| **Sender Keys** | REQUIRED | REQUIRED | REQUIRED | Group optimization |
+| Capability | Required | Android | iOS | Web | Status | Notes |
+|---|---|---|---|---|---|---|
+| **Key Generation** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Must use platform secure RNG |
+| **Forward Secrecy** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Signal-aligned ratchet |
+| **Replay Protection** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Duplicate nonce/messageId rejection |
+| **Ciphertext Integrity** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Tamper rejection (AEAD) |
+| **Message Auth** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Signature verification |
+| **Sender Keys** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Group optimization |
 
 ---
 
 ## 2. Storage Parity
-| Capability | Android | iOS | Web | Notes |
-|---|---|---|---|---|
-| **Plaintext Storage** | FORBIDDEN | FORBIDDEN | FORBIDDEN | Strictly prohibited |
-| **Encrypted Storage** | REQUIRED | REQUIRED | REQUIRED | SQLCipher / Encrypted IndexedDB |
-| **Key Storage** | REQUIRED | REQUIRED | REQUIRED | Keystore / Keychain / Encrypted IDB |
+| Capability | Required | Android | iOS | Web | Status | Notes |
+|---|---|---|---|---|---|---|
+| **Plaintext Storage** | FORBIDDEN | ✅ | ✅ | ✅ | ✅ Implemented | Strictly prohibited |
+| **Encrypted Storage** | REQUIRED | ✅ | ✅ | ✅ | ⚠️ Partial | SQLCipher (Mobile) / Encrypted IDB (Web - Pending) |
+| **Key Storage** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Keystore / Keychain / Encrypted IDB |
 
 ---
 
 ## 3. Device Trust Parity
-| Capability | Android | iOS | Web | Notes |
-|---|---|---|---|---|
-| **Safety Number** | REQUIRED | REQUIRED | REQUIRED | Visual fingerprint comparison |
-| **Key Change Warn** | REQUIRED | REQUIRED | REQUIRED | Blocking warning on identity change |
-| **Device Revocation** | REQUIRED | REQUIRED | REQUIRED | Immediate access cut-off |
+| Capability | Required | Android | iOS | Web | Status | Notes |
+|---|---|---|---|---|---|---|
+| **Safety Number** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Visual fingerprint comparison |
+| **Key Change Warn** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Blocking warning on identity change |
+| **Device Revocation** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Immediate access cut-off |
 
 ---
 
 ## 4. Offline / Sync Parity
-| Capability | Android | iOS | Web | Notes |
-|---|---|---|---|---|
-| **Offline Queue** | REQUIRED | REQUIRED | REQUIRED | Retry-safe logic |
-| **Repair Protocol** | REQUIRED | REQUIRED | REQUIRED | Gap detection & filling |
-| **Read Receipts** | REQUIRED | REQUIRED | REQUIRED | Sync convergence |
+| Capability | Required | Android | iOS | Web | Status | Notes |
+|---|---|---|---|---|---|---|
+| **Offline Queue** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Retry-safe logic |
+| **Repair Protocol** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Gap detection & filling |
+| **Read Receipts** | REQUIRED | ✅ | ✅ | ✅ | ✅ Implemented | Sync convergence |
 
 ---
 
