@@ -9,6 +9,7 @@
 
 require_once '../api/auth_middleware.php';
 require_once '../includes/logger.php';
+require_once '../includes/metrics.php';
 require_once '../api/db_connect.php';
 
 $pullStart = microtime(true);
@@ -187,6 +188,10 @@ if ($msgCount > 0) {
     logInfo('PULL_EMPTY', ['since_seq' => $sinceSeq]);
 }
 
+// Epic 29: Record metrics
+recordMetric($pdo, '/relay/pull.php', 'GET', 200, $pullMs);
+incrementCounter($pdo, 'relay_pull_total');
+
 echo json_encode([
     "messages" => $messages,
     "receipts" => $receipts,
@@ -197,4 +202,5 @@ echo json_encode([
 ]);
 
 $conn->close();
+
 

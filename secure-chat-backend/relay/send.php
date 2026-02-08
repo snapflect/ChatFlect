@@ -9,6 +9,7 @@
 
 require_once '../api/auth_middleware.php';
 require_once '../includes/logger.php';
+require_once '../includes/metrics.php';
 require_once '../api/db_connect.php';
 
 // Set user context for logging
@@ -223,6 +224,11 @@ try {
     // Return Success
     $sendMs = round((microtime(true) - $sendStart) * 1000, 2);
     logPerf('SEND_SUCCESS', $sendMs, ['chat_id' => $chatId, 'server_seq' => $nextSeq]);
+
+    // Epic 29: Record metrics
+    recordMetric($pdo, '/relay/send.php', 'POST', 200, $sendMs);
+    incrementCounter($pdo, 'relay_send_total');
+
     echo json_encode([
         "success" => true,
         "server_seq" => $nextSeq,
@@ -232,11 +238,18 @@ try {
 
 } catch (Exception $e) {
     $conn->rollback();
+    $sendMs = round((microtime(true) - $sendStart) * 1000, 2);
     logError('SEND_FAIL', ['error' => $e->getMessage(), 'chat_id' => $chatId ?? 'unknown']);
+
+    // Epic 29: Record error metrics
+    incrementCounter($pdo, 'relay_send_errors');
+
     if ($conn->errno === 1062) {
+        recordMetric($pdo, '/relay/send.php', 'POST', 409, $sendMs);
         http_response_code(409);
         echo json_encode(["error" => "CONFLICT", "message" => "Duplicate or race condition", "request_id" => getRequestId()]);
     } else {
+        recordMetric($pdo, '/relay/send.php', 'POST', 500, $sendMs);
         http_response_code(500);
         echo json_encode(["error" => "DB_ERROR", "message" => $e->getMessage(), "request_id" => getRequestId()]);
     }

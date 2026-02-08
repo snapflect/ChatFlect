@@ -77,6 +77,10 @@ if (!function_exists('checkRateLimit')) {
                 'limit' => $limit
             ]);
 
+            // Epic 29: Increment counter
+            require_once __DIR__ . '/metrics.php';
+            incrementCounter(getDbPdo(), 'rate_limit_blocks_total');
+
             // Epic 26: Create RATE_LIMIT_BLOCK alert for escalation (after 2x violations)
             // With 30-min cooldown to prevent alert spam
             if ($count >= $limit * 2 && $userId) {
