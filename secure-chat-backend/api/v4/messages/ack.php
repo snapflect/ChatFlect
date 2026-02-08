@@ -28,7 +28,14 @@ try {
     }
 
     $pdo->beginTransaction();
-    $stmt = $pdo->prepare("UPDATE device_inbox SET status = ? WHERE inbox_id = ? AND recipient_device_id = ?");
+
+    // Hardening: Enforce ownership (recipient_device_id must match auth ID)
+    // Also update expiration on ACK to free up storage sooner (7 days)
+    $stmt = $pdo->prepare("
+        UPDATE device_inbox 
+        SET status = ?, expires_at = ? 
+        WHERE inbox_id = ? AND recipient_device_id = ?
+    ");
 
     $count = 0;
     foreach ($acks as $ack) {
@@ -36,7 +43,9 @@ try {
         $id = $ack['inbox_id'] ?? 0;
 
         if (in_array($status, ['DELIVERED', 'ACKED']) && $id) {
-            $stmt->execute([$status, $id, $deviceId]);
+            // Shorten retention on ACK (7 days)
+            $newExpiry = time() + (7 * 86400); // 7 Days TTL for Acked messages
+            $stmt->execute([$status, $newExpiry, $id, $deviceId]);
             $count += $stmt->rowCount();
         }
     }

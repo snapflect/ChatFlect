@@ -75,3 +75,27 @@ function getTrustedDevices($pdo, $userId)
     $stmt->execute([$userId]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
+function checkPeerRelationship($pdo, $requesterId, $targetId)
+{
+    if ($requesterId === $targetId)
+        return true;
+
+    // Check 1: In contacts?
+    // (Assuming contacts table exists, if not skip or mock)
+    // $stmt = $pdo->prepare("SELECT 1 FROM contacts WHERE user_id = ? AND contact_id = ?");
+    // $stmt->execute([$requesterId, $targetId]);
+    // if ($stmt->fetchColumn()) return true;
+
+    // Check 2: Shared Group? (More robust)
+    $stmt = $pdo->prepare("
+        SELECT 1 FROM group_members gm1
+        JOIN group_members gm2 ON gm1.group_id = gm2.group_id
+        WHERE gm1.user_id = ? AND gm2.user_id = ?
+    ");
+    $stmt->execute([$requesterId, $targetId]);
+    if ($stmt->fetchColumn())
+        return true;
+
+    return false;
+}

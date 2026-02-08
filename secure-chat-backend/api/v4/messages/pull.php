@@ -27,15 +27,19 @@ try {
 
     $limit = 50;
 
-    // Fetch from device_inbox
+    // Hardening: Explicitly bind query to auth token's device_id
     $stmt = $pdo->prepare("
         SELECT inbox_id, message_uuid, encrypted_payload, nonce, created_at 
         FROM device_inbox 
-        WHERE recipient_device_id = ? AND status = 'PENDING'
+        WHERE recipient_device_id = :authDeviceId 
+          AND status = 'PENDING'
         ORDER BY inbox_id ASC
-        LIMIT ?
+        LIMIT :limit
     ");
-    $stmt->execute([$deviceId, $limit]);
+
+    $stmt->bindValue(':authDeviceId', $deviceId);
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->execute();
     $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     echo json_encode([

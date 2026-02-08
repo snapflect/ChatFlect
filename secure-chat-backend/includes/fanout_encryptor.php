@@ -58,12 +58,20 @@ class FanoutEncryptor
             $ciphertext = base64_encode(openssl_encrypt($plaintextPayload, 'aes-256-gcm', $sessionKey, 0, hex2bin($nonce), $tag));
             $finalPayload = json_encode(['ct' => $ciphertext, 'tag' => base64_encode($tag)]);
 
-            // 3. Store in Device Inbox
+            // 3. Store in Device Inbox ONLY if still TRUSTED (Race Condition Guard)
+            $stmtCheck = $pdo->prepare("SELECT trust_state FROM devices WHERE device_id = ?");
+            $stmtCheck->execute([$recipientDevId]);
+            if ($stmtCheck->fetchColumn() !== 'TRUSTED') {
+                continue; // Skip revoked/pending device
+            }
+
             $stmt = $pdo->prepare("
-                INSERT INTO device_inbox (recipient_device_id, message_uuid, encrypted_payload, nonce, status)
-                VALUES (?, ?, ?, ?, 'PENDING')
+                INSERT IGNORE INTO device_inbox (recipient_device_id, message_uuid, encrypted_payload, nonce, status, expires_at)
+                VALUES (?, ?, ?, ?, 'PENDING', ?)
             ");
-            $stmt->execute([$recipientDevId, $messageUuid, $finalPayload, $nonce]);
+            // Default TTL: 30 days (2592000 seconds)
+            $expiresAt = time() + 2592000;
+            $stmt->execute([$recipientDevId, $messageUuid, $finalPayload, $nonce, $expiresAt]);
             $fanoutCount++;
         }
 
