@@ -61,7 +61,7 @@ function recordAbuseEvent($pdo, $userId, $deviceUuid, $ip, $eventType, $weight, 
         ABUSE_LOCKOUT_MINUTES
     ]);
 
-    // 3. If CRITICAL, log ABUSE_LOCK event
+    // 3. If CRITICAL, log ABUSE_LOCK event and create security alert
     $newScore = getAbuseScore($pdo, $userId);
     if ($newScore['risk_level'] === 'CRITICAL' && $eventType !== 'ABUSE_LOCK') {
         // Log the lock event (prevent recursion by checking eventType)
@@ -72,6 +72,10 @@ function recordAbuseEvent($pdo, $userId, $deviceUuid, $ip, $eventType, $weight, 
         $stmt->execute([$userId, $deviceUuid, $ip, json_encode(['triggered_by' => $eventType])]);
 
         error_log("[ABUSE] User $userId LOCKED for " . ABUSE_LOCKOUT_MINUTES . " minutes. Event: $eventType");
+
+        // Create Security Alert (Epic 26)
+        require_once __DIR__ . '/security_alerts.php';
+        alertAbuseLock($pdo, $userId, $deviceUuid, $ip, $eventType);
     }
 }
 

@@ -58,6 +58,10 @@ try {
     ");
     $stmt->execute([$user_id, $target_device, $ip, $ua, json_encode(['revoked_by' => $current_device])]);
 
+    // 8. Create Security Alert (Epic 26)
+    require_once __DIR__ . '/../../../includes/security_alerts.php';
+    alertDeviceRevoked($pdo, $user_id, $target_device, $ip, $current_device);
+
     echo json_encode([
         'success' => true,
         'device_uuid' => $target_device,

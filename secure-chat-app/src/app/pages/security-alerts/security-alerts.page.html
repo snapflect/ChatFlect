@@ -1,0 +1,53 @@
+<ion-header>
+    <ion-toolbar>
+        <ion-buttons slot="start">
+            <ion-back-button defaultHref="/settings"></ion-back-button>
+        </ion-buttons>
+        <ion-title>Security Alerts</ion-title>
+        <ion-buttons slot="end">
+            <ion-button (click)="loadAlerts()">
+                <ion-icon name="refresh-outline"></ion-icon>
+            </ion-button>
+        </ion-buttons>
+    </ion-toolbar>
+    <ion-toolbar>
+        <ion-segment [(ngModel)]="filter" (ionChange)="onFilterChange($event.detail.value!)">
+            <ion-segment-button value="all">
+                <ion-label>All</ion-label>
+            </ion-segment-button>
+            <ion-segment-button value="unread">
+                <ion-label>Unread</ion-label>
+            </ion-segment-button>
+        </ion-segment>
+    </ion-toolbar>
+</ion-header>
+
+<ion-content>
+    <ion-progress-bar *ngIf="loading" type="indeterminate"></ion-progress-bar>
+
+    <ion-list>
+        <ion-item *ngFor="let alert of alerts" [class.unread]="!alert.is_read" (click)="markAsRead(alert)">
+            <ion-icon [name]="getAlertInfo(alert.alert_type).icon" slot="start"
+                [color]="getAlertInfo(alert.alert_type).color">
+            </ion-icon>
+            <ion-label>
+                <h2>
+                    {{ getAlertInfo(alert.alert_type).title }}
+                    <ion-badge [color]="getSeverityColor(alert.severity)">{{ alert.severity }}</ion-badge>
+                </h2>
+                <p>{{ alert.metadata?.message || alert.alert_type }}</p>
+                <p class="timestamp">{{ alert.created_at | date:'medium' }}</p>
+            </ion-label>
+            <ion-icon name="ellipse" slot="end" color="primary" *ngIf="!alert.is_read"></ion-icon>
+        </ion-item>
+    </ion-list>
+
+    <ion-item *ngIf="alerts.length === 0 && !loading" lines="none">
+        <ion-label class="ion-text-center">
+            <ion-icon name="shield-checkmark-outline"
+                style="font-size: 48px; color: var(--ion-color-success);"></ion-icon>
+            <h2>No alerts</h2>
+            <p>Your account is secure</p>
+        </ion-label>
+    </ion-item>
+</ion-content>
