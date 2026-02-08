@@ -1,6 +1,6 @@
 <?php
 // includes/group_auth.php
-// Epic 41: Group Auth + Membership Helpers
+// Epic 43: Group Auth + Membership Helpers
 
 require_once __DIR__ . '/db_connect.php';
 require_once __DIR__ . '/logger.php';
@@ -10,34 +10,22 @@ require_once __DIR__ . '/logger.php';
  */
 function requireGroupMember($pdo, string $groupId, string $userId): bool
 {
-    $stmt = $pdo->prepare("
-        SELECT 1 FROM group_members 
-        WHERE group_id = ? AND user_id = ? AND removed_at IS NULL
-    ");
-    $stmt->execute([$groupId, $userId]);
-
-    if (!$stmt->fetch()) {
+    if (!isGroupMemberActive($pdo, $groupId, $userId)) {
         http_response_code(403);
         echo json_encode(['error' => 'NOT_GROUP_MEMBER', 'message' => 'You are not a member of this group']);
         exit;
     }
-
     return true;
 }
 
 /**
- * Verify user is an admin of the group.
+ * Verify user is an admin or owner of the group.
  */
 function requireGroupAdmin($pdo, string $groupId, string $userId): bool
 {
-    $stmt = $pdo->prepare("
-        SELECT role FROM group_members 
-        WHERE group_id = ? AND user_id = ? AND removed_at IS NULL
-    ");
-    $stmt->execute([$groupId, $userId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $role = getMemberRole($pdo, $groupId, $userId);
 
-    if (!$row || $row['role'] !== 'admin') {
+    if ($role !== 'admin' && $role !== 'owner') {
         http_response_code(403);
         echo json_encode(['error' => 'NOT_GROUP_ADMIN', 'message' => 'Admin privileges required']);
         exit;
@@ -47,9 +35,38 @@ function requireGroupAdmin($pdo, string $groupId, string $userId): bool
 }
 
 /**
- * Get user's role in a group.
+ * Verify user is the owner of the group.
  */
-function getGroupRole($pdo, string $groupId, string $userId): ?string
+function requireGroupOwner($pdo, string $groupId, string $userId): bool
+{
+    $role = getMemberRole($pdo, $groupId, $userId);
+
+    if ($role !== 'owner') {
+        http_response_code(403);
+        echo json_encode(['error' => 'NOT_GROUP_OWNER', 'message' => 'Owner privileges required']);
+        exit;
+    }
+
+    return true;
+}
+
+/**
+ * Check if member is active (not removed).
+ */
+function isGroupMemberActive($pdo, string $groupId, string $userId): bool
+{
+    $stmt = $pdo->prepare("
+        SELECT 1 FROM group_members 
+        WHERE group_id = ? AND user_id = ? AND removed_at IS NULL
+    ");
+    $stmt->execute([$groupId, $userId]);
+    return (bool) $stmt->fetch();
+}
+
+/**
+ * Get user's role in a group (owner, admin, member, or null).
+ */
+function getMemberRole($pdo, string $groupId, string $userId): ?string
 {
     $stmt = $pdo->prepare("
         SELECT role FROM group_members 
@@ -58,7 +75,28 @@ function getGroupRole($pdo, string $groupId, string $userId): ?string
     $stmt->execute([$groupId, $userId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    return $row ? $row['role'] : null;
+    // In migration 024, roles were ENUM('admin', 'member').
+    // Epic 43 logically treats 'created_by' as owner, or we need to update the ENUM.
+    // For WhatsApp-style, we can either update schema or infer owner from groups table.
+    // Let's infer owner from groups table first to avoid schema change if possible,
+    // OR just use 'admin' role + is_creator check.
+    // BETTER: Let's check if they are the creator in `groups` table if role is 'admin'.
+    // Actually, migration 024 didn't enforce owner role in ENUM. 
+    // Let's stick to: Owner matches `created_by` in `groups` table.
+
+    if (!$row)
+        return null;
+
+    // Check ownership
+    $stmtOwner = $pdo->prepare("SELECT created_by FROM `groups` WHERE group_id = ?");
+    $stmtOwner->execute([$groupId]);
+    $group = $stmtOwner->fetch(PDO::FETCH_ASSOC);
+
+    if ($group && $group['created_by'] === $userId) {
+        return 'owner';
+    }
+
+    return $row['role'];
 }
 
 /**
