@@ -1,0 +1,30 @@
+# Secrets - NEVER commit
+.env
+*.env
+config/.env
+service-account.json
+*-service-account.json
+*.key
+*.pem
+
+# Logs
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+vendor/
+node_modules/
+
+# Build
+dist/
+build/
