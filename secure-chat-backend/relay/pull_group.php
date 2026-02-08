@@ -1,6 +1,6 @@
 <?php
-// relay/pull_group.php
-// Epic 42: Pull Group Messages Endpoint
+// relay/pull_group.php (v2)
+// Epic 45: Pull Group Messages + Receipts
 
 require_once __DIR__ . '/../includes/db_connect.php';
 require_once __DIR__ . '/../api/auth_middleware.php';
@@ -16,6 +16,7 @@ try {
 
     $groupId = $_GET['group_id'] ?? '';
     $sinceSeq = (int) ($_GET['since_seq'] ?? 0);
+    $sinceReceiptId = (int) ($_GET['since_receipt_id'] ?? 0); // New for Epic 45
     $limit = min((int) ($_GET['limit'] ?? 50), 200);
 
     if (!$groupId) {
@@ -24,10 +25,9 @@ try {
         exit;
     }
 
-    // Verify membership
     requireGroupMember($pdo, $groupId, $userId);
 
-    // Fetch messages
+    // 1. Fetch Messages
     $stmt = $pdo->prepare("
         SELECT message_uuid, sender_id, sender_device_uuid, server_seq, encrypted_payload, created_at
         FROM group_messages
@@ -38,26 +38,40 @@ try {
     $stmt->execute([$groupId, $sinceSeq, $limit]);
     $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Get last seq
     $lastSeq = $sinceSeq;
     if (!empty($messages)) {
         $lastSeq = (int) $messages[count($messages) - 1]['server_seq'];
     }
 
-    // Check if more
-    $hasMore = count($messages) === $limit;
+    // 2. Fetch Receipts (Epic 45)
+    $stmtReceipts = $pdo->prepare("
+        SELECT receipt_id, message_uuid, user_id, device_uuid, type, created_at
+        FROM group_receipts
+        WHERE group_id = ? AND receipt_id > ?
+        ORDER BY receipt_id ASC
+        LIMIT ?
+    ");
+    $stmtReceipts->execute([$groupId, $sinceReceiptId, $limit]);
+    $receipts = $stmtReceipts->fetchAll(PDO::FETCH_ASSOC);
 
-    // Metrics
+    $lastReceiptId = $sinceReceiptId;
+    if (!empty($receipts)) {
+        $lastReceiptId = (int) $receipts[count($receipts) - 1]['receipt_id'];
+    }
+
+    $hasMore = (count($messages) === $limit) || (count($receipts) === $limit);
+
     $latency = (microtime(true) - $startTime) * 1000;
-    recordMetric($pdo, 'pull_group', $latency, 200);
+    recordMetric($pdo, 'pull_group_v2', $latency, 200);
 
     echo json_encode([
         'success' => true,
         'group_id' => $groupId,
         'messages' => $messages,
+        'receipts' => $receipts,
         'last_seq' => $lastSeq,
-        'has_more' => $hasMore,
-        'count' => count($messages)
+        'last_receipt_id' => $lastReceiptId,
+        'has_more' => $hasMore
     ]);
 
 } catch (Exception $e) {
