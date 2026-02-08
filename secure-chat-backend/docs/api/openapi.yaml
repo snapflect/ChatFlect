@@ -1,0 +1,221 @@
+openapi: 3.1.0
+info:
+  title: ChatFlect API
+  version: 1.0.0
+  description: Secure E2EE Messaging Backend API
+
+servers:
+  - url: https://api.chatflect.com
+    description: Production
+  - url: http://localhost/secure-chat-backend
+    description: Local
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error, message, request_id]
+      properties:
+        error:
+          type: string
+          example: RATE_LIMITED
+        message:
+          type: string
+        retry_after_sec:
+          type: integer
+        request_id:
+          type: string
+
+    SendRequest:
+      type: object
+      required: [chat_id, payload, client_uuid]
+      properties:
+        chat_id:
+          type: string
+        payload:
+          type: string
+          description: E2EE encrypted message
+        client_uuid:
+          type: string
+          format: uuid
+
+    SendResponse:
+      type: object
+      required: [success, server_seq, timestamp, request_id]
+      properties:
+        success:
+          type: boolean
+        server_seq:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+
+    PullResponse:
+      type: object
+      required: [messages, receipts, last_seq, request_id]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        receipts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Receipt"
+        last_seq:
+          type: integer
+        last_receipt_id:
+          type: integer
+        has_more:
+          type: boolean
+        request_id:
+          type: string
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        chat_id:
+          type: string
+        sender_id:
+          type: string
+        payload:
+          type: string
+        server_seq:
+          type: integer
+        created_at:
+          type: string
+
+    Receipt:
+      type: object
+      properties:
+        id:
+          type: integer
+        chat_id:
+          type: string
+        message_uuid:
+          type: string
+        receipt_type:
+          type: string
+          enum: [DELIVERED, READ]
+
+    HealthResponse:
+      type: object
+      required: [status, db_status]
+      properties:
+        status:
+          type: string
+          enum: [OK, DEGRADED, CRITICAL]
+        relay_send_p99:
+          type: number
+        error_rate_5xx:
+          type: number
+        db_status:
+          type: string
+
+paths:
+  /relay/send.php:
+    post:
+      summary: Send encrypted message
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/SendRequest"
+      responses:
+        "200":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendResponse"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /relay/pull.php:
+    get:
+      summary: Pull messages and receipts
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: since_seq
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Messages retrieved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullResponse"
+
+  /relay/receipt.php:
+    post:
+      summary: Store delivery receipt
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Receipt stored
+
+  /relay/repair.php:
+    get:
+      summary: Repair missing messages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: chat_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: from_seq
+          in: query
+          schema:
+            type: integer
+        - name: to_seq
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Gap repaired
+
+  /admin/v1/health_report.php:
+    get:
+      summary: System health report
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
