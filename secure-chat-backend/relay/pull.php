@@ -41,6 +41,11 @@ if ($deviceResult->num_rows === 0 || $deviceResult->fetch_assoc()['status'] !== 
 }
 $stmtDevice->close();
 
+// 1.6 Rate Limiting (Epic 23)
+require_once '../includes/rate_limiter.php';
+$clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+checkRateLimit($conn, $userId, $deviceUuid, $clientIp, 'relay/pull.php', 120, 60);
+
 // 2. Parse Input (Wait, we need to check DB state for ETag FIRST? No, ETag depends on RESULT usually, OR on server state).
 // Efficient ETag: We need to know the 'latest' state without fetching everything.
 // Ideal: Client sends 'If-None-Match: "md5_hash_of_last_state"'.

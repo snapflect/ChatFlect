@@ -48,6 +48,11 @@ if ($deviceResult->num_rows === 0 || $deviceResult->fetch_assoc()['status'] !== 
 }
 $stmtDevice->close();
 
+// 1.6 Rate Limiting (Epic 23)
+require_once '../includes/rate_limiter.php';
+$clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+checkRateLimit($conn, $userId, $deviceUuid, $clientIp, 'relay/send.php', 30, 60);
+
 // 2. Parse Input
 $input = json_decode(file_get_contents('php://input'), true);
 

@@ -28,6 +28,11 @@ try {
         exit;
     }
 
+    // 2.5 Rate Limiting (Epic 23)
+    require_once __DIR__ . '/../../includes/rate_limiter.php';
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    checkRateLimitPDO($pdo, $user_id, $device_uuid, $clientIp, 'relay/receipt.php', 100, 60);
+
     // 3. Parse Input
     $input = json_decode(file_get_contents('php://input'), true);
     $chat_id = $input['chat_id'] ?? '';

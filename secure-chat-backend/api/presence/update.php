@@ -49,6 +49,11 @@ try {
         exit;
     }
 
+    // 3.5 Rate Limiting (Epic 23)
+    require_once __DIR__ . '/../../includes/rate_limiter.php';
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    checkRateLimitPDO($pdo, $user_id, $device_uuid, $clientIp, 'presence/update.php', 6, 60);
+
     // 4. Rate Guard (10s Throttling)
     // Only fetch necessary column to optimize
     $stmt = $pdo->prepare("SELECT last_seen, typing_in_chat FROM presence WHERE user_id = ? AND device_uuid = ?");

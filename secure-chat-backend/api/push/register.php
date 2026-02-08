@@ -46,6 +46,11 @@ try {
         exit;
     }
 
+    // 3.5 Rate Limiting (Epic 23)
+    require_once __DIR__ . '/../../includes/rate_limiter.php';
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    checkRateLimitPDO($pdo, $user_id, $device_uuid, $clientIp, 'push/register.php', 5, 600);
+
     // 4. Upsert Token
     // We explicitly set is_active = 1 on new registration
     $stmt = $pdo->prepare("

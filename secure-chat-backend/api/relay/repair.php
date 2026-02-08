@@ -17,6 +17,11 @@ try {
         exit;
     }
 
+    // 1.5 Rate Limiting (Epic 23)
+    require_once __DIR__ . '/../../includes/rate_limiter.php';
+    $clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    checkRateLimitPDO($pdo, $user_id, $device_uuid, $clientIp, 'relay/repair.php', 10, 60);
+
     // 2. Validate Input
     $chat_id = $_GET['chat_id'] ?? null;
     $start_seq = isset($_GET['start_seq']) ? (int) $_GET['start_seq'] : 0;
