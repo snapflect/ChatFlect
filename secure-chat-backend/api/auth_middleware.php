@@ -333,6 +333,56 @@ function requireAuth($requestUserId = null)
             ]);
             exit;
         }
+
+        // --- Epic 26: Security Alerts Integration ---
+        $currentIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+
+        // NEW_DEVICE_LOGIN: Check if this is first login for this device
+        $lastLoginStmt = $conn->prepare("SELECT id FROM device_audit_logs WHERE user_id = ? AND device_uuid = ? AND event_type = 'LOGIN' LIMIT 1");
+        if ($lastLoginStmt) {
+            $lastLoginStmt->bind_param("ss", $authUserId, $deviceUuid);
+            $lastLoginStmt->execute();
+            $loginResult = $lastLoginStmt->get_result();
+            $isNewDevice = ($loginResult->num_rows === 0);
+            $lastLoginStmt->close();
+
+            if ($isNewDevice) {
+                // Trigger NEW_DEVICE_LOGIN alert
+                require_once __DIR__ . '/../includes/security_alerts.php';
+                alertNewDeviceLogin(getDbPdo(), $authUserId, $deviceUuid, $currentIp, $userAgent);
+            }
+        }
+
+        // IP_CHANGE: Compare to last 3 logins
+        $ipCheckStmt = $conn->prepare("SELECT DISTINCT ip_address FROM device_audit_logs WHERE user_id = ? AND event_type = 'LOGIN' ORDER BY created_at DESC LIMIT 3");
+        if ($ipCheckStmt) {
+            $ipCheckStmt->bind_param("s", $authUserId);
+            $ipCheckStmt->execute();
+            $ipResult = $ipCheckStmt->get_result();
+            $recentIps = [];
+            while ($ipRow = $ipResult->fetch_assoc()) {
+                $recentIps[] = $ipRow['ip_address'];
+            }
+            $ipCheckStmt->close();
+
+            // If we have history and current IP is not in the last 3
+            if (count($recentIps) > 0 && !in_array($currentIp, $recentIps)) {
+                require_once __DIR__ . '/../includes/security_alerts.php';
+                createSecurityAlert(getDbPdo(), $authUserId, 'IP_CHANGE', 'WARNING', $deviceUuid, $currentIp, [
+                    'previous_ips' => $recentIps,
+                    'message' => 'Login from a new IP address detected'
+                ]);
+            }
+        }
+
+        // Log this login to device_audit_logs
+        $logStmt = $conn->prepare("INSERT INTO device_audit_logs (user_id, device_uuid, event_type, ip_address, user_agent) VALUES (?, ?, 'LOGIN', ?, ?)");
+        if ($logStmt) {
+            $logStmt->bind_param("ssss", $authUserId, $deviceUuid, $currentIp, $userAgent);
+            $logStmt->execute();
+            $logStmt->close();
+        }
     }
 
 

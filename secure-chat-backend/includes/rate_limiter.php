@@ -67,6 +67,14 @@ if (!function_exists('checkRateLimit')) {
 
             // Log Abuse
             error_log("[RATE_LIMIT] Blocked $keyType:$keyValue on $endpoint ($count >= $limit)");
+
+            // Epic 26: Create RATE_LIMIT_BLOCK alert for escalation (after 3+ violations)
+            if ($count >= $limit * 2) {
+                require_once __DIR__ . '/../api/db.php';
+                require_once __DIR__ . '/security_alerts.php';
+                alertRateLimitBlock(getDbPdo(), $userId ?? 'unknown', $deviceUuid ?? 'unknown', $ip, $endpoint);
+            }
+
             exit;
         }
 
