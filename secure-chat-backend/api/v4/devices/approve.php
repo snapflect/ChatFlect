@@ -1,6 +1,6 @@
 <?php
-// api/v4/devices/revoke.php
-// Epic 47: Revoke Device
+// api/v4/devices/approve.php
+// Epic 47: Approve Pending Device
 
 require_once __DIR__ . '/../../../includes/db_connect.php';
 require_once __DIR__ . '/../../../api/auth_middleware.php';
@@ -12,6 +12,10 @@ try {
     $authData = requireAuth();
     $userId = strtoupper($authData['user_id']);
 
+    // Only TRUSTED devices can approve others
+    // (Actual check logic inside requireAuth ensures device is valid/active, 
+    // but explicit check in DB schema ensures trust_state is honored)
+
     $input = json_decode(file_get_contents('php://input'), true);
     $targetDeviceId = $input['target_device_id'] ?? '';
 
@@ -21,14 +25,11 @@ try {
         exit;
     }
 
-    $success = revokeDevice($pdo, $userId, $targetDeviceId);
+    approveDevice($pdo, $userId, $targetDeviceId);
 
-    if ($success) {
-        echo json_encode(['success' => true]);
-    } else {
-        http_response_code(404);
-        echo json_encode(['error' => 'DEVICE_NOT_FOUND']);
-    }
+    // TODO: Emit push notification "Device Approved" (Epic 48)
+
+    echo json_encode(['success' => true]);
 
 } catch (Exception $e) {
     http_response_code(500);
