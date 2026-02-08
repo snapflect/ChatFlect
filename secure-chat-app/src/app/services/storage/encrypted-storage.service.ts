@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { StorageKDFService } from './storage-kdf.service';
+import { StorageKDFService } from './storage-kdf.service'; // Adjust import if needed, assuming relative path
 
 /**
  * Encrypted IndexedDB Wrapper
@@ -19,7 +19,23 @@ export class EncryptedStorageService {
     private db: IDBDatabase | null = null;
     private keys: Map<string, CryptoKey> = new Map();
 
+    // Hardening: Rate Limiting
+    private opCount = 0;
+    private lastReset = Date.now();
+    private readonly MAX_OPS_PER_SEC = 100;
+
     constructor(private kdf: StorageKDFService) { }
+
+    private checkRateLimit() {
+        const now = Date.now();
+        if (now - this.lastReset > 1000) {
+            this.opCount = 0;
+            this.lastReset = now;
+        }
+        if (this.opCount++ > this.MAX_OPS_PER_SEC) {
+            throw new Error('Storage Rate Limit Exceeded');
+        }
+    }
 
     async init(dbName: string, version: number): Promise<void> {
         // 1. Open DB
@@ -46,6 +62,7 @@ export class EncryptedStorageService {
     }
 
     async put(storeName: 'messages' | 'sessions' | 'registry', id: string, data: any): Promise<void> {
+        this.checkRateLimit();
         const key = this.keys.get(storeName);
         if (!key) throw new Error(`No key for context ${storeName}`);
 
@@ -69,6 +86,7 @@ export class EncryptedStorageService {
     }
 
     async get(storeName: 'messages' | 'sessions' | 'registry', id: string): Promise<any | null> {
+        this.checkRateLimit();
         const key = this.keys.get(storeName);
         if (!key) throw new Error(`No key for context ${storeName}`);
 

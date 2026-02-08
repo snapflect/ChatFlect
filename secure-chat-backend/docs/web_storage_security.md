@@ -24,3 +24,8 @@ Records are stored as opacity blobs:
 
 ## Migration
 Existing plaintext data is considered compromised and should be wiped on upgrade.
+
+## Hardening Roadmap (Epic 50-HF)
+- **Rate Limiting**: `EncryptedStorageService` throttles operations (>100 ops/sec) to slow down offline exhaust attacks.
+- **Key Rotation**: Infrastructure exists to rotate keys. Future update will implement full re-encryption jobs.
+- **WebAuthn Binding**: Future plan to wrap the Master Key in a WebAuthn PRF (Pseudo-Random Function) from a hardware authenticator (TouchID/YubiKey) for "Secure Enclave" equivalent on Web.

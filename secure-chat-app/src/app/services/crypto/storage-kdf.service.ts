@@ -41,4 +41,15 @@ export class StorageKDFService {
             ['encrypt', 'decrypt']
         );
     }
+
+    // Hardening: Key Rotation Stub
+    // In real implementation, this would derive a NEW key with salt version + 1,
+    // re-encrypt all data, and commit.
+    async rotateStorageKey(context: 'messages' | 'sessions'): Promise<void> {
+        console.warn(`[Security] Key Rotation requested for ${context}. Feature pending: Re-encryption job.`);
+        // 1. Derive new key (v+1)
+        // 2. Iterate all IDB records
+        // 3. Decrypt (v) -> Encrypt (v+1)
+        // 4. Update Header
+    }
 }
