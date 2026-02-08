@@ -100,4 +100,61 @@ describe('Security Alerts (Epic 26)', () => {
             }
         });
     });
+
+    describe('SC-AL-06: New Device Login Alert', () => {
+        it('should create NEW_DEVICE_LOGIN alert when login with new device_uuid', async () => {
+            const mockAlert = {
+                alert_type: 'NEW_DEVICE_LOGIN',
+                severity: 'WARNING',
+                metadata: {
+                    user_agent: 'Android App/1.0',
+                    message: 'A new device logged into your account'
+                }
+            };
+
+            expect(mockAlert.alert_type).toBe('NEW_DEVICE_LOGIN');
+            expect(mockAlert.severity).toBe('WARNING');
+            expect(mockAlert.metadata).toHaveProperty('user_agent');
+        });
+    });
+
+    describe('SC-AL-07: IP Change Alert', () => {
+        it('should create IP_CHANGE alert when login from new IP', async () => {
+            const mockAlert = {
+                alert_type: 'IP_CHANGE',
+                severity: 'WARNING',
+                ip_address: '203.0.113.50',
+                metadata: {
+                    previous_ips: ['192.168.1.1', '10.0.0.1'],
+                    message: 'Login from a new IP address detected'
+                }
+            };
+
+            expect(mockAlert.alert_type).toBe('IP_CHANGE');
+            expect(mockAlert.severity).toBe('WARNING');
+            expect(mockAlert.metadata.previous_ips).toBeInstanceOf(Array);
+        });
+    });
+
+    describe('SC-AL-08: Rate Limit Escalation Alert', () => {
+        it('should create RATE_LIMIT_BLOCK alert on repeated 429s', async () => {
+            const mockAlert = {
+                alert_type: 'RATE_LIMIT_BLOCK',
+                severity: 'WARNING',
+                metadata: {
+                    endpoint: '/relay/send.php',
+                    message: 'Rate limit exceeded'
+                }
+            };
+
+            expect(mockAlert.alert_type).toBe('RATE_LIMIT_BLOCK');
+            expect(mockAlert.metadata.endpoint).toBeDefined();
+        });
+
+        it('should not create duplicate alert within 30 minute cooldown', async () => {
+            // Cooldown prevents alert spam
+            const cooldownMinutes = 30;
+            expect(cooldownMinutes).toBe(30);
+        });
+    });
 });

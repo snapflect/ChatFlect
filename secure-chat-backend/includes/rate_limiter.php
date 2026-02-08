@@ -68,11 +68,25 @@ if (!function_exists('checkRateLimit')) {
             // Log Abuse
             error_log("[RATE_LIMIT] Blocked $keyType:$keyValue on $endpoint ($count >= $limit)");
 
-            // Epic 26: Create RATE_LIMIT_BLOCK alert for escalation (after 3+ violations)
-            if ($count >= $limit * 2) {
+            // Epic 26: Create RATE_LIMIT_BLOCK alert for escalation (after 2x violations)
+            // With 30-min cooldown to prevent alert spam
+            if ($count >= $limit * 2 && $userId) {
                 require_once __DIR__ . '/../api/db.php';
                 require_once __DIR__ . '/security_alerts.php';
-                alertRateLimitBlock(getDbPdo(), $userId ?? 'unknown', $deviceUuid ?? 'unknown', $ip, $endpoint);
+                $pdo = getDbPdo();
+
+                // Check if alert was created in last 30 minutes
+                $cooldownStmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM security_alerts 
+                    WHERE user_id = ? AND alert_type = 'RATE_LIMIT_BLOCK' 
+                    AND created_at > NOW() - INTERVAL 30 MINUTE
+                ");
+                $cooldownStmt->execute([$userId]);
+                $recentAlerts = $cooldownStmt->fetchColumn();
+
+                if ($recentAlerts == 0) {
+                    alertRateLimitBlock($pdo, $userId, $deviceUuid ?? 'unknown', $ip, $endpoint);
+                }
             }
 
             exit;
