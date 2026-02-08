@@ -51,3 +51,15 @@ Any violation is a release blocker. CI tests enforce these rules.
 ## Invariant 8: Safe Failure
 > **Rule**: Any crypto failure must fail closed (reject message).
 > **Enforcement**: Exception handling must never return "success" on crypto error.
+
+---
+
+## Invariant 9: No Key Material Logging
+> **Rule**: No private keys, session keys, derived secrets, or raw decrypted payloads may ever appear in logs/debug dumps.
+> **Enforcement**: Automated log checks, strict Redact-by-Default policy.
+
+---
+
+## Invariant 10: Versioned Crypto Protocol Compatibility
+> **Rule**: Messages must carry a protocol version and clients must fail safe if unsupported.
+> **Enforcement**: Protocol header checks, explicit version negotiation.
