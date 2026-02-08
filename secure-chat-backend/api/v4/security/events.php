@@ -19,25 +19,54 @@ if (!$adminSecret || $receivedSecret !== $adminSecret) {
     exit;
 }
 
-// HF-51.1: Rate Limiting (Simple File-based for now, Redis recommended for prod)
-$rateLimitFile = sys_get_temp_dir() . '/admin_rate_limit_' . md5($receivedSecret);
+// HF-51.1: Advanced Rate Limiting (Composite IP + AdminToken)
+$clientIp = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+$bucketKey = md5($receivedSecret . '|' . $clientIp);
+$rateLimitFile = sys_get_temp_dir() . '/admin_rate_limit_' . $bucketKey;
+
+// Settings
 $rateLimitWindow = 60; // 1 minute
 $maxRequests = 10;
+$banThreshold = 50; // 5x limit = Ban
 
-$current = (int) @file_get_contents($rateLimitFile);
-$mtime = @filemtime($rateLimitFile);
+$data = @json_decode(@file_get_contents($rateLimitFile), true) ?? ['count' => 0, 'start' => time(), 'banned' => false];
 
-if ($mtime && (time() - $mtime > $rateLimitWindow)) {
-    $current = 0; // Reset
+// Check Ban
+if (!empty($data['banned']) && $data['banned'] > time()) {
+    http_response_code(403);
+    echo json_encode(['error' => 'IP_BANNED_TEMPORARILY']);
+    exit;
 }
 
-if ($current >= $maxRequests) {
+// Reset Window
+if (time() - $data['start'] > $rateLimitWindow) {
+    if ($data['count'] > $maxRequests) {
+        // Log abuse before reset?
+    }
+    $data['count'] = 0;
+    $data['start'] = time();
+}
+
+// Check Limit
+if ($data['count'] >= $maxRequests) {
+    // Ban Logic: If hitting limit excessively
+    if ($data['count'] >= $banThreshold) {
+        $data['banned'] = time() + 3600; // 1 Hour Ban
+        file_put_contents($rateLimitFile, json_encode($data));
+        http_response_code(403);
+        echo json_encode(['error' => 'IP_BANNED_TEMPORARILY']);
+        exit;
+    }
+
+    file_put_contents($rateLimitFile, json_encode($data)); // Save state even on block
     http_response_code(429);
     echo json_encode(['error' => 'RATE_LIMIT_EXCEEDED']);
     exit;
 }
 
-file_put_contents($rateLimitFile, $current + 1);
+// Increment
+$data['count']++;
+file_put_contents($rateLimitFile, json_encode($data));
 
 // 2. Query Params
 $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : 100;

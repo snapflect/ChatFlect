@@ -7,8 +7,12 @@ require_once __DIR__ . '/../includes/db_connect.php';
 
 echo "Starting Audit Log Cleanup...\n";
 
+// HF-51.7: Privileged Cleanup Bypass
+$pdo->exec("SET @allow_audit_cleanup = 1");
+
 // 1. Purge INFO logs older than 30 days
 $stmt = $pdo->prepare("DELETE FROM security_audit_log WHERE severity = 'INFO' AND created_at < NOW() - INTERVAL 30 DAY");
+
 $stmt->execute();
 $infoDeleted = $stmt->rowCount();
 echo "[CLEANUP] Deleted $infoDeleted INFO logs > 30 days.\n";

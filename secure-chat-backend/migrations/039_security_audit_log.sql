@@ -17,14 +17,25 @@ CREATE TABLE IF NOT EXISTS `security_audit_log` (
     INDEX `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- HF-51.2: Immutable Audit Store
--- Trigger to block Updates
+-- HF-51.2: Immutable Audit Store (Updated HF-51.7)
+-- Trigger to block Updates/Deletes UNLESS privileged session var is set
 DELIMITER //
 CREATE TRIGGER `prevent_audit_update` BEFORE UPDATE ON `security_audit_log`
 FOR EACH ROW
 BEGIN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Security Audit Logs are Immutable';
+    IF @allow_audit_cleanup IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Security Audit Logs are Immutable';
+    END IF;
+END;
+//
+CREATE TRIGGER `prevent_audit_delete` BEFORE DELETE ON `security_audit_log`
+FOR EACH ROW
+BEGIN
+    IF @allow_audit_cleanup IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Security Audit Logs are Immutable';
+    END IF;
 END;
 //
 DELIMITER ;
+
 
