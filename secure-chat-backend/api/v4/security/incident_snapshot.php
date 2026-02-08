@@ -50,4 +50,9 @@ $stmtLogs = $pdo->prepare("SELECT * FROM security_audit_log WHERE $col = ? ORDER
 $stmtLogs->execute([$targetValue]);
 $snapshot['audit_logs'] = $stmtLogs->fetchAll(PDO::FETCH_ASSOC);
 
+// HF-53.1: Snapshot Integrity Hash
+// Compute SHA256 of the data payload to make it tamper-evident
+$snapshot['integrity_hash'] = hash('sha256', json_encode($snapshot['actor']) . json_encode($snapshot['audit_logs']) . json_encode($snapshot['bans']));
+
 echo json_encode(['success' => true, 'snapshot' => $snapshot]);
+
