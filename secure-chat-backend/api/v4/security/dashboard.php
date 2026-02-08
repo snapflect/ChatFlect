@@ -42,6 +42,9 @@ $stmt7d = $pdo->query("
 $metrics['trend_7d'] = $stmt7d->fetchAll(PDO::FETCH_ASSOC);
 
 // 2c. Top 5 Attackers (IP)
+// HF-51.9: Secure Output - Mask IPs by default unless 'raw=true'
+$isRaw = isset($_GET['raw']) && $_GET['raw'] === 'true';
+
 $stmtIP = $pdo->query("
     SELECT ip_address, COUNT(*) as count 
     FROM security_audit_log 
@@ -50,6 +53,12 @@ $stmtIP = $pdo->query("
     ORDER BY count DESC 
     LIMIT 5
 ");
-$metrics['top_ips'] = $stmtIP->fetchAll(PDO::FETCH_ASSOC);
+$metrics['top_ips'] = array_map(function($row) use ($isRaw) {
+    if (!$isRaw) {
+        $row['ip_address'] = substr($row['ip_address'], 0, 4) . '.xx.xx.xx'; // Masked
+    }
+    return $row;
+}, $stmtIP->fetchAll(PDO::FETCH_ASSOC));
+
 
 echo json_encode(['success' => true, 'generated_at' => date('c'), 'metrics' => $metrics]);
