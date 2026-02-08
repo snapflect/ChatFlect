@@ -1,0 +1,18 @@
+.current-device {
+  --background: rgba(var(--ion-color-success-rgb), 0.1);
+  border-left: 3px solid var(--ion-color-success);
+}
+
+ion-badge {
+  margin-left: 8px;
+  font-size: 10px;
+}
+
+.secondary {
+  color: var(--ion-color-medium);
+  font-size: 12px;
+}
+
+ion-segment-button {
+  --indicator-color: var(--ion-color-primary);
+}

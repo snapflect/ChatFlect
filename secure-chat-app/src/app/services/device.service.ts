@@ -1,38 +1,79 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { ApiService } from './api.service';
-import { Observable } from 'rxjs';
 
-export interface DeviceInfo {
+export interface Device {
     device_uuid: string;
     device_name: string;
-    last_active: string;
+    platform: string;
+    status: 'active' | 'revoked';
+    last_seen: string | null;
+    registered_at: string;
+    is_current: boolean;
+    app_version?: string;
+}
+
+export interface AuditEvent {
+    event_type: 'LOGIN' | 'REGISTER' | 'REVOKE' | 'TOKEN_REFRESH' | 'LOGOUT';
+    device_uuid: string;
+    ip_address: string;
+    user_agent: string;
     created_at: string;
-    libsignal_device_id: number;
-    status: 'active' | 'pending' | 'revoked';
-    revoked_at?: string;
-    signing_public_key?: string; // Epic 5/6 Strict Fingerprint
+    metadata?: any;
 }
 
 @Injectable({
     providedIn: 'root'
 })
 export class DeviceService {
+    private api = inject(ApiService);
 
-    constructor(private api: ApiService) { }
-
-    listDevices(userId: string): Observable<DeviceInfo[]> {
-        return this.api.get(`devices.php?action=list&user_id=${userId}`);
+    /**
+     * List all devices for the current user
+     */
+    async listDevices(): Promise<Device[]> {
+        try {
+            const res = await this.api.get<{ devices: Device[] }>('/v4/devices/list.php');
+            return res.devices || [];
+        } catch (e) {
+            console.error('[DeviceService] listDevices error:', e);
+            return [];
+        }
     }
 
-    revokeDevice(userId: string, deviceUuid: string): Observable<any> {
-        // Use DELETE method on devices.php
-        return this.api.delete(`devices.php?user_id=${userId}&device_uuid=${deviceUuid}`);
+    /**
+     * Revoke a device
+     * @param deviceUuid Target device to revoke
+     * @param forceLogout If revoking current device, must be true
+     */
+    async revokeDevice(deviceUuid: string, forceLogout: boolean = false): Promise<boolean> {
+        try {
+            const res = await this.api.post<{ success: boolean }>('/v4/devices/revoke.php', {
+                device_uuid: deviceUuid,
+                force_logout: forceLogout
+            });
+            return res.success || false;
+        } catch (e) {
+            console.error('[DeviceService] revokeDevice error:', e);
+            return false;
+        }
     }
 
-    // Future: Story 4.3 Approve Device
-    approveDevice(deviceUuid: string): Observable<any> {
-        return this.api.post('v3/approve_device.php', {
-            device_uuid: deviceUuid
-        });
+    /**
+     * Get audit history for current user
+     * @param limit Max number of events (default 50)
+     * @param deviceUuid Optional filter by device
+     */
+    async getAuditLogs(limit: number = 50, deviceUuid?: string): Promise<AuditEvent[]> {
+        try {
+            let url = `/v4/devices/audit.php?limit=${limit}`;
+            if (deviceUuid) {
+                url += `&device_uuid=${deviceUuid}`;
+            }
+            const res = await this.api.get<{ events: AuditEvent[] }>(url);
+            return res.events || [];
+        } catch (e) {
+            console.error('[DeviceService] getAuditLogs error:', e);
+            return [];
+        }
     }
 }

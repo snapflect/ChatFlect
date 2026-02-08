@@ -1,0 +1,77 @@
+<ion-header>
+    <ion-toolbar>
+        <ion-buttons slot="start">
+            <ion-back-button defaultHref="/settings"></ion-back-button>
+        </ion-buttons>
+        <ion-title>Device Manager</ion-title>
+        <ion-buttons slot="end">
+            <ion-button (click)="loadDevices()">
+                <ion-icon name="refresh-outline"></ion-icon>
+            </ion-button>
+        </ion-buttons>
+    </ion-toolbar>
+    <ion-toolbar>
+        <ion-segment [(ngModel)]="selectedTab" (ionChange)="onTabChange($event.detail.value!)">
+            <ion-segment-button value="devices">
+                <ion-label>Devices</ion-label>
+            </ion-segment-button>
+            <ion-segment-button value="audit">
+                <ion-label>Activity</ion-label>
+            </ion-segment-button>
+        </ion-segment>
+    </ion-toolbar>
+</ion-header>
+
+<ion-content>
+    <!-- Loading -->
+    <ion-progress-bar *ngIf="loading" type="indeterminate"></ion-progress-bar>
+
+    <!-- Devices Tab -->
+    <ng-container *ngIf="selectedTab === 'devices'">
+        <ion-list>
+            <ion-item *ngFor="let device of devices" [class.current-device]="device.is_current">
+                <ion-icon [name]="getPlatformIcon(device.platform)" slot="start" color="primary"></ion-icon>
+                <ion-label>
+                    <h2>
+                        {{ device.device_name || device.platform }}
+                        <ion-badge *ngIf="device.is_current" color="success">This Device</ion-badge>
+                    </h2>
+                    <p>{{ device.platform }} &bull; {{ device.status }}</p>
+                    <p *ngIf="device.last_seen">Last seen: {{ device.last_seen | date:'medium' }}</p>
+                </ion-label>
+                <ion-button slot="end" fill="clear" color="danger" (click)="confirmRevoke(device)"
+                    *ngIf="device.status === 'active'">
+                    <ion-icon name="close-circle-outline"></ion-icon>
+                </ion-button>
+                <ion-badge slot="end" color="medium" *ngIf="device.status === 'revoked'">Revoked</ion-badge>
+            </ion-item>
+        </ion-list>
+
+        <ion-item *ngIf="devices.length === 0 && !loading" lines="none">
+            <ion-label class="ion-text-center">
+                <p>No devices found</p>
+            </ion-label>
+        </ion-item>
+    </ng-container>
+
+    <!-- Audit Tab -->
+    <ng-container *ngIf="selectedTab === 'audit'">
+        <ion-list>
+            <ion-item *ngFor="let event of auditEvents">
+                <ion-icon [name]="getEventIcon(event.event_type)" slot="start"
+                    [color]="getEventColor(event.event_type)"></ion-icon>
+                <ion-label>
+                    <h3>{{ event.event_type }}</h3>
+                    <p>{{ event.created_at | date:'medium' }}</p>
+                    <p class="secondary">{{ event.ip_address }}</p>
+                </ion-label>
+            </ion-item>
+        </ion-list>
+
+        <ion-item *ngIf="auditEvents.length === 0 && !loading" lines="none">
+            <ion-label class="ion-text-center">
+                <p>No activity yet</p>
+            </ion-label>
+        </ion-item>
+    </ng-container>
+</ion-content>
