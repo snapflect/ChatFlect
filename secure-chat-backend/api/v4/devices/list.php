@@ -1,48 +1,47 @@
 <?php
 // api/v4/devices/list.php
-// Epic 25: Device Manager - List Devices
+// Epic 48: Device Discovery / Sync
 
 require_once __DIR__ . '/../../../includes/db_connect.php';
-require_once __DIR__ . '/../../auth_middleware.php';
+require_once __DIR__ . '/../../../api/auth_middleware.php';
 
 header('Content-Type: application/json');
 
 try {
-    // 1. Authenticate
-    $auth = authenticate_request($pdo);
-    $user_id = $auth['user_id'];
-    $current_device = $auth['device_uuid'] ?? null;
+    $authData = requireAuth();
+    $requesterUserId = strtoupper($authData['user_id']); // "Who is asking?"
 
-    // 2. Fetch all devices for user
-    $stmt = $pdo->prepare("
-        SELECT 
-            d.device_uuid,
-            d.device_name,
-            d.platform,
-            d.status,
-            d.registered_at,
-            p.last_seen,
-            p.app_version
-        FROM devices d
-        LEFT JOIN presence p ON d.device_uuid = p.device_uuid AND d.user_id = p.user_id
-        WHERE d.user_id = ?
-        ORDER BY d.registered_at DESC
-    ");
-    $stmt->execute([$user_id]);
-    $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $targetUserId = $_GET['user_id'] ?? $requesterUserId;
+    $targetUserId = strtoupper($targetUserId);
 
-    // 3. Mark current device
-    foreach ($devices as &$device) {
-        $device['is_current'] = ($device['device_uuid'] === $current_device);
+    // Privacy Check:
+    // 1. If asking for self, return ALL non-revoked devices (including PENDING).
+    // 2. If asking for contact, return ONLY TRUSTED devices.
+
+    $isSelf = ($requesterUserId === $targetUserId);
+
+    $query = "SELECT device_id, platform, device_name, public_identity_key, trust_state, last_seen_at 
+              FROM devices 
+              WHERE user_id = ? AND revoked_at IS NULL";
+
+    if (!$isSelf) {
+        $query .= " AND trust_state = 'TRUSTED'";
+    } else {
+        // Self can see pending
+        $query .= " AND trust_state IN ('TRUSTED', 'PENDING')";
     }
+
+    $stmt = $pdo->prepare($query);
+    $stmt->execute([$targetUserId]);
+    $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     echo json_encode([
         'success' => true,
-        'devices' => $devices,
-        'count' => count($devices)
+        'user_id' => $targetUserId,
+        'devices' => $devices
     ]);
 
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'SERVER_ERROR']);
+    echo json_encode(['error' => 'SERVER_ERROR', 'message' => $e->getMessage()]);
 }
