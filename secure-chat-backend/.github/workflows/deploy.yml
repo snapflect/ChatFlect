@@ -1,0 +1,69 @@
+# Deployment Pipeline
+# Epic 38: DEV → SIT → PROD promotion
+
+name: Deploy
+
+on:
+    push:
+        branches: [enhancements]
+    workflow_dispatch:
+        inputs:
+            environment:
+                description: "Target environment"
+                required: true
+                type: choice
+                options:
+                    - dev
+                    - sit
+                    - prod
+
+jobs:
+    deploy-dev:
+        name: Deploy to DEV
+        if: github.event_name == 'push'
+        runs-on: ubuntu-latest
+        environment: development
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Deploy to DEV
+              run: echo "Deploying to DEV..."
+
+    deploy-sit:
+        name: Deploy to SIT
+        if: github.event.inputs.environment == 'sit'
+        runs-on: ubuntu-latest
+        environment: staging
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Deploy to SIT
+              uses: appleboy/ssh-action@v1
+              with:
+                  host: ${{ secrets.SSH_HOST }}
+                  username: ${{ secrets.SSH_USER }}
+                  key: ${{ secrets.SSH_KEY }}
+                  script: |
+                      cd /var/www/chatflect
+                      DEPLOY_ENV=sit ./scripts/deploy_backend.sh
+
+    deploy-prod:
+        name: Deploy to PROD
+        if: github.event.inputs.environment == 'prod'
+        runs-on: ubuntu-latest
+        environment: production
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Require Admin Approval
+              run: echo "Production deployment requires approval"
+
+            - name: Deploy to PROD
+              uses: appleboy/ssh-action@v1
+              with:
+                  host: ${{ secrets.PROD_SSH_HOST }}
+                  username: ${{ secrets.PROD_SSH_USER }}
+                  key: ${{ secrets.PROD_SSH_KEY }}
+                  script: |
+                      cd /var/www/chatflect
+                      DEPLOY_ENV=prod ./scripts/deploy_backend.sh
