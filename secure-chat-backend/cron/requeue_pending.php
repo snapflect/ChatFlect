@@ -10,13 +10,20 @@ echo "Starting Message Re-queue Manager...\n";
 // If push failed, maybe we retry.
 // Logic: If PENDING > 1 hour, maybe emit another push event?
 
-// For now, let's just log stats. Real push retry logic requires push_queue table.
+// HF-49.7: Active Requeue & Failure Marking
+// 1. Mark as FAILED if retry_count > 5
+$pdo->exec("UPDATE device_inbox SET status = 'FAILED' WHERE status = 'PENDING' AND retry_count > 5");
 
-$stmt = $pdo->query("SELECT COUNT(*) FROM device_inbox WHERE status = 'PENDING' AND created_at < NOW() - INTERVAL 1 HOUR");
-$stuckCount = $stmt->fetchColumn();
+// 2. Increment retry for stuck messages
+$stmt = $pdo->query("
+    UPDATE device_inbox 
+    SET retry_count = retry_count + 1, last_retry_at = NOW()
+    WHERE status = 'PENDING' AND created_at < NOW() - INTERVAL 1 HOUR AND retry_count <= 5
+");
+// Note: In a real system, we would fetch these rows and re-emit a Push Notification event here.
+// For now, we just track the retry state.
 
-echo "Found $stuckCount messages pending > 1 hour.\n";
-
-// Future: Re-trigger FCM/APNS here.
+$stuckCount = $stmt->rowCount();
+echo "Re-queued (metadata update) $stuckCount stuck messages.\n";
 
 echo "Re-queue Check Complete.\n";

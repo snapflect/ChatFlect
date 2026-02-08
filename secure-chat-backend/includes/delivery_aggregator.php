@@ -9,14 +9,19 @@ function getMessageDeliveryStatus($pdo, $messageUuid)
     // 1. Count Total Trusted Devices for Recipient (Snapshot at send time ideally, but current count is proxy)
     // Actually, we can just count rows in device_inbox for this messageUuid
 
+    // HF-49.5: Trust Filtering
+    // Only count devices that are currently TRUSTED. 
+    // Revoked devices should not count towards "Delivered" state (prevents compromised device from faking delivery)
+
     $stmt = $pdo->prepare("
         SELECT 
-            COUNT(*) as total_devices,
-            SUM(CASE WHEN status = 'DELIVERED' THEN 1 ELSE 0 END) as delivered_count,
-            SUM(CASE WHEN status = 'ACKED' THEN 1 ELSE 0 END) as acked_count,
-            SUM(CASE WHEN status = 'READ' THEN 1 ELSE 0 END) as read_count
-        FROM device_inbox
-        WHERE message_uuid = ?
+            COUNT(di.recipient_device_id) as total_devices,
+            SUM(CASE WHEN di.status = 'DELIVERED' THEN 1 ELSE 0 END) as delivered_count,
+            SUM(CASE WHEN di.status = 'ACKED' THEN 1 ELSE 0 END) as acked_count,
+            SUM(CASE WHEN di.status = 'READ' THEN 1 ELSE 0 END) as read_count
+        FROM device_inbox di
+        JOIN devices d ON di.recipient_device_id = d.device_id
+        WHERE di.message_uuid = ? AND d.trust_state = 'TRUSTED'
     ");
     $stmt->execute([$messageUuid]);
     $stats = $stmt->fetch(PDO::FETCH_ASSOC);
