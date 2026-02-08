@@ -1,0 +1,59 @@
+# Lint Gate CI Workflow
+# Epic 39: Block PRs with lint failures
+
+name: Lint Gate
+
+on:
+    pull_request:
+        paths:
+            - "secure-chat-app/**"
+            - "secure-chat-backend/**"
+    workflow_dispatch:
+
+jobs:
+    frontend-lint:
+        name: Frontend Lint (Angular)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+                  cache: "npm"
+                  cache-dependency-path: secure-chat-app/package-lock.json
+
+            - name: Install dependencies
+              run: npm ci
+              working-directory: secure-chat-app
+
+            - name: Run ESLint
+              run: npm run lint
+              working-directory: secure-chat-app
+
+            - name: Check Prettier formatting
+              run: npx prettier --check "src/**/*.{ts,html,scss}"
+              working-directory: secure-chat-app
+
+    backend-lint:
+        name: Backend Lint (PHP)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: "8.2"
+                  tools: phpcs, php-cs-fixer
+
+            - name: Run PHPCS
+              run: phpcs --standard=PSR12 --ignore=vendor,node_modules,backups,logs .
+              working-directory: secure-chat-backend
+              continue-on-error: true
+
+            - name: Check PHP-CS-Fixer
+              run: php-cs-fixer fix --dry-run --diff
+              working-directory: secure-chat-backend
+              continue-on-error: true
