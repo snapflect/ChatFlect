@@ -53,6 +53,18 @@ require_once '../includes/rate_limiter.php';
 $clientIp = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 checkRateLimit($conn, $userId, $deviceUuid, $clientIp, 'relay/send.php', 30, 60);
 
+// 1.7 Abuse Detection (Epic 24)
+require_once '../includes/db_connect.php'; // PDO for abuse detector
+require_once '../includes/abuse_detector.php';
+$abuseCheck = checkAbuse($pdo, $userId);
+if (!$abuseCheck['allowed']) {
+    sendAbuseBlockResponse($abuseCheck);
+}
+// Apply delay for MEDIUM risk
+if ($abuseCheck['delay_ms'] > 0) {
+    usleep($abuseCheck['delay_ms'] * 1000);
+}
+
 // 2. Parse Input
 $input = json_decode(file_get_contents('php://input'), true);
 
