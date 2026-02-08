@@ -28,3 +28,11 @@ Polled via `cron/security_alerts.php`.
 ## Access Control
 - Logs accessible ONLY via `api/v4/security/events.php`
 - Protected by `X-Admin-Secret` header (Environment Variable).
+
+## Tamper Detection (Epic 51-HF)
+To ensure the integrity of the audit trail (`security_audit_log`), the following measures are recommended:
+
+1.  **Row Integrity**: Use database triggers to prevent `UPDATE` or `DELETE` on the log table (except by the authorized `cleanup_audit_logs.php` user).
+2.  **Sequence Gaps**: Monitor `audit_id` auto-increment field. A gap indicates a potential hard deletion.
+3.  **Hash Chaining** (Future): Store a hash of the previous row in the current row to form a cryptographic chain.
+

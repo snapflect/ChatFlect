@@ -19,6 +19,26 @@ if (!$adminSecret || $receivedSecret !== $adminSecret) {
     exit;
 }
 
+// HF-51.1: Rate Limiting (Simple File-based for now, Redis recommended for prod)
+$rateLimitFile = sys_get_temp_dir() . '/admin_rate_limit_' . md5($receivedSecret);
+$rateLimitWindow = 60; // 1 minute
+$maxRequests = 10;
+
+$current = (int) @file_get_contents($rateLimitFile);
+$mtime = @filemtime($rateLimitFile);
+
+if ($mtime && (time() - $mtime > $rateLimitWindow)) {
+    $current = 0; // Reset
+}
+
+if ($current >= $maxRequests) {
+    http_response_code(429);
+    echo json_encode(['error' => 'RATE_LIMIT_EXCEEDED']);
+    exit;
+}
+
+file_put_contents($rateLimitFile, $current + 1);
+
 // 2. Query Params
 $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : 100;
 $severity = $_GET['severity'] ?? null;
