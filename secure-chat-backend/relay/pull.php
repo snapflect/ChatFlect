@@ -10,7 +10,11 @@
 require_once '../api/auth_middleware.php';
 require_once '../includes/logger.php';
 require_once '../includes/metrics.php';
+require_once '../includes/kill_switch.php';
 require_once '../api/db_connect.php';
+
+// Epic 30: Check kill switch first
+enforceKillSwitch('PULL');
 
 $pullStart = microtime(true);
 
