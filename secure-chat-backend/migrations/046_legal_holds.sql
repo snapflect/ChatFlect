@@ -8,8 +8,11 @@ CREATE TABLE IF NOT EXISTS `legal_holds` (
     `target_value` VARCHAR(128) NOT NULL,
     `case_reference` VARCHAR(64) NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `expires_at` TIMESTAMP NULL, -- HF-54.3: Auto-expiry
+    `review_required` TINYINT(1) DEFAULT 0, -- HF-54.3: Flag for review
     `created_by` VARCHAR(64) NOT NULL,
     `active` TINYINT(1) DEFAULT 1,
+
     
     INDEX `idx_target` (`target_type`, `target_value`),
     INDEX `idx_active` (`active`)
