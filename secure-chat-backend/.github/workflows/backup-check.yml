@@ -1,0 +1,39 @@
+# Backup Check CI Workflow
+# Epic 37: Nightly backup freshness check
+
+name: Backup Check
+
+on:
+    schedule:
+        - cron: "0 6 * * *" # Daily at 6 AM UTC
+    workflow_dispatch:
+
+jobs:
+    check-backup:
+        name: Check Backup Freshness
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Check Backup Status
+              run: |
+                  RESPONSE=$(curl -s -H "X-Admin-Token: ${{ secrets.ADMIN_API_TOKEN }}" \
+                    "${{ secrets.API_URL }}/admin/v1/backup_status.php")
+
+                  STATUS=$(echo "$RESPONSE" | jq -r '.status')
+                  AGE=$(echo "$RESPONSE" | jq -r '.backup_age_hours')
+
+                  echo "Backup Status: $STATUS"
+                  echo "Backup Age: ${AGE}h"
+
+                  if [ "$STATUS" = "NO_BACKUP" ] || [ "$STATUS" = "MISSING" ]; then
+                    echo "❌ CRITICAL: No backup found!"
+                    exit 1
+                  fi
+
+                  if [ "$STATUS" = "STALE" ]; then
+                    echo "⚠️ WARNING: Backup is stale (>24h)"
+                    exit 1
+                  fi
+
+                  echo "✅ Backup OK"
