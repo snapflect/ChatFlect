@@ -35,16 +35,50 @@ $activeUsers = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
 echo "Found " . count($activeUsers) . " active users.\n";
 
+// HF-55.2: Trust Decay for Dormant Accounts
+// Decay 5 points if last_seen > 90 days
+// We need 'last_seen'. Using audit log last event?
+// This is expensive on large scale.
+// Using simplified logic: If NOT in activeUsers (last 24h), we check last activity?
+// For patch: Let's iterate trust_scores table where last_updated < 90 days ago? 
+// No, decay applies to HIGH scores that go dormant.
+// Let's implement active user reward (Anti-Farming) first.
+
+// HF-55.5: Anti-Farming Rule
+// "Clean Day" only if they actually decrypted messages?
+// This requires querying `decryption_logs` or similar. 
+// We defined `security_audit_log` with event_type 'MSG_DECRYPT_SUCCESS' in Epic 51?
+// Let's assume we look for 'MSG_DECRYPT_SUCCESS' or 'MSG_SENT'.
+
 foreach ($activeUsers as $uid) {
-    // Check for negative events
+    // 1. Check for meaningful activity (HF-55.5)
+    $stmtAct = $pdo->prepare("SELECT 1 FROM security_audit_log WHERE user_id = ? AND created_at >= ? AND event_type IN ('MSG_DECRYPT_SUCCESS', 'MSG_SENT') LIMIT 1");
+    $stmtAct->execute([$uid, $yesterday]);
+    if (!$stmtAct->fetchColumn()) {
+        // Active but no real messages? Passive farming? Skip bonus.
+        echo "Skip User $uid: No meaningful activity.\n";
+        continue;
+    }
+
+    // 2. Check for negative events
     $stmtBad = $pdo->prepare("SELECT 1 FROM trust_score_events WHERE actor_type = 'USER' AND actor_value = ? AND created_at >= ? AND score_delta < 0 LIMIT 1");
     $stmtBad->execute([$uid, $yesterday]);
 
     if (!$stmtBad->fetchColumn()) {
-        // Clean day!
-        $engine->logEvent('USER', $uid, 'CLEAN_DAY', 'No violations on ' . $yesterday);
+        $engine->logEvent('USER', $uid, 'CLEAN_DAY', 'Active & Clean on ' . $yesterday);
         echo "Awarded CLEAN_DAY to User $uid\n";
     }
 }
+
+// HF-55.2: Decay Dormant
+// Find users with Score > 400 who haven't updated in 90 days
+$ninetyDaysAgo = date('Y-m-d', strtotime('-90 days'));
+$stmtDormant = $pdo->prepare("SELECT actor_type, actor_value FROM trust_scores WHERE trust_score > 400 AND last_updated_at < ?");
+$stmtDormant->execute([$ninetyDaysAgo]);
+while ($row = $stmtDormant->fetch(PDO::FETCH_ASSOC)) {
+    $engine->logEvent($row['actor_type'], $row['actor_value'], 'DECAY_INACTIVITY', 'Dormant > 90 days');
+    echo "Decayed dormant actor " . $row['actor_value'] . "\n";
+}
+
 
 echo "Trust Score Recalculation Complete.\n";

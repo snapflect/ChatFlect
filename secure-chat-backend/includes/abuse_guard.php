@@ -11,13 +11,18 @@ class AbuseGuard
     private $pdo;
     private $logger;
     private $policy;
+    private $trustEngine;
 
     public function __construct($pdo)
     {
         $this->pdo = $pdo;
         $this->logger = new AuditLogger($pdo);
         $this->loadPolicy();
+        // HF-55.1: Trust Integration
+        require_once __DIR__ . '/trust_score_engine.php';
+        $this->trustEngine = new TrustScoreEngine($pdo);
     }
+
 
     private function loadPolicy()
     {

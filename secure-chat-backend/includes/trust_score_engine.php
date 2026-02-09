@@ -17,8 +17,13 @@ class TrustScoreEngine
         'CAPTCHA_FAIL' => -20,
         'DEVICE_REVOKED' => -100,
         'CLEAN_DAY' => 5, // Daily bonus
-        'TRUSTED_DEVICE_ADD' => 20
+        'TRUSTED_DEVICE_ADD' => 20,
+        // HF-55.4: Severe Penalties
+        'TAMPER_DETECT' => -300,
+        'KEY_CHANGE_SUSPICIOUS' => -100,
+        'DEVICE_REVOKED_FORCE' => -100
     ];
+
 
     const DEFAULTS = [
         'IP' => 200,
