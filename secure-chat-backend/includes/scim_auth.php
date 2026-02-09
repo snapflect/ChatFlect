@@ -26,7 +26,7 @@ class SCIMAuth
         $hash = hash('sha256', $token);
 
         $stmt = $this->pdo->prepare("
-            SELECT t.token_id, t.org_id, t.revoked 
+            SELECT t.token_id, t.org_id, t.revoked, t.expires_at, t.allowed_ips 
             FROM scim_tokens t
             WHERE t.token_hash = ?
         ");
