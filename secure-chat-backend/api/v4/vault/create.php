@@ -24,6 +24,13 @@ try {
 
     $mgr = new VaultManager($pdo, $user['user_id'], $masterKey);
 
+    // HF-69.1: AbuseGuard Rate Limiting
+    require_once __DIR__ . '/../../../../includes/abuse_guard.php';
+    $guard = new AbuseGuard($pdo);
+    if (!$guard->checkLimit($user['user_id'], 'VAULT_WRITE', 10, 60)) { // 10 items/min
+        throw new Exception("Rate limit exceeded for Vault operations");
+    }
+
     $id = $mgr->createItem($input['type'], $input['metadata'], $input['payload']);
 
     echo json_encode(['success' => true, 'item_id' => $id]);
