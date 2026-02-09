@@ -27,13 +27,24 @@ class GovernanceEngine
         if (!$policy)
             throw new Exception("Unknown Action Type: $actionType");
 
+        // HF-58.5: Policy Change Governance
+        if ($actionType === 'POLICY_CHANGE' && $policy['is_locked']) {
+            // Special high-security check could go here
+        }
+
         // Calculate Expiry
         $hours = $policy['auto_expire_hours'] ?? 24;
         $expiry = date('Y-m-d H:i:s', strtotime("+$hours hours"));
         $targetJson = is_array($target) ? json_encode($target) : $target;
+        $createdAt = date('Y-m-d H:i:s');
 
-        $stmt = $this->pdo->prepare("INSERT INTO admin_action_queue (action_type, target_resource, requester_id, reason, expires_at) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$actionType, $targetJson, $adminId, $reason, $expiry]);
+        // HF-58.4: Immutable Action Hashing
+        // hash = sha256(type + target + requester + reason + created_at)
+        $raw = $actionType . $targetJson . $adminId . $reason . $createdAt;
+        $hash = hash('sha256', $raw);
+
+        $stmt = $this->pdo->prepare("INSERT INTO admin_action_queue (action_type, target_resource, requester_id, reason, expires_at, created_at, action_hash) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$actionType, $targetJson, $adminId, $reason, $expiry, $createdAt, $hash]);
 
         return $this->pdo->lastInsertId();
     }
@@ -54,6 +65,12 @@ class GovernanceEngine
         if (strtotime($req['expires_at']) < time()) {
             $this->updateStatus($requestId, 'EXPIRED');
             throw new Exception("Request Expired");
+        }
+
+        // Verify Hash Integrity
+        $currentRaw = $req['action_type'] . $req['target_resource'] . $req['requester_id'] . $req['reason'] . $req['created_at'];
+        if (hash('sha256', $currentRaw) !== $req['action_hash']) {
+            throw new Exception("INTEGRITY COMPROMISED: Request has been tampered with.");
         }
 
         // 2. Fetch Policy
@@ -82,8 +99,8 @@ class GovernanceEngine
 
     public function rejectAction($requestId, $rejectorId, $reason)
     {
-        $this->updateStatus($requestId, 'REJECTED');
-        // Log rejection metadata if needed
+        $stmt = $this->pdo->prepare("UPDATE admin_action_queue SET status = 'REJECTED', rejection_reason = ? WHERE request_id = ?");
+        $stmt->execute([$reason, $requestId]);
     }
 
     public function executeAction($requestId)
