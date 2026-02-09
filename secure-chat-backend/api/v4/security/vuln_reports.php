@@ -17,13 +17,22 @@ if (!$adminSecret || ($headers['X-Admin-Secret'] ?? '') !== $adminSecret) {
 }
 
 $status = $_GET['status'] ?? null;
-$sql = "SELECT * FROM vulnerability_reports";
+$search = $_GET['search'] ?? null; // HF-57.1: Search
+$sql = "SELECT * FROM vulnerability_reports WHERE 1=1";
 $params = [];
 
 if ($status) {
-    $sql .= " WHERE status = ?";
+    $sql .= " AND status = ?";
     $params[] = $status;
 }
+
+if ($search) {
+    $sql .= " AND (title LIKE ? OR reporter_email LIKE ?)";
+    $term = "%$search%";
+    $params[] = $term;
+    $params[] = $term;
+}
+
 
 $sql .= " ORDER BY created_at DESC LIMIT 50";
 

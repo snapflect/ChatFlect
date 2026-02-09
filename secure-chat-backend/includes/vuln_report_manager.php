@@ -44,9 +44,19 @@ class VulnReportManager
             'ip_source' => $ip
         ];
 
+        // HF-57.4: Deduplication
+        $contentHash = hash('sha256', $title . $payload['description']);
+        $stmtDup = $this->pdo->prepare("SELECT 1 FROM vulnerability_reports WHERE content_hash = ?");
+        $stmtDup->execute([$contentHash]);
+        if ($stmtDup->fetchColumn()) {
+            // Shadowban duplicate? Or return error?
+            // Returning specific error might leak info, but for bug bounty, "Duplicate" is standard status.
+            throw new Exception("Duplicate Report Detected");
+        }
+
         // 4. Persistence
-        $stmt = $this->pdo->prepare("INSERT INTO vulnerability_reports (title, reporter_email, severity, affected_component, payload_json) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$title, $email, $severity, $component, json_encode($payload)]);
+        $stmt = $this->pdo->prepare("INSERT INTO vulnerability_reports (title, reporter_email, severity, affected_component, payload_json, content_hash) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$title, $email, $severity, $component, json_encode($payload), $contentHash]);
 
         $id = $this->pdo->lastInsertId();
 
@@ -57,7 +67,27 @@ class VulnReportManager
         // If someone spams 100 reports, they get banned. Good researchers send 1-2.
         $this->abuseGuard->reportViolation('IP', $ip, 'VULN_SUBMISSION');
 
-        return $id;
+        // HF-57.2: Signed Receipt
+        $receipt = [
+            'report_id' => $id,
+            'hash' => $contentHash,
+            'timestamp' => date('c'),
+            'node' => getenv('NODE_ID') ?? 'PRIMARY'
+        ];
+
+        // Sign Receipt
+        $keyDir = __DIR__ . '/keys';
+        if (!file_exists("$keyDir/private.pem")) {
+            require_once "$keyDir/server_key_gen.php"; // Ensure keygen is available
+        }
+        $privKey = file_get_contents("$keyDir/private.pem");
+        openssl_sign(json_encode($receipt), $signature, $privKey, OPENSSL_ALGO_SHA256);
+
+        return [
+            'id' => $id,
+            'receipt' => $receipt,
+            'signature' => base64_encode($signature)
+        ];
     }
 
     public function updateStatus($reportId, $status, $note = null, $adminUser = 'System')
