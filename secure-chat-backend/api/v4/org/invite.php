@@ -25,6 +25,24 @@ try {
         exit;
     }
 
+    // HF-60.2: AbuseGuard
+    require_once __DIR__ . '/../../../includes/abuse_guard.php';
+    $abuseGuard = new AbuseGuard($pdo);
+    $abuseGuard->checkInviteQuota($orgIdBin, $user['user_id']);
+
+    // HF-60.3: Domain Policy
+    $org = $orgMgr->getOrgById($orgIdBin); // Need to implement/expose getOrgById or similar
+    // (Mock implementation for now or reusing getOrgBySlug equivalent logic if ID available)
+    if (!empty($org['allowed_domains'])) {
+        $allowed = json_decode($org['allowed_domains'], true);
+        $domain = substr(strrchr($email, "@"), 1);
+        if ($allowed && !in_array($domain, $allowed)) {
+            http_response_code(403);
+            echo json_encode(['error' => "Domain @$domain not allowed by Organization Policy"]);
+            exit;
+        }
+    }
+
     $inviteMgr = new OrgInviteManager($pdo);
     $token = $inviteMgr->createInvite($orgIdBin, $user['user_id'], $email, $role);
 

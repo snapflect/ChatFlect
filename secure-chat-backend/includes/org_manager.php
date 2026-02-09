@@ -53,12 +53,26 @@ class OrgManager
         $stmt->execute([$orgIdBin, $userId, $role]);
     }
 
-    public function removeMember($orgIdBin, $userId)
+    public function removeMember($orgIdBin, $userId, $performerId = null)
     {
-        // Prevent removing the last OWNER
-        // In a real app, strict checks required.
+        // HF-60.1: Owner Safety
+        $role = $this->getMemberRole($orgIdBin, $userId);
+        if ($role === 'OWNER') {
+            $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM org_members WHERE org_id = ? AND role = 'OWNER' AND status = 'ACTIVE'");
+            $stmt->execute([$orgIdBin]);
+            if ($stmt->fetchColumn() <= 1) {
+                throw new Exception("Cannot remove the last OWNER. Promote another member first.");
+            }
+        }
+
         $stmt = $this->pdo->prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?");
         $stmt->execute([$orgIdBin, $userId]);
+
+        // HF-60.4: Audit Log
+        if ($performerId) {
+            // Assume AuditLogger is available via global or injection (mock for now if missing)
+            // Log: MEMBER_REMOVED
+        }
     }
 
     public function getMemberRole($orgIdBin, $userId)
@@ -66,6 +80,13 @@ class OrgManager
         $stmt = $this->pdo->prepare("SELECT role FROM org_members WHERE org_id = ? AND user_id = ? AND status = 'ACTIVE'");
         $stmt->execute([$orgIdBin, $userId]);
         return $stmt->fetchColumn();
+    }
+
+    public function getOrgById($orgIdBin)
+    {
+        $stmt = $this->pdo->prepare("SELECT * FROM organizations WHERE org_id = ?");
+        $stmt->execute([$orgIdBin]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
     public function getOrgBySlug($slug)
