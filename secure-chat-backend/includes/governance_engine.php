@@ -8,10 +8,13 @@ require_once __DIR__ . '/db_connect.php';
 class GovernanceEngine
 {
     private $pdo;
+    private $identityMgr;
 
     public function __construct($pdo)
     {
         $this->pdo = $pdo;
+        require_once __DIR__ . '/admin_identity_manager.php';
+        $this->identityMgr = new AdminIdentityManager($pdo);
     }
 
     public function getPolicy($actionType)
@@ -84,9 +87,24 @@ class GovernanceEngine
         $meta[] = ['id' => $approverId, 'time' => date('c')];
         $newMeta = json_encode($meta);
 
-        // 4. Check Quorum
+        // 4. Check Quorum & Roles
         $count = count($meta);
-        if ($count >= $policy['min_approvers']) {
+        $roleSatisfied = false;
+        $requiredRole = $policy['required_role'] ?? 'ANY';
+
+        if ($requiredRole === 'ANY') {
+            $roleSatisfied = true;
+        } else {
+            // Check if any approver has the required role
+            foreach ($meta as $approval) {
+                if ($this->identityMgr->verifyRole($approval['id'], $requiredRole)) {
+                    $roleSatisfied = true;
+                    break;
+                }
+            }
+        }
+
+        if ($count >= $policy['min_approvers'] && $roleSatisfied) {
             $stmtUpd = $this->pdo->prepare("UPDATE admin_action_queue SET status = 'APPROVED', approval_metadata = ? WHERE request_id = ?");
             $stmtUpd->execute([$newMeta, $requestId]);
             return 'APPROVED';
