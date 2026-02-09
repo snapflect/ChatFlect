@@ -18,12 +18,15 @@ class TransparencyReportEngine
     {
         $stats = [
             'header' => [
+                'report_id' => "TR-" . date('Y-m', strtotime($startDate)), // HF-56.1: ID Format
                 'period_start' => $startDate,
                 'period_end' => $endDate,
                 'generated_at' => date('c'),
-                'node_id' => getenv('NODE_ID') ?? 'PRIMARY'
+                'node_id' => getenv('NODE_ID') ?? 'PRIMARY',
+                'schema_version' => '1.0' // HF-56.1: Versioning
             ],
             'security_stats' => $this->getSecurityStats($startDate, $endDate),
+
             'compliance_stats' => $this->getComplianceStats($startDate, $endDate),
             'forensics_stats' => $this->getForensicsStats($startDate, $endDate),
             'integrity_stats' => $this->getIntegrityStats($startDate, $endDate)

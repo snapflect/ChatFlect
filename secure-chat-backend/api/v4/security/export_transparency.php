@@ -24,10 +24,32 @@ $report = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$report)
     exit('NOT_FOUND');
 
-$filename = "transparency_report_{$report['period_start']}_{$report['period_end']}.json";
+$filename = "transparency_report_{$report['period_start']}_{$report['period_end']}";
+$tmpFile = tempnam(sys_get_temp_dir(), 'TRZIP');
+$zip = new ZipArchive();
+if ($zip->open($tmpFile, ZipArchive::CREATE) !== TRUE) {
+    exit('ZIP_ERROR');
+}
 
-header('Content-Type: application/json');
-header('Content-Disposition: attachment; filename="' . $filename . '"');
-header('X-ChatFlect-Signature: ' . $report['signature']);
+// 1. Report JSON
+$zip->addFromString('report.json', $report['report_json']);
 
-echo $report['report_json'];
+// 2. Signature
+$zip->addFromString('signature.sig', base64_decode($report['signature']));
+
+// 3. Manifest
+$manifest = [
+    'period' => $report['period_start'] . ' to ' . $report['period_end'],
+    'integrity_hash' => $report['integrity_hash'],
+    'generated_at' => $report['generated_at'],
+    'schema_version' => json_decode($report['report_json'])->header->schema_version ?? '1.0'
+];
+$zip->addFromString('manifest.json', json_encode($manifest, JSON_PRETTY_PRINT));
+
+$zip->close();
+
+header('Content-Type: application/zip');
+header('Content-Disposition: attachment; filename="' . $filename . '.zip"');
+header('Content-Length: ' . filesize($tmpFile));
+readfile($tmpFile);
+unlink($tmpFile);
