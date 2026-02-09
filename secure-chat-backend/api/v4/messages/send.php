@@ -29,6 +29,10 @@ try {
     $convIdBin = hex2bin($convId);
     $content = $input['content']; // Encrypted Blob
 
+    // HF-74.3: Traffic Padding
+    require_once __DIR__ . '/../../includes/traffic_padding.php';
+    $content = TrafficPadder::padBlob($content);
+
     // HF-72.2: Forced Block on Broken Trust
     // 1. Get Conversation Participants (excluding self)
     // For 1:1, it's the other user. For Group, it's all of them.
