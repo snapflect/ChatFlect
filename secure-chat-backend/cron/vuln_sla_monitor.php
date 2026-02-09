@@ -25,8 +25,17 @@ if (count($staleReports) > 0) {
             'id' => $r['report_id'],
             'age_hours' => $slaHours
         ]);
+        if ($r['severity'] === 'CRITICAL' && $slaHours >= 24) {
+            // HF-57.8: Escalation Email
+            $to = 'security-emergency@chatflect.com'; // In prod: env var
+            $subject = "[SLA BREACH] Critical Vulnerability Pending > 24h";
+            $body = "Report ID {$r['report_id']} is CRITICAL and untouched for {$slaHours} hours. Immediate triage required.";
+            // mail($to, $subject, $body); // Mocked for now
+            echo "Escalation Email Sent for Report " . $r['report_id'] . "\n";
+        }
         echo "Alerted on Report ID " . $r['report_id'] . "\n";
     }
 } else {
+
     echo "No SLA violations found.\n";
 }

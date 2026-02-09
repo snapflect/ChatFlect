@@ -20,6 +20,47 @@ class VulnReportManager
         $this->abuseGuard = new AbuseGuard($pdo);
     }
 
+    public function assignDisclosureId($reportId)
+    {
+        $year = date('Y');
+        // Find next ID
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM vulnerability_reports WHERE disclosure_id LIKE ?");
+        $stmt->execute(["CHATFLECT-$year-%"]);
+        $count = $stmt->fetchColumn() + 1;
+        $id = sprintf("CHATFLECT-%s-%03d", $year, $count); // CHATFLECT-2026-001
+
+        $stmtUpd = $this->pdo->prepare("UPDATE vulnerability_reports SET disclosure_id = ? WHERE report_id = ?");
+        $stmtUpd->execute([$id, $reportId]);
+
+        return $id;
+    }
+
+    public function uploadAttachment($reportId, $file)
+    {
+        // Limits
+        if ($file['size'] > 5 * 1024 * 1024)
+            throw new Exception("File too large (Max 5MB)");
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        $allowed = ['txt', 'pdf', 'png', 'jpg', 'zip'];
+        if (!in_array($ext, $allowed))
+            throw new Exception("Invalid file type");
+
+        // Storage
+        $storageDir = __DIR__ . '/../storage/vuln_uploads';
+        if (!is_dir($storageDir))
+            mkdir($storageDir, 0700, true);
+
+        $hash = hash_file('sha256', $file['tmp_name']);
+        $storageName = $hash . '.' . $ext;
+        $target = "$storageDir/$storageName";
+
+        if (!move_uploaded_file($file['tmp_name'], $target))
+            throw new Exception("Upload Failed");
+
+        $stmt = $this->pdo->prepare("INSERT INTO vulnerability_attachments (report_id, filename_original, filename_storage, mime_type, file_size) VALUES (?, ?, ?, ?, ?)");
+        $stmt->execute([$reportId, $file['name'], $storageName, $file['type'], $file['size']]);
+    }
+
     public function submitReport($ip, $data)
     {
         // 1. Abuse Check
