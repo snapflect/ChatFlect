@@ -48,13 +48,26 @@ $zip->addFromString('ban_history.json', json_encode($bans, JSON_PRETTY_PRINT));
 $manifest['files']['ban_history.json'] = hash('sha256', json_encode($bans));
 
 // C. Manifest
-$zip->addFromString('manifest.json', json_encode($manifest, JSON_PRETTY_PRINT));
+$manifestJson = json_encode($manifest, JSON_PRETTY_PRINT);
+$zip->addFromString('manifest.json', $manifestJson);
+
+// HF-53.6: RSA Signed Bundles
+// Sign the manifest.json with server private key
+$keyDir = __DIR__ . '/../../../includes/keys';
+if (!file_exists("$keyDir/private.pem")) {
+    require_once "$keyDir/server_key_gen.php";
+}
+$privateKey = file_get_contents("$keyDir/private.pem");
+
+openssl_sign($manifestJson, $signature, $privateKey, OPENSSL_ALGO_SHA256);
+$zip->addFromString('manifest.sig', $signature);
 
 $zip->close();
 
 // Stream ZIP
 header('Content-Type: application/zip');
 header('Content-Disposition: attachment; filename="' . $caseId . '.zip"');
+
 header('Content-Length: ' . filesize($tmpFile));
 readfile($tmpFile);
 unlink($tmpFile);
