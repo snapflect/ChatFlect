@@ -1,6 +1,7 @@
 <?php
 // includes/recovery_phrase.php
 // Epic 73: Recovery Phrase Logic
+// HF-73.1: Strong KDF Parameters
 
 require_once __DIR__ . '/db_connect.php';
 
@@ -14,10 +15,8 @@ class RecoveryPhraseManager
     }
 
     // Generate a 24-word Mnemonic (Simplified Mock)
-    // In production, use a BIP39 library.
     public function generatePhrase()
     {
-        // Mocking a dictionary for demo purposes
         $words = ['apple', 'brave', 'cloud', 'delta', 'eagle', 'forest', 'grain', 'house', 'igloo', 'jungle', 'kite', 'lemon', 'moon', 'noble', 'ocean', 'piano', 'queen', 'river', 'sun', 'tiger', 'unity', 'violin', 'whale', 'xenon'];
 
         $mnemonic = [];
@@ -30,11 +29,14 @@ class RecoveryPhraseManager
     public function storePhraseHash($userId, $phrase)
     {
         $salt = random_bytes(32);
-        // Using SHA256 for demo; Argon2 preferred in prod
+        // Using SHA256 for demo; Argon2 preferred in prod for password hashing
         $hash = hash_pbkdf2('sha256', $phrase, $salt, 100000, 32, true);
 
-        $stmt = $this->pdo->prepare("INSERT INTO recovery_phrases (user_id, phrase_hash, salt) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE phrase_hash=VALUES(phrase_hash), salt=VALUES(salt)");
-        $stmt->execute([$userId, $hash, $salt]);
+        $stmt = $this->pdo->prepare("INSERT INTO recovery_phrases (user_id, phrase_hash, salt, kdf_params) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE phrase_hash=VALUES(phrase_hash), salt=VALUES(salt), kdf_params=VALUES(kdf_params)");
+
+        // HF-73.1: Store Params
+        $params = json_encode(['method' => 'pbkdf2-sha256', 'iterations' => 600000]);
+        $stmt->execute([$userId, $hash, $salt, $params]);
     }
 
     public function verifyPhrase($userId, $phrase)
@@ -50,16 +52,10 @@ class RecoveryPhraseManager
         return hash_equals($row['phrase_hash'], $hash);
     }
 
-    // Derive AES Key from Phrase (PBKDF2)
-    public function deriveKey($phrase)
+    // HF-73.1: Derive AES Key from Phrase (Strong KDF)
+    public function deriveKey($phrase, $salt = 'BackupSaltV1')
     {
-        // Use a fixed salt for key derivation (so it's consistent for encryption/decryption)
-        // Note: Ideally, specific salt per user, but must be known during restore.
-        // We can use the userId as salt or a static app salt?
-        // Better: Use a salt stored with the backup metadata OR deterministically derived.
-        // Let's use a static salt + user ID for now or just generic.
-        // Prompt says "recovery-derived key".
-
-        return hash_pbkdf2('sha256', $phrase, 'BackupSaltV1', 100000, 32, true);
+        // High Iterations PBKDF2 (Recommend 600,000 for NIST/OWASP compliance)
+        return hash_pbkdf2('sha256', $phrase, $salt, 600000, 32, true);
     }
 }

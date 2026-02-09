@@ -1,6 +1,7 @@
 <?php
 // api/v4/backup/restore.php
-// Epic 73: Restore Logic (Signal Metadata mostly, actual blob decryption on client)
+// Epic 73: Restore Logic
+// HF-73.3: Enforce Rate Limit
 
 require_once __DIR__ . '/../../includes/auth_middleware.php';
 require_once __DIR__ . '/../../includes/restore_manager.php';
@@ -9,18 +10,25 @@ $user = authenticate();
 $input = json_decode(file_get_contents('php://input'), true);
 
 try {
-    // Validate Phrase Hash (Requires Phrase)
-    // Client sends phrase. Server hashes it. compares to DB.
-    // If valid, server allows access to backups?
-    // Actually, `download.php` allows download if authenticated.
-    // `restore.php` might be "I am a new device, help me get the backup".
-    // AND "Here is the phrase to prove I am the owner".
-
     $phrase = $input['recovery_phrase'];
     $rm = new RestoreManager($pdo);
 
-    // Verify Phrase
-    $rm->validatePhrase($user['user_id'], $phrase);
+    // HF-73.3: Rate Limit
+    if (!$rm->checkRateLimit($user['user_id'])) {
+        http_response_code(429);
+        echo json_encode(['error' => 'Too many restore attempts. Try again later.']);
+        exit;
+    }
+
+    // Log Attempt Start (Optimistic logging or could log failure only)
+    // Here we log failure if validate fails
+
+    if (!$rm->validatePhrase($user['user_id'], $phrase)) {
+        $rm->logAttempt($user['user_id'], false);
+        throw new Exception("Invalid Recovery Phrase");
+    }
+
+    $rm->logAttempt($user['user_id'], true);
 
     // Check if backup exists
     $backup = $rm->getLatestBackup($user['user_id']);
