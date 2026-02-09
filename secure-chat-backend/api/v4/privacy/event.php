@@ -14,8 +14,23 @@ try {
     $platform = $input['platform'];
     $convIdBin = hex2bin($convId);
 
+    // HF-71.1: Strict Device Binding
+    // We do NOT trust input['device_id']. We use auth token's device_uuid.
+    $deviceId = $user['device_uuid'];
+    if (empty($deviceId)) {
+        throw new Exception("Device ID missing from auth context");
+    }
+
     $logger = new PrivacyEventLogger($pdo);
-    $logger->logEvent($convIdBin, $user['user_id'], $user['device_uuid'] ?? null, $type, $platform);
+
+    // HF-71.2: Rate Limit
+    if (!$logger->checkRateLimit($convIdBin, $deviceId)) {
+        http_response_code(429);
+        echo json_encode(['error' => 'Rate limit exceeded']);
+        exit;
+    }
+
+    $logger->logEvent($convIdBin, $user['user_id'], $deviceId, $type, $platform);
 
     // Trigger Alerts if enabled
     $stmt = $pdo->prepare("SELECT alert_on_screenshot FROM conversation_privacy_settings WHERE conversation_id = ?");
