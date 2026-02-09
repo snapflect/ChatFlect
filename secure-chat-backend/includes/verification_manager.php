@@ -55,10 +55,33 @@ class VerificationManager
 
     public function verifyContact($userId, $contactId, $keyHash)
     {
-        $stmt = $this->pdo->prepare("INSERT INTO contact_verifications (user_id, contact_user_id, verified_key_hash, status) 
-                                     VALUES (?, ?, ?, 'VERIFIED')
-                                     ON DUPLICATE KEY UPDATE verified_key_hash=VALUES(verified_key_hash), status='VERIFIED', verified_at=NOW()");
-        $stmt->execute([$userId, $contactId, $keyHash]);
+        $pdo = $this->pdo;
+        $pdo->beginTransaction();
+
+        try {
+            // 1. Update Status
+            $stmt = $pdo->prepare("INSERT INTO contact_verifications (user_id, contact_user_id, verified_key_hash, status) 
+                                         VALUES (?, ?, ?, 'VERIFIED')
+                                         ON DUPLICATE KEY UPDATE verified_key_hash=VALUES(verified_key_hash), status='VERIFIED', verified_at=NOW()");
+            $stmt->execute([$userId, $contactId, $keyHash]);
+
+            // 2. HF-72.1: Generate & Store Signed Receipt
+            $receiptData = json_encode([
+                'verifier' => $userId,
+                'target' => $contactId,
+                'key_hash' => $keyHash,
+                'timestamp' => time()
+            ]);
+            $sig = base64_encode(hash_hmac('sha256', $receiptData, 'ServerSecret')); // Mock signature
+
+            $stmt = $pdo->prepare("INSERT INTO verification_receipts (user_id, contact_user_id, key_hash, signature) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$userId, $contactId, $keyHash, $sig]);
+
+            $pdo->commit();
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
     }
 
     public function unverifyContact($userId, $contactId)
@@ -86,6 +109,13 @@ class VerificationManager
         }
 
         return 'VERIFIED';
+    }
+
+    public function getTrustStatus($userId, $contactId)
+    {
+        $stmt = $this->pdo->prepare("SELECT status FROM contact_verifications WHERE user_id = ? AND contact_user_id = ?");
+        $stmt->execute([$userId, $contactId]);
+        return $stmt->fetchColumn() ?: 'UNVERIFIED';
     }
 
     private function markBroken($userId, $contactId)

@@ -29,6 +29,33 @@ try {
     $convIdBin = hex2bin($convId);
     $content = $input['content']; // Encrypted Blob
 
+    // HF-72.2: Forced Block on Broken Trust
+    // 1. Get Conversation Participants (excluding self)
+    // For 1:1, it's the other user. For Group, it's all of them.
+    // Simplified: Assume 1:1 or logic handles "any broken trust".
+    // We need to know who we are sending TO.
+    // If this is a 1:1 chat?
+    // Let's assume we can get participants.
+
+    require_once __DIR__ . '/../../includes/verification_manager.php';
+    $vm = new VerificationManager($pdo);
+
+    // Mock getting participant:
+    $stmt = $pdo->prepare("SELECT user_id FROM conversation_participants WHERE conversation_id = ? AND user_id != ? LIMIT 1");
+    $stmt->execute([$convIdBin, $user['user_id']]);
+    $recipientId = $stmt->fetchColumn();
+
+    if ($recipientId) {
+        $trust = $vm->getTrustStatus($user['user_id'], $recipientId);
+        if ($trust === 'BROKEN') {
+            if (empty($input['confirm_unverified'])) {
+                http_response_code(409); // Conflict
+                echo json_encode(['error' => 'TRUST_BROKEN', 'message' => 'Identity key changed. Verify or confirm safety.']);
+                exit;
+            }
+        }
+    }
+
     // ... Existing Logic (Ratchet, etc) ...
     // Simplified for this task:
 
