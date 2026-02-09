@@ -21,6 +21,19 @@ if (!$row) {
 $rawJson = $row['report_json'];
 $report = json_decode($rawJson, true);
 
+// HF-56.7: CDN Caching
+// Reports are immutable per generated ID.
+// However, 'latest' changes when a new one is generated.
+// We cache for 1 hour or until a new one is generated (implied by content change).
+$etag = md5($row['signature']); // Signature is unique per report
+header('Cache-Control: public, max-age=3600');
+header('ETag: "' . $etag . '"');
+
+if (isset($_SERVER['HTTP_IF_NONE_MATCH']) && trim($_SERVER['HTTP_IF_NONE_MATCH']) === '"' . $etag . '"') {
+    http_response_code(304);
+    exit;
+}
+
 // Sanitize (Example: Remove node_id if internal IP leaked, though current schema is safe)
 // HF-56.3: Ensure nothing strictly internal is exposed.
 // Current schema is mostly aggregated stats. We strip explicit 'node_id' for paranoia.
