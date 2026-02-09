@@ -12,6 +12,21 @@ function getDeviceRegistry($pdo, $orgIdBin, $start, $end)
         WHERE m.org_id = ?
     ");
     // Improvements: Date range filtering on last_active or created_at if columns exist
-    $stmt->execute([$orgIdBin]);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // HF-63.4: Redaction
+    $redaction = $job['redaction_level'] ?? 'PARTIAL';
+
+    // If STRICT redaction, don't show device_name or last active specifics? 
+    // Or just mask if user requested.
+    // For now, let's assume 'PARTIAL' masks IP if we had it.
+    // Since we don't return IP in this query, let's say we mask 'device_name' if STRICT.
+
+    $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if ($redaction === 'STRICT') {
+        foreach ($data as &$row) {
+            $row['device_name'] = 'REDACTED_DEVICE';
+        }
+    }
+
+    return $data;
 }
