@@ -49,6 +49,20 @@ class OrgManager
 
     public function addMember($orgIdBin, $userId, $role = 'MEMBER')
     {
+        // HF-67.1: atomic License Check
+        // Note: Caller must ensure Transaction for 'FOR UPDATE' to work effectively across the insert.
+        // But even without explicit transaction, it guards the moment.
+        require_once __DIR__ . '/license_manager.php';
+        $licMgr = new LicenseManager($this->pdo);
+
+        // We only check limits for non-Owners or if strict.
+        // Actually, Owner counts towards seats usually.
+        // checkSeatLimitAtomic throws logic if limit reached? No, returns false.
+
+        if (!$licMgr->checkSeatLimitAtomic($orgIdBin)) {
+            throw new Exception("Organization License Seat Limit Reached");
+        }
+
         $stmt = $this->pdo->prepare("INSERT INTO org_members (org_id, user_id, role) VALUES (?, ?, ?)");
         $stmt->execute([$orgIdBin, $userId, $role]);
     }
