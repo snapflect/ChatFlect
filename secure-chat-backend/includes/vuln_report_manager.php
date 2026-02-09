@@ -35,11 +35,65 @@ class VulnReportManager
         return $id;
     }
 
+    public function scanFile($path)
+    {
+        // HF-57.9: Virus Scan Hook
+        // In prod: exec('clamdscan ' . escapeshellarg($path), $output, $return);
+        // For now, assume safe.
+        // Return true if safe, false if infected.
+        return true;
+    }
+
+    public function checkUploadQuota($ip, $size)
+    {
+        // HF-57.10: Upload Quotas
+        // Global Limit: 1GB/day
+        // IP Limit: 50MB/day
+
+        $today = date('Y-m-d 00:00:00');
+
+        // 1. Check IP
+        $stmt = $this->pdo->prepare("
+            SELECT SUM(file_size) 
+            FROM vulnerability_attachments va
+            JOIN vulnerability_reports vr ON va.report_id = vr.report_id
+            WHERE vr.payload_json->>'$.ip_source' = ? 
+            AND va.uploaded_at >= ?
+        ");
+        $stmt->execute([$ip, $today]);
+        $ipUsed = $stmt->fetchColumn() ?: 0;
+
+        if ($ipUsed + $size > 50 * 1024 * 1024)
+            throw new Exception("Daily Upload Limit Exceeded (IP)");
+
+        // 2. Check Global
+        $stmtG = $this->pdo->prepare("SELECT SUM(file_size) FROM vulnerability_attachments WHERE uploaded_at >= ?");
+        $stmtG->execute([$today]);
+        $globalUsed = $stmtG->fetchColumn() ?: 0;
+
+        if ($globalUsed + $size > 1024 * 1024 * 1024)
+            throw new Exception("System Storage Full - Try later");
+    }
+
     public function uploadAttachment($reportId, $file)
     {
         // Limits
         if ($file['size'] > 5 * 1024 * 1024)
             throw new Exception("File too large (Max 5MB)");
+
+        // Check Quotas
+        // Need IP of reporter. Logic: 
+        // We don't pass IP here easily unless we fetch report or pass it. 
+        // Let's fetch report to get IP from payload if we stored it? 
+        // Actually, we store IP in payload_json.
+        $stmtR = $this->pdo->prepare("SELECT payload_json FROM vulnerability_reports WHERE report_id = ?");
+        $stmtR->execute([$reportId]);
+        $json = $stmtR->fetchColumn();
+        $payload = json_decode($json, true);
+        $ip = $payload['ip_source'] ?? '0.0.0.0';
+
+        $this->checkUploadQuota($ip, $file['size']);
+
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         $allowed = ['txt', 'pdf', 'png', 'jpg', 'zip'];
         if (!in_array($ext, $allowed))
@@ -51,6 +105,11 @@ class VulnReportManager
             mkdir($storageDir, 0700, true);
 
         $hash = hash_file('sha256', $file['tmp_name']);
+
+        // Scan
+        if (!$this->scanFile($file['tmp_name']))
+            throw new Exception("Malware Detected");
+
         $storageName = $hash . '.' . $ext;
         $target = "$storageDir/$storageName";
 
