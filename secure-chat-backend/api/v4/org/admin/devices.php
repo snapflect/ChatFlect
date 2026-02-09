@@ -13,9 +13,15 @@ try {
     $mgr = new OrgAdminManager($pdo);
     $mgr->ensureAdmin($orgIdBin, $user['user_id']);
 
-    $devices = $mgr->getOrgDevices($orgIdBin);
+    $devices = $mgr->getOrgDevices($orgIdBin); // Update manager to accept pagination or slice here
 
-    echo json_encode(['devices' => $devices]);
+    // HF-61.3: Pagination (Slicing array for now since manager returns all, optimal is SQL limit)
+    $limit = isset($_GET['limit']) ? min((int) $_GET['limit'], 100) : 50;
+    $offset = isset($_GET['offset']) ? (int) $_GET['offset'] : 0;
+
+    $pagedDevices = array_slice($devices, $offset, $limit);
+
+    echo json_encode(['devices' => $pagedDevices, 'total' => count($devices), 'limit' => $limit, 'offset' => $offset]);
 
 } catch (Exception $e) {
     http_response_code(403);

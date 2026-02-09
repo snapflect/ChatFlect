@@ -4,16 +4,19 @@
 
 require_once __DIR__ . '/db_connect.php';
 require_once __DIR__ . '/org_manager.php';
+require_once __DIR__ . '/governance_engine.php';
 
 class OrgAdminManager
 {
     private $pdo;
     private $orgMgr;
+    private $govEngine;
 
     public function __construct($pdo)
     {
         $this->pdo = $pdo;
         $this->orgMgr = new OrgManager($pdo);
+        $this->govEngine = new GovernanceEngine($pdo);
     }
 
     public function ensureAdmin($orgIdBin, $userId)
@@ -57,11 +60,14 @@ class OrgAdminManager
     public function disableMember($orgIdBin, $targetUserId, $performerId)
     {
         $this->ensureAdmin($orgIdBin, $performerId);
-        // Prevent disabling self or owner if not owner
-        // (Similar checks to updateMemberRole)
 
-        $stmt = $this->pdo->prepare("UPDATE org_members SET status = 'DISABLED' WHERE org_id = ? AND user_id = ?");
-        $stmt->execute([$orgIdBin, $targetUserId]);
+        // HF-61.1: Governance Integration
+        // Instead of immediate action, request approval.
+        // Reason: "Admin X requested disable of User Y"
+        $target = ['org_id' => bin2hex($orgIdBin), 'user_id' => $targetUserId];
+        $reqId = $this->govEngine->requestAction($performerId, 'ORG_DISABLE_MEMBER', $target, "Disable Member via Console");
+
+        return $reqId;
     }
 
     public function getOrgDevices($orgIdBin)
