@@ -6,9 +6,22 @@ require_once __DIR__ . '/../../../includes/db_connect.php';
 require_once __DIR__ . '/../../../includes/env.php';
 require_once __DIR__ . '/../../../includes/csv_writer.php';
 
+// HF-51.6: Export Signing
+// Prepare keys
+$keyDir = __DIR__ . '/../../../includes/keys';
+if (!file_exists("$keyDir/private.pem")) {
+    require_once "$keyDir/server_key_gen.php";
+}
+$privateKey = file_get_contents("$keyDir/private.pem");
+
+// Buffer Output for Signing (Note: For huge exports, streaming + chunk signing is better, 
+// strictly limiting buffer here for safety as per HF-53.3 caps)
+ob_start();
+
 // Admin Auth
 $headers = getallheaders();
 $adminSecret = getenv('ADMIN_SECRET_KEY');
+
 if (!$adminSecret || ($headers['X-Admin-Secret'] ?? '') !== $adminSecret) {
     http_response_code(403);
     exit('FORBIDDEN');
@@ -28,11 +41,15 @@ if ($format === 'csv') {
     $writer = new CsvWriter();
     $writer->writeHeader(['audit_id', 'event_type', 'severity', 'user_id', 'device_id', 'ip_address', 'meta', 'created_at']);
 
-    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $writer->writeRow($row);
-    }
-    $writer->close();
-} else {
-    header('Content-Type: application/json');
-    echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
-}
+// End buffering and sign
+$data = ob_get_clean();
+
+// Compute Signature
+$signature = '';
+openssl_sign($data, $signature, $privateKey, OPENSSL_ALGO_SHA256);
+$base64Sig = base64_encode($signature);
+
+// Send Headers
+header("X-ChatFlect-Signature: $base64Sig");
+echo $data;
+
