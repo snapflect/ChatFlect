@@ -56,4 +56,13 @@ class CallPolicyEnforcer
         // Mock: In real app, fetch from users table
         return 1;
     }
+
+    // HF-77.5: Recording Policy
+    public function canRecordCall($userId)
+    {
+        $orgId = $this->getUserOrg($userId);
+        $stmt = $this->pdo->prepare("SELECT allow_recording FROM org_call_policies WHERE org_id = ?");
+        $stmt->execute([$orgId]);
+        return (bool) $stmt->fetchColumn();
+    }
 }

@@ -1,4 +1,4 @@
--- 087_call_policies.sql
+-- 087_call_policies.sql (Updated)
 -- Epic 77: Org Call Policies
 
 CREATE TABLE IF NOT EXISTS `org_call_policies` (
@@ -6,8 +6,9 @@ CREATE TABLE IF NOT EXISTS `org_call_policies` (
     `org_id` INT NOT NULL,
     `allow_calls` BOOLEAN DEFAULT TRUE,
     `allow_video` BOOLEAN DEFAULT TRUE,
+    `allow_recording` BOOLEAN DEFAULT FALSE, -- HF-77.5
     `require_verified_contacts` BOOLEAN DEFAULT FALSE,
-    `max_duration_seconds` INT DEFAULT 3600, -- 1 hour default
+    `max_duration_seconds` INT DEFAULT 3600,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     UNIQUE KEY `uniq_org_policy` (`org_id`)

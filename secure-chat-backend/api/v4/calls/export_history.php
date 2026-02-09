@@ -13,6 +13,18 @@ try {
     $stmt->execute();
     $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    // HF-77.4: Privacy Masking
+    // Mask IDs/IPs if user doesn't have "UNMASK" permission (Mock)
+    // Assume default is MASKED
+
+    foreach ($history as &$row) {
+        $row['call_id'] = bin2hex($row['call_id']); // Ensure Hex
+        // initiator_user_id is internal ID, usually fine, but PII implies name/phone.
+        // We'll mask it anyway for the example.
+        $row['initiator_user_id'] = 'USER-' . substr(md5($row['initiator_user_id']), 0, 6);
+    }
+    unset($row);
+
     // Sign the Bundle
     $payload = json_encode($history);
     $privateKeyPath = __DIR__ . '/../../keys/server_private.pem';
