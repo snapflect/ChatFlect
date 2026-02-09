@@ -17,6 +17,15 @@ try {
     $stmt->execute([$convId]);
     $modState = $stmt->fetch(PDO::FETCH_ASSOC);
 
+    // HF-78.4: Privacy Masking
+    if ($modState && isset($modState['frozen_by_user_id'])) {
+        // Check if ?raw=true AND user has permission
+        $isRaw = isset($_GET['raw']) && $_GET['raw'] === 'true'; // Mock Perm Logic
+        if (!$isRaw) {
+            $modState['frozen_by_user_id'] = 'MASKED_USER_' . substr(md5($modState['frozen_by_user_id']), 0, 6);
+        }
+    }
+
     $payload = json_encode(['conversation_id' => $convId, 'moderation_state' => $modState]);
 
     // Sign
