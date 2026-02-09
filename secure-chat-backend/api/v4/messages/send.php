@@ -29,9 +29,15 @@ try {
     $convIdBin = hex2bin($convId);
     $content = $input['content']; // Encrypted Blob
 
-    // HF-74.3: Traffic Padding
+    // HF-74.3: Traffic Padding & HF-74.4: Policy
     require_once __DIR__ . '/../../includes/traffic_padding.php';
-    $content = TrafficPadder::padBlob($content);
+
+    // Mock Fetch Org Policy (In real app: PrivacyPolicyEnforcer)
+    // Default to 'LOW'
+    $paddingPolicy = 'LOW';
+    // $paddingPolicy = $privacyEnforcer->getPaddingPolicy($user['org_id']); 
+
+    $content = TrafficPadder::padBlob($content, $paddingPolicy);
 
     // HF-72.2: Forced Block on Broken Trust
     // 1. Get Conversation Participants (excluding self)
