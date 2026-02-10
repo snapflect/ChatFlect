@@ -1,25 +1,42 @@
 <?php
 require_once 'db.php';
-require_once 'rate_limiter.php';
-enforceRateLimit();
+require_once 'audit_log.php';
+require_once 'auth_middleware.php';
 
-// Headers handled by db.php
+enforceRateLimit();
+header('Content-Type: application/json; charset=utf-8');
+
+// SECURITY FIX (E1): Enforce authentication for key operations
+// This prevents anonymous enumeration of user keys
+$authUserId = requireAuth();
 
 // GET { user_id } -> Return Public Key
 // GET { phone_number } -> Return Public Key (for contacts)
 
 if (isset($_GET['user_id'])) {
-    $uid = $_GET['user_id'];
+    $uid = trim(strtoupper($_GET['user_id'])); // v16.0 Zero-Trust Normalization
+
+    // Audit log for key access
+    auditLog('KEY_FETCH', $authUserId, ['target_user' => $uid]);
 
     // 1. Try fetching device keys
-    $stmt = $conn->prepare("SELECT device_uuid, public_key FROM user_devices WHERE user_id = ?");
+    $stmt = $conn->prepare("SELECT device_uuid, public_key, signature, bundle_version, last_active, signed_at FROM user_devices WHERE user_id = ?");
     $stmt->bind_param("s", $uid);
     $stmt->execute();
     $resDevices = $stmt->get_result();
 
     $deviceKeys = [];
     while ($row = $resDevices->fetch_assoc()) {
-        $deviceKeys[$row['device_uuid']] = $row['public_key'];
+        // Construct the bundle object
+        $bundle = [
+            'public_key' => $row['public_key'],
+            'version' => (int) ($row['bundle_version'] ?? 1),
+            'timestamp' => $row['signed_at'] ?? $row['last_active'], // Prefer signed_at for verification
+            'signature' => $row['signature'] ?? null
+        ];
+
+        // Return full bundle object keyed by UUID
+        $deviceKeys[$row['device_uuid']] = $bundle;
     }
 
     // 2. Fetch primary key (legacy fallback or primary device)

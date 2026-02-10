@@ -1,0 +1,7 @@
+Contact: mailto:security@chatflect.com
+Encryption: https://chatflect.com/api/v4/public/trust/public_key.php
+Policy: https://chatflect.com/docs/vulnerability_disclosure_policy.md
+Acknowledgments: https://chatflect.com/hall-of-fame
+Preferred-Languages: en, fr, es
+Canonical: https://chatflect.com/.well-known/security.txt
+Expires: 2027-01-01T00:00:00.000Z

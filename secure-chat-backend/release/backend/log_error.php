@@ -14,6 +14,9 @@ if ($data) {
     $level = isset($data['level']) ? strtoupper($data['level']) : 'INFO';
     $message = isset($data['message']) ? $data['message'] : 'No message';
     $context = isset($data['context']) ? json_encode($data['context']) : '';
+
+    // Use Indian Standard Time (IST) for log timestamps
+    date_default_timezone_set('Asia/Kolkata');
     $timestamp = date('Y-m-d H:i:s');
     $ip = $_SERVER['REMOTE_ADDR'];
 

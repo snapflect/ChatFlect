@@ -117,7 +117,7 @@ export class SecureMediaService implements OnDestroy {
                             ? Capacitor.convertFileSrc(entry.blob_path)
                             : null;
 
-                        if (nativeUrl) {
+                        if (nativeUrl && !key) {
                             this.cache.set(cacheKey, { url: nativeUrl, timestamp: Date.now() });
                             this.throttledVerify(url, entry.etag, true).then(res => {
                                 if (res.status === 'mismatch') this.handleIntegrityMismatch(url);
@@ -140,7 +140,7 @@ export class SecureMediaService implements OnDestroy {
                         let blob = new Blob([byteArray], { type: entry.mime });
 
                         if (key && iv) {
-                            blob = await this.decryptMedia(blob, key, iv);
+                            blob = await this.decryptMedia(blob, key, iv, mimeType || entry.mime);
                         }
 
                         const objectUrl = URL.createObjectURL(blob);
@@ -197,7 +197,7 @@ export class SecureMediaService implements OnDestroy {
                                 let finalBlob = new Blob([byteArray], { type: chunkBlob.type });
 
                                 if (key && iv) {
-                                    finalBlob = await this.decryptMedia(finalBlob, key, iv);
+                                    finalBlob = await this.decryptMedia(finalBlob, key, iv, mimeType || chunkBlob.type);
                                 }
 
                                 if (mimeType) {
@@ -342,46 +342,117 @@ export class SecureMediaService implements OnDestroy {
         if (encrypt) {
             const enc = await this.crypto.encryptBlob(file);
             blob = enc.encryptedBlob;
-            ivBase64 = this.crypto.arrayBufferToBase64(enc.iv.buffer as ArrayBuffer);
+            ivBase64 = this.crypto.arrayBufferToBase64(enc.iv);
             keyData = enc.key;
         }
 
-        const formData = new FormData();
-        formData.append('file', blob, encrypt ? 'secure_file.bin' : 'file');
+        // Determine filename with proper extension
+        const ext = encrypt ? 'bin' : this.getExtFromMime(blob.type);
+        const filename = `upload_${Date.now()}.${ext}`;
 
-        // Note: Using toPromise() as per project pattern, even if deprecated in RxJS 7
-        const res: any = await this.api.post('upload.php', formData).toPromise();
+        const formData = new FormData();
+        formData.append('file', blob, filename);
+
+        // Use native fetch for file uploads (more reliable on mobile/Capacitor)
+        const userId = localStorage.getItem('user_id') || '';
+        const idToken = localStorage.getItem('id_token') || '';
+
+        console.log('[SecureMedia] Starting upload to:', `https://chat.snapflect.com/api/upload.php`);
+        console.log('[SecureMedia] Payload details:', {
+            filename,
+            blobSize: blob.size,
+            blobType: blob.type,
+            userIdLength: userId.length,
+            tokenLength: idToken.length
+        });
+
+        const response = await fetch(`https://chat.snapflect.com/api/upload.php`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${idToken || userId}`,
+                'X-User-ID': userId
+            },
+            body: formData
+        });
+
+        console.log('[SecureMedia] Upload response received. Status:', response.status);
+
+        if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            console.error('[SecureMedia] Upload failed on server:', errBody);
+            throw new Error(errBody.error || 'Upload failed');
+        }
+
+        const res = await response.json();
         if (!res?.url) throw new Error('Upload failed');
 
         return {
             url: res.url,
             iv: ivBase64,
             mime: res.mime,
-            _rawKey: keyData
+            key: keyData
         };
     }
 
-    private async decryptMedia(blobEnc: Blob, keyEncBase64: string, ivBase64: string): Promise<Blob> {
+    private getExtFromMime(mime: string): string {
+        const map: Record<string, string> = {
+            'image/jpeg': 'jpg',
+            'image/png': 'png',
+            'image/gif': 'gif',
+            'image/webp': 'webp',
+            'video/mp4': 'mp4',
+            'audio/mpeg': 'mp3',
+            'audio/ogg': 'ogg',
+            'application/pdf': 'pdf'
+        };
+        return map[mime] || 'bin';
+    }
+
+    private async decryptMedia(blobEnc: Blob, keyEncBase64: string, ivBase64: string, mimeType: string = ''): Promise<Blob> {
+        console.log('[SecureMedia] decryptMedia called:', {
+            blobSize: blobEnc.size,
+            keyPrefix: keyEncBase64?.substring(0, 10),
+            ivLength: ivBase64?.length,
+            mimeType
+        });
+
         let rawKey: ArrayBuffer;
         if (keyEncBase64.startsWith('RAW:')) {
+            console.log('[SecureMedia] Using RAW key (prefixed)');
             rawKey = this.crypto.base64ToArrayBuffer(keyEncBase64.substring(4));
+        } else if (keyEncBase64.length < 200) {
+            // Safety fallback: RSA-encrypted keys are typically >300 chars (2048-bit). 
+            // AES keys (32 bytes) are ~44 chars. If it's short, it's definitely raw.
+            console.log('[SecureMedia] Using RAW key (detected by length)');
+            rawKey = this.crypto.base64ToArrayBuffer(keyEncBase64);
         } else {
+            console.log('[SecureMedia] Using RSA-encrypted key');
             const priv = localStorage.getItem('private_key');
             if (!priv) throw new Error('No private key');
             const privKey = await this.crypto.importKey(priv, 'private');
             const keyBuf = await window.crypto.subtle.decrypt({ name: 'RSA-OAEP' }, privKey, this.crypto.base64ToArrayBuffer(keyEncBase64));
-            rawKey = this.crypto.base64ToArrayBuffer(new TextDecoder().decode(keyBuf));
+            rawKey = keyBuf; // Correct: the decrypted buffer is the raw key
             new Uint8Array(keyBuf).fill(0);
         }
+
+        console.log('[SecureMedia] rawKey length:', rawKey.byteLength);
 
         const aesKey = await window.crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, true, ['decrypt']);
         const ivBuffer = this.crypto.base64ToArrayBuffer(ivBase64);
         const iv = new Uint8Array(ivBuffer);
-        const decryptedBlob = await this.crypto.decryptBlob(blobEnc, aesKey, iv);
 
-        new Uint8Array(rawKey).fill(0);
-        iv.fill(0);
-        return decryptedBlob;
+        console.log('[SecureMedia] IV length:', iv.length, 'Attempting decrypt...');
+
+        try {
+            const decryptedBlob = await this.crypto.decryptBlob(blobEnc, aesKey, iv, mimeType);
+            console.log('[SecureMedia] Decryption SUCCESS, size:', decryptedBlob.size);
+            new Uint8Array(rawKey).fill(0);
+            iv.fill(0);
+            return decryptedBlob;
+        } catch (e) {
+            console.error('[SecureMedia] Decryption FAILED:', e);
+            throw e;
+        }
     }
 
     public releaseMedia(url: string): void {

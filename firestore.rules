@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===========================================
+    // HELPER FUNCTIONS
+    // ===========================================
+
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user is chat participant
+    function isParticipant(chatId) {
+      return isAuthenticated()
+             && request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
+
+    // Check if user owns this document
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // STRICT: Check if device is active (not revoked)
+    // Requires device_uuid in custom claims
+    function isDeviceActive() {
+      let deviceUuid = request.auth.token.device_uuid;
+      let uid = request.auth.uid;
+      return deviceUuid != null
+             && exists(/databases/$(database)/documents/device_registry/$(uid)/devices/$(deviceUuid))
+             && get(/databases/$(database)/documents/device_registry/$(uid)/devices/$(deviceUuid)).data.status == 'active';
+    }
+
+    // Combined check: authenticated + active device
+    function isActiveUser() {
+      return isAuthenticated() && isDeviceActive();
+    }
+
+    // ===========================================
+    // CHATS COLLECTION (Metadata)
+    // ===========================================
+    match /chats/{chatId} {
+      // STRICT: Read-only for participants with active device
+      allow read: if isParticipant(chatId) && isDeviceActive();
+      allow write: if false; // Backend only via Admin SDK
+
+      // -----------------------------------------
+      // MESSAGES SUBCOLLECTION (E2EE payloads)
+      // -----------------------------------------
+      match /messages/{msgId} {
+        // PHASE 3: Relay Backend Only
+        // Clients must use /relay/pull API. Direct Firestore access denied.
+        allow read, write: if false; 
+      }
+
+      // -----------------------------------------
+      // LIVE LOCATIONS SUBCOLLECTION
+      // -----------------------------------------
+      match /locations/{locId} {
+        // Participants with active device can read
+        allow read: if isParticipant(chatId) && isDeviceActive();
+        // Only owner with active device can create their own location
+        allow create: if isParticipant(chatId) && isDeviceActive()
+                      && request.resource.data.userId == request.auth.uid;
+        // STRICT FIX: Update/delete requires participant check
+        allow update, delete: if isParticipant(chatId) && isDeviceActive()
+                              && resource.data.userId == request.auth.uid;
+      }
+    }
+
+    // ===========================================
+    // USERS COLLECTION (Profile & Contacts)
+    // ===========================================
+    match /users/{uid} {
+      // STRICT: Owner + active device
+      allow read, write: if isOwner(uid) && isDeviceActive();
+
+      match /contacts/{contactId} {
+        allow read, write: if isOwner(uid) && isDeviceActive();
+      }
+
+      match /blocked/{blockedId} {
+        allow read, write: if isOwner(uid) && isDeviceActive();
+      }
+
+      // Per-user sync requests (internal device signaling)
+      match /sync_requests/{reqId} {
+        allow read, write: if isOwner(uid) && isDeviceActive();
+      }
+    }
+
+    // ===========================================
+    // SYNC REQUESTS (CRITICAL: Key Handover)
+    // ===========================================
+    match /sync_requests/{sessionId} {
+      // Any authenticated user with active device can create (requester)
+      allow create: if isActiveUser();
+      // Only target user with active device can read and cleanup
+      allow read: if isActiveUser()
+                  && resource.data.targetUserId == request.auth.uid;
+      allow update, delete: if isActiveUser()
+                            && resource.data.targetUserId == request.auth.uid;
+    }
+
+    // ===========================================
+    // PRESENCE STATUS
+    // ===========================================
+    match /status/{userId} {
+      // Owner with active device can write their status
+      allow write: if isOwner(userId) && isDeviceActive();
+      // All authenticated users with active device can read (for presence UI)
+      allow read: if isActiveUser();
+    }
+
+    // ===========================================
+    // DEVICE REGISTRY (Epic 7 - Revocation Enforcement)
+    // ===========================================
+    match /device_registry/{uid} {
+      // Read-only for owner (device check exempted here to allow bootstrap)
+      allow read: if isOwner(uid);
+      allow write: if false; // Backend Admin SDK only
+
+      match /devices/{deviceUuid} {
+        allow read: if isOwner(uid);
+        allow write: if false; // Backend Admin SDK only
+      }
+    }
+
+    // ===========================================
+    // LOCATION AUDIT TRAIL
+    // ===========================================
+    match /location_audit/{auditId} {
+      // Anyone with active device can create audit entry
+      allow create: if isActiveUser();
+      // No client reads (Admin SDK only for auditing)
+      allow read, update, delete: if false;
+    }
+
+    // ===========================================
+    // DEFAULT DENY
+    // ===========================================
+    // Catch-all: deny everything not explicitly allowed
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

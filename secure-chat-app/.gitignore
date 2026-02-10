@@ -11,8 +11,8 @@ $RECYCLE.BIN/
 
 *.log
 log.txt
-build_errors.txt
-build_output.txt
+*.txt
+build_*.txt
 test_output.txt
 
 /.sourcemaps

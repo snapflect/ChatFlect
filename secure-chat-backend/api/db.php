@@ -48,4 +48,24 @@ function sendResponse($data, $httpCode = 200)
 
 // Note: Rate limiter and auth_middleware should be included by individual API files
 // as they need the $conn variable to be initialized first
+
+/**
+ * Get PDO connection (for services that need PDO like security_alerts.php)
+ */
+function getDbPdo()
+{
+    static $pdo = null;
+    if ($pdo === null) {
+        $pdo = new PDO(
+            'mysql:host=localhost;dbname=u668772406_secure_chat;charset=utf8mb4',
+            'u668772406_chat_admin',
+            'MusMisMM@1',
+            [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
+            ]
+        );
+    }
+    return $pdo;
+}
 ?>

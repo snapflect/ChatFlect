@@ -44,6 +44,9 @@ if ($method === 'POST' && json_last_error() !== JSON_ERROR_NONE) {
 }
 
 if ($method === 'POST') {
+    // SECURITY FIX (Review 1.7): CSRF Protection for Login/Profile Actions
+    validateCSRF();
+
     /* ---------- OTP CONFIRM (UNCHANGED) ---------- */
     /* ---------- OTP CONFIRM (HYBRID) ---------- */
     if (isset($data->action) && $data->action === 'confirm_otp') {
@@ -95,7 +98,7 @@ if ($method === 'POST') {
         if ($userRes->num_rows > 0) {
             // Existing
             $row = $userRes->fetch_assoc();
-            $userId = $row['user_id'];
+            $userId = trim(strtoupper($data->user_id)); // v16.0 Zero-Trust Normalization
             $isProfileComplete = (int) $row['is_profile_complete'];
 
             // Update Key
@@ -138,6 +141,27 @@ if ($method === 'POST') {
 
         // 5. Cache Session for instant auth
         CacheService::cacheSession($jti, $userId, ['device' => $deviceUuid]);
+
+        // 6. Set HTTP-Only Cookie
+        $cookieExpires = strtotime($expires);
+        setcookie('auth_token', $jti, [
+            'expires' => $cookieExpires,
+            'path' => '/api',
+            'domain' => '', // Current domain
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'Strict'
+        ]);
+
+        $refreshExpires = time() + (86400 * 30); // 30 Days
+        setcookie('refresh_token', $refreshToken, [
+            'expires' => $refreshExpires,
+            'path' => '/api',
+            'domain' => '',
+            'secure' => true,
+            'httponly' => true,
+            'samesite' => 'Strict'
+        ]);
 
         // Audit log successful login
         auditLog(AUDIT_LOGIN_SUCCESS, $userId, ['method' => 'email_otp', 'is_new_user' => $isNewUser]);
@@ -321,7 +345,7 @@ if ($method === 'POST') {
 
 } elseif ($method === 'GET') {
 
-    $userId = $_GET['user_id'] ?? '';
+    $userId = isset($_GET['user_id']) ? trim(strtoupper($_GET['user_id'])) : ''; // v16.0 Zero-Trust Normalization
     if (!$userId) {
         http_response_code(400);
         echo json_encode(["error" => "user_id required"]);

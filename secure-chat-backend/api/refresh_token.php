@@ -9,15 +9,20 @@ require_once 'auth_middleware.php';
 $json = file_get_contents("php://input");
 $data = json_decode($json);
 
-if (!isset($data->refresh_token) || !isset($data->user_id)) {
+// SECURITY FIX (Review 1.7): CSRF Protection
+// Refresh Token endpoint relies on Cookies, so it MUST be protected against CSRF
+validateCSRF();
+
+// 0. Get Refresh Token from Cookie or Body
+$refreshToken = $data->refresh_token ?? $_COOKIE['refresh_token'] ?? null;
+$userId = sanitizeUserId($data->user_id);
+$deviceUuid = $data->device_uuid ?? 'unknown';
+
+if (!$refreshToken || !$userId) {
     http_response_code(400);
     echo json_encode(["error" => "Refresh token and user ID required"]);
     exit;
 }
-
-$refreshToken = $data->refresh_token; // Typically hashed in DB, but let's assume secure entropy
-$userId = sanitizeUserId($data->user_id);
-$deviceUuid = $data->device_uuid ?? 'unknown';
 
 // 1. Validate Refresh Token in DB
 $stmt = $conn->prepare("SELECT id_token_jti FROM user_sessions WHERE user_id = ? AND device_uuid = ? AND refresh_token = ? AND expires_at > NOW()");
@@ -26,6 +31,10 @@ $stmt->execute();
 $res = $stmt->get_result();
 
 if ($res->num_rows === 0) {
+    // Clear cookies on failure
+    setcookie('auth_token', '', time() - 3600, '/api');
+    setcookie('refresh_token', '', time() - 3600, '/api');
+
     auditLog(AUDIT_AUTH_FAILED, $userId, ['reason' => 'invalid_refresh_token', 'device' => $deviceUuid]);
     http_response_code(401);
     echo json_encode(["error" => "Invalid or expired refresh token. Please log in again."]);
@@ -54,6 +63,27 @@ $upd->execute();
 CacheService::cacheSession($newJti, $userId, ['device_uuid' => $deviceUuid]);
 
 auditLog('REFRESH_TOKEN_ROTATED', $userId, ['device_uuid' => $deviceUuid]);
+
+// 6. Set HTTP-Only Cookies
+$cookieExpires = strtotime($newExpires);
+setcookie('auth_token', $newJti, [
+    'expires' => $cookieExpires,
+    'path' => '/api',
+    'domain' => '',
+    'secure' => true,
+    'httponly' => true,
+    'samesite' => 'Strict'
+]);
+
+$refreshExpires = time() + (86400 * 30); // 30 Days
+setcookie('refresh_token', $newRefreshToken, [
+    'expires' => $refreshExpires,
+    'path' => '/api',
+    'domain' => '',
+    'secure' => true,
+    'httponly' => true,
+    'samesite' => 'Strict'
+]);
 
 echo json_encode([
     "status" => "success",

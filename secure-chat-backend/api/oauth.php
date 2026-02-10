@@ -170,6 +170,27 @@ $sess->close();
 // 2. Cache Session for instant auth
 CacheService::cacheSession($jti, $userId, ['device' => $deviceUuid]);
 
+// 3. Set HTTP-Only Cookies
+$cookieExpires = strtotime($expires);
+setcookie('auth_token', $jti, [
+    'expires' => $cookieExpires,
+    'path' => '/api',
+    'domain' => '',
+    'secure' => true,
+    'httponly' => true,
+    'samesite' => 'Strict'
+]);
+
+$refreshExpires = time() + (86400 * 30); // 30 Days
+setcookie('refresh_token', $refreshToken, [
+    'expires' => $refreshExpires,
+    'path' => '/api',
+    'domain' => '',
+    'secure' => true,
+    'httponly' => true,
+    'samesite' => 'Strict'
+]);
+
 // Return success
 echo json_encode([
     "status" => "success",

@@ -1,0 +1,49 @@
+{
+    "policies": {
+        "auth_register": {
+            "capacity": 10,
+            "refill_rate": 0.166,
+            "ban_threshold": 5
+        },
+        "device_ops": {
+            "capacity": 5,
+            "refill_rate": 0.083,
+            "ban_threshold": 3
+        },
+        "message_pull": {
+            "capacity": 60,
+            "refill_rate": 1.0,
+            "ban_threshold": 10
+        },
+        "sync_repair": {
+            "capacity": 10,
+            "refill_rate": 0.166,
+            "ban_threshold": 5
+        },
+        "general_api": {
+            "capacity": 100,
+            "refill_rate": 1.66,
+            "ban_threshold": 20
+        }
+    },
+    "escalation_ladder": [
+        "1 MINUTE",
+        "10 MINUTES",
+        "1 HOUR",
+        "24 HOURS"
+    ],
+    "abuse_scores": {
+        "rate_limit_hit": 1,
+        "auth_fail": 10,
+        "ban_trigger": 50
+    },
+    "allowlist": [
+        "127.0.0.1",
+        "::1"
+    ],
+    "trusted_proxies": [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16"
+    ]
+}

@@ -1,193 +1,97 @@
 import { Injectable } from '@angular/core';
 import { PushNotifications } from '@capacitor/push-notifications';
-import { ApiService } from './api.service';
 import { Platform } from '@ionic/angular';
-import { LoggingService } from './logging.service';
-import { initializeApp } from 'firebase/app';
-import { getMessaging, getToken, onMessage } from 'firebase/messaging';
-import { environment } from 'src/environments/environment';
-import { BehaviorSubject } from 'rxjs';
+import { ApiService } from './api.service';
+import { AuthService } from './auth.service';
+import { RelaySyncService } from './relay-sync.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class PushService {
-    // VAPID Key from Firebase Console -> Cloud Messaging -> Web Configuration
-    // If you don't have one, generate it in Firebase Console.
-    // For now, we will try without or user must replace this.
-    private readonly VAPID_KEY = ''; // Placeholder: Enter "Web Push Certificate" Key here if needed.
-
-    public messageSubject = new BehaviorSubject<any>(null); // Foreground Receipt
-    public tapSubject = new BehaviorSubject<string | null>(null); // User Tap Action
 
     constructor(
-        private api: ApiService,
         private platform: Platform,
-        private logger: LoggingService
+        private api: ApiService,
+        private auth: AuthService,
+        private relaySync: RelaySyncService
     ) { }
 
-    initPush() {
-        if (this.platform.is('capacitor')) {
-            this.initNativePush();
-        } else {
-            this.initWebPush();
-        }
-    }
-
-    // --- Native (Android/iOS) ---
-    private async initNativePush() {
-        try {
-            let permStatus = await PushNotifications.checkPermissions();
-            if (permStatus.receive === 'prompt') {
-                permStatus = await PushNotifications.requestPermissions();
-            }
-            if (permStatus.receive !== 'granted') {
-                this.logger.error('Native Push permission denied');
-                return;
-            }
-            await PushNotifications.register();
-            this.addNativeListeners();
-        } catch (e) {
-            this.logger.error('Native Push Init Error', e);
-        }
-    }
-
-    private cachedToken: string | null = null;
-
-    private addNativeListeners() {
-        PushNotifications.addListener('registration', (token: any) => {
-            this.logger.log('Native Push Token:', token.value);
-            this.cachedToken = token.value;
-            this.saveToken(token.value);
-        });
-        PushNotifications.addListener('registrationError', (err: any) => {
-            this.logger.error('Native Push Registration Error:', err.error);
-        });
-        PushNotifications.addListener('pushNotificationReceived', (notification: any) => {
-            this.logger.log('Native Push Received:', notification);
-            // Just emit for logging/toasts. DO NOT NAVIGATE.
-            this.messageSubject.next(notification);
-        });
-        PushNotifications.addListener('pushNotificationActionPerformed', (notification: any) => {
-            this.logger.log('Native Push Action:', notification);
-            const data = notification.notification.data;
-            if (data && data.chatId) {
-                this.tapSubject.next(data.chatId);
-            }
-        });
-    }
-
-    // --- Web (PWA) ---
-    private async initWebPush() {
-        try {
-            const app = initializeApp(environment.firebase);
-            const messaging = getMessaging(app);
-
-            // Request Permission
-            const permission = await Notification.requestPermission();
-            if (permission !== 'granted') {
-                this.logger.error('Web Notification permission denied');
-                return;
-            }
-
-            // Get Token
-            // validKey is optional in some setups but recommended.
-            const options: any = { serviceWorkerRegistration: await navigator.serviceWorker.ready };
-            if (this.VAPID_KEY) options.vapidKey = this.VAPID_KEY;
-
-            // Try to register SW if not ready (Hybrid approach)
-            // Ideally 'navigator.serviceWorker.register' is done by Angular in main.ts or app.module
-            // But we created firebase-messaging-sw.js explicitly.
-            if ('serviceWorker' in navigator) {
-                try {
-                    const registration = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-                    options.serviceWorkerRegistration = registration;
-                } catch (err) {
-                    this.logger.error("SW Registration Failed", err);
-                }
-            }
-
-            getToken(messaging, options).then((currentToken) => {
-                if (currentToken) {
-                    this.logger.log('Web Push Token:', currentToken);
-                    this.saveToken(currentToken);
-                } else {
-                    this.logger.log('No registration token available.');
-                }
-            }).catch((err) => {
-                this.logger.error('An error occurred while retrieving token. ', err);
-            });
-
-            // Foreground Messages
-            onMessage(messaging, (payload) => {
-                this.logger.log('Web Foreground Message:', payload);
-                this.messageSubject.next(payload);
-                // Optional: Show local notification or toast
-            });
-
-        } catch (e) {
-            this.logger.error('Web Push Init Error', e);
-        }
-    }
-
-    async saveToken(token: string) {
-        const userId = localStorage.getItem('user_id');
-        const deviceUuid = localStorage.getItem('device_uuid');
-        const publicKey = localStorage.getItem('public_key');
-
-        if (!userId || !deviceUuid || !publicKey) {
-            this.logger.log("Push Token received but missing user/device info. Cached.");
+    init() {
+        if (!this.platform.is('capacitor')) {
+            console.log('Push: Not a capacitor platform');
             return;
         }
 
-        try {
-            await this.api.post('devices.php?action=register', {
-                user_id: userId,
-                device_uuid: deviceUuid,
-                public_key: publicKey,
-                fcm_token: token,
-                device_name: 'Mobile Device' // Could use Device plugin to get real name
-            }).toPromise();
-            this.logger.log('FCM Token Saved to Backend (Multi-Device)');
-        } catch (e) {
-            this.logger.error('Failed to save FCM token', e);
-        }
-    }
-
-    async syncToken() {
-        if (this.cachedToken) {
-            this.logger.log("Syncing cached push token...");
-            await this.saveToken(this.cachedToken);
-        } else {
-            // Try to get permission/token again if missing
-            this.initPush();
-        }
-    }
-
-    async sendPush(targetUserId: string, title: string, body: string, data: any = {}) {
-        try {
-            // Determine channel based on notification type
-            const channelId = data.type === 'call_invite' ? 'incoming_call' : 'messages';
-
-            await this.api.post('push.php', {
-                target_user_id: targetUserId,
-                title: title,
-                body: body,
-                data: JSON.stringify(data),
-                android_channel_id: channelId
-            }).toPromise();
-        } catch (e) {
-            this.logger.error("Send Push Failed", e);
-        }
-    }
-
-    async clearNotifications() {
-        if (this.platform.is('capacitor')) {
-            try {
-                await PushNotifications.removeAllDeliveredNotifications();
-            } catch (e) {
-                this.logger.error("Failed to clear notifications", e);
+        // 1. Request Permissions
+        PushNotifications.requestPermissions().then(result => {
+            if (result.receive === 'granted') {
+                PushNotifications.register();
             }
+        });
+
+        // 2. Registration Success
+        PushNotifications.addListener('registration', (token) => {
+            console.log('Push Registration Success', token.value);
+            this.registerToken(token.value);
+        });
+
+        // 3. Receive Notification (Foreground/Background)
+        PushNotifications.addListener('pushNotificationReceived', (notification) => {
+            console.log('Push Received', notification);
+
+            // WAKE SIGNAL LOGIC (Epic 20)
+            // We ignore payload content securely.
+            // Just trigger a sync.
+            const data = notification.data || {};
+            if (data.type === 'SYNC') {
+                console.log('Push: WAKE SIGNAL RECEIVED -> Triggering Sync');
+                // We don't know chatId from payload per security, 
+                // so we rely on RelaySyncService to poll ALL active chats or specific logic.
+                // For MVP, RelaySyncService usually polls active chat.
+                // Ideally, we trigger a global check.
+                // Assuming RelaySyncService has a global poll or we iterate.
+
+                // For now, let's trigger the sync if a chat is active.
+                this.relaySync.forceSync();
+            }
+        });
+
+        // 4. Action Performed (Tapped)
+        PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
+            console.log('Push Action', notification);
+            // Navigate to app, sync happens on visibility change anyway.
+        });
+    }
+
+    private async registerToken(token: string) {
+        const userId = this.auth.getUserId(); // Synchronous check
+        if (!userId) return; // Wait for login
+
+        let platformName = 'web';
+        if (this.platform.is('android')) platformName = 'android';
+        if (this.platform.is('ios')) platformName = 'ios';
+
+        try {
+            await this.api.post('push/register.php', {
+                token: token,
+                platform: platformName
+            }).toPromise();
+            console.log('Push: Token Registered with Relay Backend');
+        } catch (e) {
+            console.error('Push: Registration Failed', e);
         }
+    }
+
+    // Call this after login manually to ensure sync
+    syncToken() {
+        if (!this.platform.is('capacitor')) return;
+
+        PushNotifications.checkPermissions().then(async (res) => {
+            if (res.receive === 'granted') {
+                // Force re-registration logic
+                PushNotifications.register();
+            }
+        });
     }
 }

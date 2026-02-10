@@ -1,0 +1,91 @@
+# Dependency Gate CI Workflow
+# Epic 40: Block vulnerable dependencies
+
+name: Dependency Gate
+
+on:
+    pull_request:
+        paths:
+            - "**/package.json"
+            - "**/package-lock.json"
+            - "**/composer.json"
+            - "**/composer.lock"
+    schedule:
+        - cron: "0 6 * * 1" # Weekly Monday 6 AM UTC
+    workflow_dispatch:
+
+jobs:
+    npm-audit-frontend:
+        name: NPM Audit (Frontend)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install dependencies
+              run: npm ci
+              working-directory: secure-chat-app
+
+            - name: Run NPM Audit
+              run: npm audit --audit-level=high
+              working-directory: secure-chat-app
+
+    npm-audit-tests:
+        name: NPM Audit (Tests)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install dependencies
+              run: npm ci
+              working-directory: crypto-tests
+
+            - name: Run NPM Audit
+              run: npm audit --audit-level=high
+              working-directory: crypto-tests
+
+    php-scan:
+        name: PHP Dependency Scan
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: "8.2"
+
+            - name: Run PHP Scan
+              run: php scripts/php_dependency_scan.php
+              working-directory: secure-chat-backend
+
+    lockfile-check:
+        name: Lockfile Consistency
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Check Frontend Lockfile
+              run: |
+                  if [ ! -f secure-chat-app/package-lock.json ]; then
+                    echo "❌ Missing package-lock.json in secure-chat-app"
+                    exit 1
+                  fi
+                  echo "✅ Frontend lockfile exists"
+
+            - name: Check Tests Lockfile
+              run: |
+                  if [ ! -f crypto-tests/package-lock.json ]; then
+                    echo "❌ Missing package-lock.json in crypto-tests"
+                    exit 1
+                  fi
+                  echo "✅ Tests lockfile exists"

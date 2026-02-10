@@ -1,0 +1,18 @@
+.unread {
+    --background: rgba(var(--ion-color-primary-rgb), 0.08);
+    border-left: 3px solid var(--ion-color-primary);
+}
+
+ion-badge {
+    margin-left: 8px;
+    font-size: 10px;
+}
+
+.timestamp {
+    color: var(--ion-color-medium);
+    font-size: 12px;
+}
+
+ion-item ion-icon[slot="end"] {
+    font-size: 10px;
+}

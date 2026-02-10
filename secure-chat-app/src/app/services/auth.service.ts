@@ -1,12 +1,14 @@
 import { Injectable } from '@angular/core';
 import { ApiService } from './api.service';
 import { BehaviorSubject, throwError } from 'rxjs';
+import { filter, take } from 'rxjs/operators';
 import { CryptoService } from './crypto.service';
 import { PushService } from './push.service';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { LoggingService } from './logging.service';
 import { CallService } from './call.service';
-import { getFirestore, collection, doc, onSnapshot, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, onSnapshot, getDoc, setDoc, deleteDoc, Unsubscribe } from 'firebase/firestore';
+import { getAuth, signInWithCustomToken, signOut, onAuthStateChanged } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
 import { environment } from 'src/environments/environment';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
@@ -14,17 +16,23 @@ import { Capacitor } from '@capacitor/core';
 import { SecureMediaService } from './secure-media.service';
 import { SecureStorageService } from './secure-storage.service';
 
+import { db, auth } from './firebase.config';
+
 @Injectable({
     providedIn: 'root'
 })
 export class AuthService {
     private userIdSource = new BehaviorSubject<string | null>(null);
     currentUserId = this.userIdSource.asObservable();
-    private db: any;
+    private db = db; // Use singleton
 
     // Blocked Users Stream
     private blockedUsersSubject = new BehaviorSubject<string[]>([]);
     blockedUsers$ = this.blockedUsersSubject.asObservable();
+    private blockedUnsub?: Unsubscribe;
+    private firebaseSigningIn = false;
+
+    // ... (rest of props)
 
     constructor(
         private api: ApiService,
@@ -35,8 +43,8 @@ export class AuthService {
         private mediaService: SecureMediaService,
         private secureStorage: SecureStorageService // v13
     ) {
-        const app = initializeApp(environment.firebase);
-        this.db = getFirestore(app);
+        // App initialized in firebase.config.ts
+        // this.db assigned above
 
         // Initialize Google Auth on native platforms
         if (Capacitor.isNativePlatform()) {
@@ -47,11 +55,45 @@ export class AuthService {
             });
         }
 
+        // 🔥 Event-Driven Readiness (The Truth)
+        onAuthStateChanged(auth, user => { // Use singleton 'auth'
+            if (user) {
+                this.logger.log('[Auth] Firebase AUTH READY', { uid: user.uid });
+                this.firebaseReadySubject.next(true);
+            } else {
+                this.logger.log('[Auth] Firebase AUTH LOST');
+                this.firebaseReadySubject.next(false);
+                this.firebaseSigningIn = false;
+            }
+        });
+
+        // 🛡️ Defensive Hardening (Enterprise Level)
+        // If auth user exists but event didn't fire (race condition), force it after 3s
+        setTimeout(() => {
+            if (!this.firebaseReadySubject.value && auth.currentUser) {
+                this.logger.warn('[Auth] Auth user present but event missed – correcting');
+                this.firebaseReadySubject.next(true);
+            }
+        }, 3000);
+
         const savedId = localStorage.getItem('user_id');
         if (savedId) {
-            this.userIdSource.next(savedId);
-            this.initBlockedListener(savedId);
+            const norm = savedId.trim().toUpperCase();
+            this.userIdSource.next(norm);
+            this.initBlockedListener(norm);
+            // v16.1 Fix: Ensure Firebase is authenticated on app restart
+            this.signInToFirebase(norm);
         }
+
+        // v16.5: Gate Push Token Sync (Race Condition Fix)
+        // Ensure we only try to write the token to Firestore when we are CONFIRMED ready and authenticated.
+        this.firebaseReady$
+            .pipe(filter(Boolean), take(1))
+            .subscribe({
+                next: () => this.pushService.syncToken(),
+                complete: () => this.logger.log('[Auth] Push token synced')
+            });
+
     }
 
     private initBlockedListener(userId: string) {
@@ -62,8 +104,9 @@ export class AuthService {
         }
 
         // 2. Real-time sync
+        this.blockedUnsub?.();
         const blockedCol = collection(this.db, `users/${userId}/blocked`);
-        onSnapshot(blockedCol, (snapshot) => {
+        this.blockedUnsub = onSnapshot(blockedCol, (snapshot) => {
             const blocked = snapshot.docs.map(d => d.id);
             localStorage.setItem('blocked_users', JSON.stringify(blocked));
             this.blockedUsersSubject.next(blocked);
@@ -99,47 +142,47 @@ export class AuthService {
     }
 
     setSession(userId: string, token?: string, isProfileComplete?: boolean, refreshToken?: string) {
-        localStorage.setItem('user_id', userId);
-        if (token) {
-            localStorage.setItem('id_token', token);
-        }
-        if (refreshToken) {
-            localStorage.setItem('refresh_token', refreshToken);
-        }
+        // v16.0: Strict Normalization
+        const normalizedId = String(userId).trim().toUpperCase();
+
+        localStorage.setItem('user_id', normalizedId);
+        // Cookie Migration: Tokens now invalid in LocalStorage - removed to enforce Cookie usage
+        // if (token) localStorage.setItem('id_token', token);
+        // if (refreshToken) localStorage.setItem('refresh_token', refreshToken);
+
         if (isProfileComplete !== undefined) {
             localStorage.setItem('is_profile_complete', isProfileComplete ? '1' : '0');
         }
-        this.userIdSource.next(userId);
-        this.initBlockedListener(userId);
+        this.userIdSource.next(normalizedId);
+        this.initBlockedListener(normalizedId);
 
         // Register Device (Phase 2) 
-        this.registerDevice(userId).catch(e => console.error("Device Reg Failed", e));
+        this.registerDevice(normalizedId).catch(e => console.error("Device Reg Failed", e));
 
         // Force Push Registration / Sync
-        this.pushService.syncToken();
+        // this.pushService.syncToken(); // Moved to signInToFirebase result
         this.callService.init();
+
+        // Ensure Firebase Auth
+        this.signInToFirebase(normalizedId);
     }
 
     async refreshToken(): Promise<string | null> {
         const userId = localStorage.getItem('user_id');
-        const refreshToken = localStorage.getItem('refresh_token');
+        // Cookie Migration: Refresh token read from Cookie by backend
         const deviceUuid = localStorage.getItem('device_uuid');
 
-        if (!userId || !refreshToken) return null;
+        if (!userId) return null;
 
         try {
             const res: any = await this.api.post('refresh_token.php', {
                 user_id: userId,
-                refresh_token: refreshToken,
+                // refresh_token: refreshToken, // Backend reads cookie
                 device_uuid: deviceUuid
             }).toPromise();
 
             if (res && res.status === 'success') {
-                localStorage.setItem('id_token', res.token);
-                // v8.1: Store the new rotated refresh token
-                if (res.refresh_token) {
-                    localStorage.setItem('refresh_token', res.refresh_token);
-                }
+                // Tokens set in Cookie by backend
                 return res.token;
             }
         } catch (e: any) {
@@ -153,6 +196,56 @@ export class AuthService {
         return null;
     }
 
+    private firebaseReadySubject = new BehaviorSubject<boolean>(false);
+    public firebaseReady$ = this.firebaseReadySubject.asObservable();
+
+    async signInToFirebase(userId: string) {
+        // ... (unchanged)
+        const authInstance = auth;
+
+        // 1. Race Condition Guard
+        if (authInstance.currentUser) {
+            this.logger.log('[Auth] Firebase ALREADY authenticated', { uid: authInstance.currentUser.uid });
+            if (!this.firebaseReadySubject.value) {
+                // Wait for listener or the defensive timeout
+            }
+            return;
+        }
+
+        // 2. Concurrency Guard
+        if (this.firebaseSigningIn) {
+            this.logger.log('[Auth] Firebase Sign-In ALREADY IN PROGRESS');
+            return;
+        }
+        this.firebaseSigningIn = true;
+
+        try {
+            this.logger.log(`[Auth] Starting Custom Token Exchange for ${userId}...`);
+
+            // Exchange PHP session for Firebase Token
+            const res: any = await this.api.post('firebase_auth.php', { user_id: userId }).toPromise();
+
+            if (res && res.status === 'success') {
+                const customToken = res.firebase_token || res.token;
+                if (!customToken) {
+                    throw new Error("Missing Firebase custom token in response");
+                }
+
+                this.logger.log("[Auth] Token received. Signing in...");
+
+                await signInWithCustomToken(authInstance, customToken);
+
+                this.logger.log("[Auth] signInWithCustomToken SUCCESS. User:", (authInstance.currentUser as any)?.uid);
+            } else {
+                this.logger.error("[Auth] Token Exchange FAILED. Response:", res);
+            }
+        } catch (e: any) {
+            this.logger.error("[Auth] Firebase Custom Auth EXCEPTION", e);
+        } finally {
+            this.firebaseSigningIn = false;
+        }
+    }
+
     // Phase 17: Email OTP
     requestOtp(email: string) {
         if (!email || !email.includes('@')) {
@@ -162,7 +255,6 @@ export class AuthService {
     }
 
     // Phase 17: Verify OTP and Register/Login
-    // Phase 17: Verify OTP and Register/Login
     async verifyOtp(otp: string, email: string) {
         try {
             // 1. Generate Key Pair (Real)
@@ -170,9 +262,11 @@ export class AuthService {
             const publicKeyStr = await this.crypto.exportKey(keys.publicKey);
             const privateKeyStr = await this.crypto.exportKey(keys.privateKey);
 
-            // Store Private Key Locally (Critical for decryption)
-            localStorage.setItem('private_key', privateKeyStr);
-            localStorage.setItem('public_key', publicKeyStr);
+            // Store Private Key Locally (Critical for decryption) -> Now Secure
+            await this.secureStorage.setItem('private_key', privateKeyStr);
+            await this.secureStorage.setItem('public_key', publicKeyStr);
+            // Redundant plaintext copy REMOVED for security
+            // localStorage.setItem('public_key', publicKeyStr); // Optional: keep public key accessible if needed sync
 
             // 2. Call API to confirm
             const response: any = await this.api.post('profile.php', {
@@ -224,8 +318,8 @@ export class AuthService {
             const privateKeyStr = await this.crypto.exportKey(keys.privateKey);
 
             // Store Private Key Locally
-            localStorage.setItem('private_key', privateKeyStr);
-            localStorage.setItem('public_key', publicKeyStr);
+            await this.secureStorage.setItem('private_key', privateKeyStr);
+            await this.secureStorage.setItem('public_key', publicKeyStr);
 
             // 3. Send to backend for verification/registration
             const googleUserAny = googleUser as any;
@@ -272,22 +366,57 @@ export class AuthService {
         }
     }
 
-    logout() {
+    async logout() {
+        try {
+            // 1. Clear Backend Cookies
+            await this.api.post('logout.php', {}).toPromise();
+        } catch (e) {
+            console.warn("[Auth] Backend Logout Error", e);
+        }
+
+        try {
+            await signOut(auth);
+        } catch (e) {
+            console.warn("[Auth] Firebase SignOut Error", e);
+        }
+
+        // Listener Cleanup
+        this.blockedUnsub?.();
+        this.blockedUnsub = undefined;
+
         this.signOutGoogle();
         this.mediaService.clearCache('LOGOUT');
+        this.mediaService.clearCache('LOGOUT');
         localStorage.removeItem('user_id');
-        localStorage.removeItem('id_token');
+        localStorage.removeItem('id_token'); // Just in case
         localStorage.removeItem('is_profile_complete');
-        localStorage.removeItem('private_key');
-        localStorage.removeItem('public_key');
+
+        await this.secureStorage.removeItem('private_key');
+        await this.secureStorage.removeItem('public_key');
+
         localStorage.removeItem('user_first_name');
-        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('refresh_token'); // Just in case
         localStorage.removeItem('blocked_users');
+        localStorage.removeItem('device_uuid'); // v16.0: Full wipe on logout to force fresh session
         this.userIdSource.next(null);
+
+        // 🔥 Robust Subject Reset
+        this.firebaseReadySubject.next(false);
+        this.firebaseSigningIn = false;
     }
 
     isAuthenticated(): boolean {
-        return !!this.userIdSource.value;
+        const val = this.userIdSource.value;
+        return !!(val && val.trim() !== '' && val.toUpperCase() === val);
+    }
+
+    getUserId(): string {
+        return this.userIdSource.value || '';
+    }
+
+    getDeviceId(): number {
+        const stored = localStorage.getItem('signal_device_id');
+        return stored ? parseInt(stored, 10) : 1;
     }
 
     async updateProfile(data: { first_name?: string, last_name?: string, short_note?: string, photo_url?: string }) {
@@ -325,8 +454,16 @@ export class AuthService {
         const myId = this.userIdSource.value;
         if (!myId) return false;
 
-        const d = await getDoc(doc(this.db, 'users', myId, 'blocked', targetId));
-        return d.exists();
+        try {
+            const d = await getDoc(doc(this.db, 'users', myId, 'blocked', targetId));
+            return d.exists();
+        } catch (e: any) {
+            // Offline: Assume not blocked to allow app usage
+            if (e.message?.includes('offline') || e.code === 'unavailable') {
+                return false;
+            }
+            throw e;
+        }
     }
 
     async deleteAccount() {
@@ -376,9 +513,9 @@ export class AuthService {
         const pub = await this.crypto.exportKey(keys.publicKey);
         const priv = await this.crypto.exportKey(keys.privateKey);
 
-        // 2. Update Local Storage
-        localStorage.setItem('public_key', pub);
-        localStorage.setItem('private_key', priv);
+        // 2. Update Local Storage -> Secure Storage
+        await this.secureStorage.setItem('public_key', pub);
+        await this.secureStorage.setItem('private_key', priv);
 
         // 3. Sync with Server (Update Device Record)
         await this.registerDevice(userId);

@@ -119,6 +119,22 @@
           </div>
           <div class="bubble-content">
 
+            <!-- v16.0: Decryption State Overlays (No more empty bubbles) -->
+            <div *ngIf="msg.text?.state && msg.text.state !== 'OK'" class="decryption-state-container">
+              <div *ngIf="msg.text.state === 'DECRYPTING'" class="state-decrypting">
+                <ion-spinner name="dots" class="state-spinner"></ion-spinner>
+                <span>Decrypting...</span>
+              </div>
+              <div *ngIf="msg.text.state === 'KEY_MISSING'" class="state-error">
+                <ion-icon name="key-outline"></ion-icon>
+                <span>{{ msg.text.text || 'Key missing for this device' }}</span>
+              </div>
+              <div *ngIf="msg.text.state === 'DECRYPT_FAILED'" class="state-error">
+                <ion-icon name="warning-outline"></ion-icon>
+                <span>Unable to decrypt message</span>
+              </div>
+            </div>
+
             <!-- Forwarded -->
             <div *ngIf="msg.forwarded" class="forwarded-label">
               <ion-icon name="arrow-redo" style="font-size: 10px;"></ion-icon> Forwarded

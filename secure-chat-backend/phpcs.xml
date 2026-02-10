@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<ruleset name="ChatFlect">
+    <description>PSR-12 coding standard for ChatFlect</description>
+    
+    <file>.</file>
+    
+    <exclude-pattern>vendor/*</exclude-pattern>
+    <exclude-pattern>node_modules/*</exclude-pattern>
+    <exclude-pattern>backups/*</exclude-pattern>
+    <exclude-pattern>logs/*</exclude-pattern>
+    
+    <rule ref="PSR12"/>
+    
+    <rule ref="Generic.Files.LineLength">
+        <properties>
+            <property name="lineLimit" value="120"/>
+            <property name="absoluteLineLimit" value="150"/>
+        </properties>
+    </rule>
+    
+    <rule ref="Squiz.Commenting.FunctionComment">
+        <severity>0</severity>
+    </rule>
+</ruleset>

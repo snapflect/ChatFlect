@@ -93,6 +93,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   // Lazy Loading State
   messagesMap = new Map<string, any>();
   isLoadingOlder = false;
+  private lastGeocodeTs = 0;
 
   constructor(
     private route: ActivatedRoute,
@@ -640,39 +641,58 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   async sendMessage() {
-    if (!this.newMessage.trim() || !this.chatId) return;
+    const textToSend = this.newMessage;
+    if (!textToSend.trim() || !this.chatId) return;
 
     // Check if blocked by me
     if (!this.isGroup) {
       const otherId = this.participants.find(p => String(p) !== String(this.currentUserId));
       if (otherId) {
-        const isBlocked = await this.auth.isUserBlocked(otherId);
-        if (isBlocked) {
-          this.showToast("Unblock this contact to send messages.");
-          return;
+        // Use try-catch or non-blocking check if possible, or assume checked on init
+        // For now, keep as is but be aware it might block slightly
+        try {
+          const isBlocked = await this.auth.isUserBlocked(otherId);
+          if (isBlocked) {
+            this.showToast("Unblock this contact to send messages.");
+            return;
+          }
+        } catch (e) {
+          // Ignore block check error if offline
         }
       }
     }
 
-    // Send with Reply Context
-    await this.chatService.sendMessage(
-      this.chatId,
-      this.newMessage,
-      this.currentUserId,
-      this.replyingTo
-    );
-
+    // Optimistic UI: Clear input immediately
     this.newMessage = '';
+    const tempReplyTo = this.replyingTo;
     this.replyingTo = null; // Clear reply context
     this.presence.setTyping(this.chatId, false); // Stop typing immediately
     this.scrollToBottom();
 
-    // Refocus for persistent "notepad" feel
+    // Refocus
     setTimeout(() => {
       if (this.chatInput && this.chatInput.nativeElement) {
         this.chatInput.nativeElement.focus();
       }
     }, 50);
+
+    // Send in background (await but don't hold UI state)
+    try {
+      await this.chatService.sendMessage(
+        this.chatId,
+        textToSend,
+        this.currentUserId,
+        tempReplyTo
+      );
+    } catch (e) {
+      // If failed, restore text? Or just toast error.
+      // Restoring might be annoying if user started typing next message.
+      // Just log/toast.
+      this.logger.error("Message send failed", e);
+      this.showToast("Failed to send message");
+      // Optional: restore text if empty
+      if (!this.newMessage) this.newMessage = textToSend;
+    }
   }
 
   // ... (Reactions, ActionSheet, Media Logic preserved) ... 
@@ -1128,11 +1148,22 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     // Reset input
     event.target.value = '';
 
+    // Safe Clone: Buffer immediately to avoid NotReadableError after async modal delay
+    let safeFile = file;
+    try {
+      const buffer = await file.arrayBuffer();
+      safeFile = new File([buffer], file.name, { type: file.type, lastModified: file.lastModified });
+    } catch (e) {
+      this.logger.error("Failed to buffer media file", e);
+      this.showToast("Failed to read file. Please try again.");
+      return;
+    }
+
     // Open Preview Modal
     const modal = await this.modalController.create({
       component: ImagePreviewModalPage,
       componentProps: {
-        file: file,
+        file: safeFile,
         viewOnceAvailable: true // FEATURE FLAG
       }
     });
@@ -1142,10 +1173,10 @@ export class ChatDetailPage implements OnInit, OnDestroy {
         const caption = result.data.caption || '';
         const viewOnce = result.data.viewOnce || false;
 
-        if (file.type.startsWith('video/')) {
-          await this.handleVideoUpload(file, caption, viewOnce);
+        if (safeFile.type.startsWith('video/')) {
+          await this.handleVideoUpload(safeFile, caption, viewOnce);
         } else {
-          await this.processImageUpload(file, caption, viewOnce);
+          await this.processImageUpload(safeFile, caption, viewOnce);
         }
       }
     });
@@ -1211,12 +1242,21 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'audio/*';
-    input.onchange = (e: any) => {
+    input.onchange = async (e: any) => {
       const file = e.target.files[0];
       if (file && this.chatId) {
-        // 0 duration for file uploads unless we parse it.
-        this.chatService.sendAudioMessage(this.chatId, file, this.currentUserId, 0);
-        this.scrollToBottom();
+        try {
+          // v15.2: Immediate buffering for audio
+          const buffer = await file.arrayBuffer();
+          const safeFile = new File([buffer], file.name, { type: file.type });
+
+          // 0 duration for file uploads unless we parse it.
+          this.chatService.sendAudioMessage(this.chatId, safeFile, this.currentUserId, 0);
+          this.scrollToBottom();
+        } catch (err) {
+          this.logger.error("Failed to buffer audio file", err);
+          this.showToast("Failed to read audio file.");
+        }
       }
     };
     input.click();
@@ -1302,14 +1342,14 @@ export class ChatDetailPage implements OnInit, OnDestroy {
       const image = await Camera.getPhoto({
         quality: 80,
         allowEditing: false,
-        resultType: CameraResultType.Uri,
+        resultType: CameraResultType.Base64, // v15.2: Direct Base64 to avoid fetch failures
+        saveToGallery: false,
         source: CameraSource.Camera
       });
 
-      if (image.webPath && this.chatId) {
-        // Fetch the image blob
-        const response = await fetch(image.webPath);
-        const blob = await response.blob();
+      if (this.chatId && image.base64String) {
+        // Immediate synchronous conversion to Blob
+        const blob = this.b64toBlob(image.base64String, 'image/jpeg');
         const file = new File([blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' });
 
         // Compress and send
@@ -1319,7 +1359,26 @@ export class ChatDetailPage implements OnInit, OnDestroy {
       }
     } catch (e) {
       this.logger.error('Take photo failed', e);
+      this.showToast('Camera capture failed');
     }
+  }
+
+  /**
+   * Helper to convert base64 to Blob without fetch (v15.2 Hardening)
+   */
+  b64toBlob(b64Data: string, contentType = '', sliceSize = 512) {
+    const byteCharacters = atob(b64Data);
+    const byteArrays = [];
+    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+      const slice = byteCharacters.slice(offset, offset + sliceSize);
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i++) {
+        byteNumbers[i] = slice.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      byteArrays.push(byteArray);
+    }
+    return new Blob(byteArrays, { type: contentType });
   }
 
   private async recordVideo() {
@@ -1332,9 +1391,19 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     input.onchange = async (e: any) => {
       const file = e.target.files[0];
       if (file && this.chatId) {
-        // sendVideoMessage args: chatId, videoBlob, senderId, duration, thumbnailBlob, caption
-        await this.chatService.sendVideoMessage(this.chatId, file, this.currentUserId, 0, null, '');
-        this.scrollToBottom();
+        try {
+          // v15.2: Immediate buffering to avoid "NotReadableError"
+          // We read the blob into memory immediately while the input reference is active.
+          const response = await fetch(URL.createObjectURL(file));
+          const bufferedBlob = await response.blob();
+
+          // sendVideoMessage args: chatId, videoBlob, senderId, duration, thumbnailBlob, caption
+          await this.chatService.sendVideoMessage(this.chatId, bufferedBlob, this.currentUserId, 0, null, '');
+          this.scrollToBottom();
+        } catch (err) {
+          this.logger.error('[Chat] Video buffering failed', err);
+          this.showToast('Failed to process video');
+        }
       }
     };
     input.click();
@@ -1370,31 +1439,41 @@ export class ChatDetailPage implements OnInit, OnDestroy {
       }
 
       // 2. Fetch the blob
-      const response = await fetch(blobUrl);
-      const blob = await response.blob();
+      // 2. Resolve File Path (Optimization for Native)
+      let filePathToOpen = '';
+      this.logger.log(`[Chat] Opening document URL: ${blobUrl}`);
 
-      // 3. Convert to base64 for Filesystem
-      const reader = new FileReader();
-      const base64Data = await new Promise<string>((resolve) => {
-        reader.onloadend = () => {
-          const base64 = (reader.result as string).split(',')[1];
-          resolve(base64);
-        };
-        reader.readAsDataURL(blob);
-      });
+      if (blobUrl.includes('_capacitor_file_')) {
+        // It's already a local file, extract path
+        const path = blobUrl.split('_capacitor_file_')[1];
+        // Decode URI component because path might include spaces/special chars
+        filePathToOpen = decodeURIComponent(path);
+      } else {
+        // Blob URL or Web URL -> Fetch and Save
+        const response = await fetch(blobUrl);
+        const blob = await response.blob();
 
-      // 4. Save to device (Persistent Cache)
-      // Use original name or timestamp
-      const fileName = docData.name || 'doc_' + Date.now();
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: base64Data,
-        directory: Directory.Cache
-      });
+        const reader = new FileReader();
+        const base64Data = await new Promise<string>((resolve) => {
+          reader.onloadend = () => {
+            const base64 = (reader.result as string).split(',')[1];
+            resolve(base64);
+          };
+          reader.readAsDataURL(blob);
+        });
 
-      // 5. Open with FileOpener (Directly in correct app)
+        const fileName = docData.name || 'doc_' + Date.now();
+        const savedFile = await Filesystem.writeFile({
+          path: fileName,
+          data: base64Data,
+          directory: Directory.Cache
+        });
+        filePathToOpen = savedFile.uri;
+      }
+
+      // 5. Open with FileOpener
       await FileOpener.open({
-        filePath: savedFile.uri,
+        filePath: filePathToOpen,
         contentType: docData.mime || 'application/octet-stream'
       });
 
@@ -1411,7 +1490,8 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   // --- Voice Recording ---
-  isRecording = false;
+  recordingState: 'IDLE' | 'STARTING' | 'RECORDING' | 'STOPPING' | 'FAILED' = 'IDLE';
+  isRecording = false; // Legacy guard kept for UI compatibility
   recordDuration = 0;
   private recordInterval: any;
 
@@ -1468,49 +1548,94 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   async recordAudio() {
+    // 🔒 Immediate JS guard - R1
+    if (this.recordingState !== 'IDLE' && this.recordingState !== 'FAILED') {
+      return;
+    }
+
     // 1. Permission Check
     const hasPerm = await this.recordingService.hasPermission();
     if (!hasPerm) {
       const granted = await this.recordingService.requestPermission();
       if (!granted) {
-        // Show alert?
         this.logger.error("Permission denied");
         return;
       }
     }
 
-    // 2. Start Recording
+    // 2. R4: startRecording Is Always Pre-normalized
+    // Defensive reset of native recorder
+    await this.recordingService.safeStopRecording();
+
+    // 3. Start Recording
     try {
-      await this.recordingService.startRecording();
+      this.recordingState = 'STARTING';
       this.isRecording = true;
+      this.recordCancelled = false;
       this.recordDuration = 0;
+
+      await this.recordingService.startRecording();
+
+      this.recordingState = 'RECORDING';
       this.recordInterval = setInterval(() => {
-        this.recordDuration++;
+        this.zone.run(() => {
+          this.recordDuration++;
+        });
       }, 1000);
-    } catch (e) {
-      this.logger.error("Start Recording Failed", e);
+    } catch (e: any) {
+      // R5/R6: Native errors are NOT exceptional, fallback to FAILED observability
+      this.recordingState = 'FAILED';
+      this.isRecording = false;
+      clearInterval(this.recordInterval);
+
+      if (e?.message !== 'ALREADY_RECORDING') {
+        this.logger.warn("[Recording] Start failed, recovered safely", e);
+      }
     }
   }
 
   async stopRecording(send: boolean) {
-    clearInterval(this.recordInterval);
+    // 🔐 R3: JS cleanup FIRST (never trust native)
+    this.recordingState = 'STOPPING';
     this.isRecording = false;
+    clearInterval(this.recordInterval);
 
     try {
-      const result = await this.recordingService.stopRecording();
+      // 🔎 R2: stopRecording MUST be Idempotent
+      const res = await this.recordingService.safeStopRecording();
 
-      if (send && result.value.recordDataBase64) {
-        // Upload & Send
-        const base64 = result.value.recordDataBase64;
-        const mime = result.value.mimeType;
-        // Convert Base64 to Blob
-        const res = await fetch(`data:${mime};base64,${base64}`);
-        const blob = await res.blob();
+      if (!res.ok) {
+        this.recordingState = 'FAILED';
+        this.logger.warn('[Recording] Native stop failed, recovered safely');
+        return;
+      }
 
-        await this.uploadAudio(blob, Math.round(result.value.msDuration / 1000));
+      this.recordingState = 'IDLE';
+
+      if (send && res.value?.recordDataBase64) {
+        await this.handleRecordedFile(res.value);
       }
     } catch (e) {
-      this.logger.error("Stop Recording Failed", e);
+      this.recordingState = 'FAILED';
+      this.logger.error("[Recording] Unexpected stop failure", e);
+    }
+  }
+
+  /**
+   * v15.3: Process the captured audio result
+   */
+  private async handleRecordedFile(value: any) {
+    try {
+      const base64 = value.recordDataBase64;
+      const mime = value.mimeType;
+      // Convert Base64 to Blob 
+      const res = await fetch(`data:${mime};base64,${base64}`);
+      const blob = await res.blob();
+
+      await this.uploadAudio(blob, Math.round(value.msDuration / 1000));
+    } catch (e) {
+      this.logger.error("[Recording] Failed to process audio result", e);
+      this.showToast("Failed to process recording");
     }
   }
 
@@ -1608,52 +1733,137 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
   async shareLocation() {
     try {
-      const hasPerm = await Geolocation.checkPermissions();
-      if (hasPerm.location !== 'granted') {
+      // 1. Permission Check
+      const perm = await Geolocation.checkPermissions();
+      if (perm.location !== 'granted') {
         const req = await Geolocation.requestPermissions();
-        if (req.location !== 'granted') return;
+        if (req.location !== 'granted') {
+          this.showToast("Location permission is required to share location.");
+          return;
+        }
       }
 
-      const position = await Geolocation.getCurrentPosition();
+      // 2. Get Position (Handle disabled services)
+      const position = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10000
+      });
+
       if (position && position.coords) {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
 
-        // Reverse geocode to get address label
-        const label = await this.reverseGeocode(lat, lng);
+        // 3. Generate Map Preview
+        // Fetch the static map image to show in preview
+        const mapUrl = this.getStaticMapUrl(lat, lng);
 
-        await this.chatService.sendLocationMessage(
-          this.chatId!,
-          lat,
-          lng,
-          this.currentUserId,
-          label
-        );
-        this.scrollToBottom();
+        let mapBlob: Blob | null = null;
+        try {
+          const res = await fetch(mapUrl);
+          mapBlob = await res.blob();
+        } catch (e) {
+          this.logger.warn("Failed to fetch map preview", e);
+          // Fallback: Proceed without preview or assume confirmed?
+          // Let's create a dummy blob or just proceed to send if preview fails
+        }
+
+        if (mapBlob) {
+          // 4. Show Preview Modal
+          const modal = await this.modalController.create({
+            component: ImagePreviewModalPage,
+            componentProps: {
+              file: mapBlob,
+              viewOnceAvailable: false // Location doesn't need view once logic usually
+            }
+          });
+
+          modal.onDidDismiss().then(async (result) => {
+            if (result.data && result.data.confirmed) {
+              // 5. Send Location Message (NOT Image)
+              const label = await this.reverseGeocode(lat, lng);
+              await this.chatService.sendLocationMessage(
+                this.chatId!,
+                lat,
+                lng,
+                this.currentUserId,
+                label
+              );
+              this.scrollToBottom();
+            }
+          });
+
+          await modal.present();
+        } else {
+          // Fallback if preview fails: Just send
+          const label = await this.reverseGeocode(lat, lng);
+          await this.chatService.sendLocationMessage(this.chatId!, lat, lng, this.currentUserId, label);
+          this.scrollToBottom();
+        }
       }
-    } catch (e) {
-      this.logger.error("Loc Error", e);
+    } catch (e: any) {
+      // Handle "Location services are not enabled"
+      if (e.message?.includes('Location services are not enabled') || e.message?.includes('location disabled')) {
+        const alert = await this.alertCtrl.create({
+          header: 'Location Disabled',
+          message: 'Please enable Location Services in your device settings to share your location.',
+          buttons: ['OK']
+        });
+        await alert.present();
+      } else {
+        this.logger.error("Location Error", e);
+        this.showToast("Failed to access location.");
+      }
     }
   }
 
 
+
+  private async throttleGeocode() {
+    const now = Date.now();
+    const delta = now - this.lastGeocodeTs;
+    if (delta < 1100) {
+      await new Promise(r => setTimeout(r, 1100 - delta));
+    }
+    this.lastGeocodeTs = Date.now();
+  }
+
+  private formatCoordinates(lat: number, lng: number): string {
+    return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  }
+
   async reverseGeocode(lat: number, lng: number): Promise<string> {
     try {
-      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`;
+      await this.throttleGeocode();
+      const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
       const response = await fetch(url, {
-        headers: { 'User-Agent': 'ChatFlect/1.0' }
+        headers: {
+          'User-Agent': 'SnapFlect/1.5.2 (support@snapflect.com)',
+          'Accept': 'application/json',
+          'Accept-Language': 'en'
+        }
       });
-      const data = await response.json();
-      if (data.display_name) {
-        // Extract shorter version (city, country)
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        console.debug('[Geocode] Non-JSON response, falling back to coordinates');
+        return this.formatCoordinates(lat, lng);
+      }
+
+      const text = await response.text();
+      const data = JSON.parse(text);
+      if (data && data.address) {
         const address = data.address || {};
-        const parts = [address.city || address.town || address.village, address.country].filter(Boolean);
-        return parts.join(', ') || data.display_name.split(',').slice(0, 2).join(',');
+        const parts = [
+          address.city || address.town || address.village || address.suburb,
+          address.state || address.country
+        ].filter(Boolean);
+
+        return parts.length > 0 ? parts.join(', ') : (data.display_name ? data.display_name.split(',').slice(0, 2).join(',') : this.formatCoordinates(lat, lng));
       }
     } catch (e) {
-      this.logger.error("Geocode failed", e);
+      console.debug('[Geocode] Reverse lookup failed, using coordinates', e);
     }
-    return 'Shared Location';
+    return this.formatCoordinates(lat, lng);
   }
 
   viewLiveMap() {
@@ -1827,34 +2037,22 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   }
 
   isImage(text: any): boolean {
-    return (typeof text === 'object' && text !== null && text.type === 'image');
+    return (typeof text === 'object' && text !== null && text.type === 'image' && (!text.state || text.state === 'OK'));
   }
 
   isMedia(text: any): boolean {
-    return (typeof text === 'object' && text !== null && ['image', 'audio', 'document'].includes(text.type));
+    return (typeof text === 'object' && text !== null && ['image', 'audio', 'document', 'video'].includes(text.type) && (!text.state || text.state === 'OK'));
   }
 
   getMsgType(text: any): string {
     if (typeof text === 'object' && text !== null) {
+      if (text.state && text.state !== 'OK') return 'decrypt_state'; // v16.0: Priority for decryption errors
       if (text.type) return text.type;
       if (text.lat && text.lng) return text.expiresAt ? 'live_location' : 'location';
       if (text.url || text.file_url) return 'image';
       return 'unknown';
     }
-    if (typeof text === 'string') {
-      if (text === 'live_location') return 'live_location';
-      if (text === 'location') return 'location';
-      if (text.startsWith('{')) {
-        try {
-          let parsed = JSON.parse(text);
-          if (typeof parsed === 'string' && parsed.startsWith('{')) {
-            try { parsed = JSON.parse(parsed); } catch (e) { }
-          }
-          if (parsed.type) return parsed.type;
-          if (parsed.lat && parsed.lng) return parsed.expiresAt ? 'live_location' : 'location';
-        } catch (e) { }
-      }
-    }
+    // ... string handling ...
     return 'text';
   }
 

@@ -5,6 +5,9 @@ require_once 'auth_middleware.php';
 
 // Enforce rate limiting
 enforceRateLimit();
+
+// SECURITY FIX (J9): Enforce authentication for status updates
+$authUserId = requireAuth();
 /* ---------- URL NORMALIZATION HELPERS ---------- */
 function getBaseUrl(): string
 {

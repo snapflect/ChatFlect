@@ -1,154 +1,140 @@
-import { Injectable } from '@angular/core';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, onSnapshot, updateDoc, deleteField, serverTimestamp } from 'firebase/firestore';
-import { environment } from 'src/environments/environment';
-import { AppState } from '@capacitor/app';
-import { Observable, BehaviorSubject } from 'rxjs';
-import { LoggingService } from './logging.service';
+import { Injectable, OnDestroy } from '@angular/core';
+import { ApiService } from './api.service';
+import { AuthService } from './auth.service';
+import { Observable, Subscription } from 'rxjs';
 
 @Injectable({
     providedIn: 'root'
 })
-export class PresenceService {
-    private db: any;
+export class PresenceService implements OnDestroy {
     private myId: string | null = null;
+    private deviceUuid: string | null = null;
 
-    // Throttling & State Tracking (v10)
-    private lastPresenceState: string | null = null;
-    private lastPresenceWriteTime: number = 0;
-    private readonly HEARTBEAT_INTERVAL = 600000; // 10 minutes (Firestore Cost Optimization)
+    // Heartbeat State
+    private heartbeatInterval: any = null;
+    private isVisible = true;
+    private readonly FG_INTERVAL = 30000; // 30s
+    private readonly BG_INTERVAL = 90000; // 90s (Battery Optimization)
 
-    private lastTypingWriteTime: Map<string, number> = new Map();
-    private readonly TYPING_THROTTLE_MS = 15000; // 15 seconds
+    // Typing State
+    private typingDebounceTimer: any = null;
+    private lastTypingSent = 0;
+    private readonly TYPING_THROTTLE_MS = 10000; // 10s server guard
 
-    constructor(private logger: LoggingService) {
-        const app = initializeApp(environment.firebase);
-        this.db = getFirestore(app);
-        this.myId = localStorage.getItem('user_id');
+    private authSub: Subscription;
+
+    constructor(
+        private api: ApiService, // Handles token injection automatically
+        private auth: AuthService
+    ) {
+        this.authSub = this.auth.currentUserId.subscribe(uid => {
+            this.myId = uid;
+            if (uid) {
+                this.initPresenceTracking();
+            } else {
+                this.stopPresenceTracking();
+            }
+        });
+
+        this.deviceUuid = localStorage.getItem('device_uuid');
     }
 
-    /**
-     * Initialize automatic presence tracking (v10)
-     */
+    ngOnDestroy() {
+        this.stopPresenceTracking();
+        this.authSub?.unsubscribe();
+    }
+
     initPresenceTracking() {
         if (!this.myId) return;
 
-        // 1. Initial online status
-        this.setPresence('online');
+        // Visibility Listener
+        document.addEventListener('visibilitychange', this.handleVisibilityChange);
 
-        // 2. Listen for App State changes
-        const { App } = require('@capacitor/app');
-        App.addListener('appStateChange', (state: { isActive: boolean }) => {
-            if (state.isActive) {
-                this.setPresence('online');
-            } else {
-                this.setPresence('offline');
-            }
-        });
-
-        // 3. Heartbeat-based presence reconciliation (v10)
-        // Convergence: If app crashes/network drops, heartbeat expires on server.
-        setInterval(() => {
-            if (this.lastPresenceState === 'online') {
-                this.setPresence('online', true); // Force heartbeat even if state same
-            }
-        }, this.HEARTBEAT_INTERVAL);
+        // Start Heartbeat
+        this.isVisible = document.visibilityState === 'visible';
+        this.updatePresence('online');
+        this.restartHeartbeat();
     }
 
-    // Set Global Online Status
-    async setPresence(status: 'online' | 'offline', isHeartbeat: boolean = false) {
+    private stopPresenceTracking() {
+        document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+        if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+        this.heartbeatInterval = null;
+    }
+
+    private handleVisibilityChange = () => {
+        const wasVisible = this.isVisible;
+        this.isVisible = document.visibilityState === 'visible';
+
+        if (this.isVisible !== wasVisible) {
+            this.restartHeartbeat();
+            if (this.isVisible) {
+                this.updatePresence('online');
+            }
+        }
+    }
+
+    private restartHeartbeat() {
+        if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+
+        // Stop if offline
+        if (!navigator.onLine || !this.myId) return;
+
+        const interval = this.isVisible ? this.FG_INTERVAL : this.BG_INTERVAL;
+
+        console.log(`[Presence] Heartbeat interval: ${interval}ms`);
+
+        this.heartbeatInterval = setInterval(() => {
+            this.updatePresence('online');
+        }, interval);
+    }
+
+    // Main Update Method
+    async updatePresence(status: 'online' | 'offline', typingInChat?: string) {
         if (!this.myId) return;
 
-        const now = Date.now();
-        // Optimization: Avoid redundant writes if state hasn't changed, unless it's a heartbeat (v10)
-        if (!isHeartbeat && status === this.lastPresenceState && (now - this.lastPresenceWriteTime < 60000)) {
-            return;
+        // ApiService handles Auth header
+        const payload: any = { status };
+        if (typingInChat !== undefined) {
+            payload.typing_in = typingInChat;
         }
 
         try {
-            const userStatusRef = doc(this.db, 'status', this.myId);
-            const payload = {
-                state: status,
-                last_changed: serverTimestamp(),
-                platform: 'mobile',
-                heartbeat: serverTimestamp() // v10: Server-side TTL hint
-            };
-            await setDoc(userStatusRef, payload, { merge: true });
-
-            this.lastPresenceState = status;
-            this.lastPresenceWriteTime = now;
+            await this.api.post('presence/update.php', payload).toPromise();
         } catch (e) {
-            this.logger.error('Error setting presence', e);
+            console.warn('[Presence] Update failed', e);
         }
     }
 
-    // Watch another user's status
-    getPresence(userId: string): Observable<any> {
-        return new Observable(observer => {
-            const docRef = doc(this.db, 'status', userId);
-            const unsub = onSnapshot(docRef, (doc) => {
-                observer.next(doc.data() || { state: 'offline' });
-            });
-            return () => unsub();
-        });
-    }
+    // Typing Logic
+    setTyping(chatId: string, isTyping: boolean) {
+        if (this.typingDebounceTimer) clearTimeout(this.typingDebounceTimer);
 
-    /**
-     * Typing Indicators (v10): Throttled to 1 write / 15s per chat
-     */
-    async setTyping(chatId: string, isTyping: boolean) {
-        if (!this.myId) return;
-
-        const now = Date.now();
-        const lastWrite = this.lastTypingWriteTime.get(chatId) || 0;
-
-        // Throttle check for 'true' status. 'false' (cleanup) always permitted.
-        if (isTyping && (now - lastWrite < this.TYPING_THROTTLE_MS)) {
-            return;
-        }
-
-        try {
-            const chatRef = doc(this.db, 'chats', chatId);
-            if (isTyping) {
-                await updateDoc(chatRef, {
-                    [`typing.${this.myId}`]: serverTimestamp()
-                });
-                this.lastTypingWriteTime.set(chatId, now);
-            } else {
-                await updateDoc(chatRef, {
-                    [`typing.${this.myId}`]: deleteField()
-                });
-                this.lastTypingWriteTime.delete(chatId);
+        if (isTyping) {
+            // Throttled Send
+            const now = Date.now();
+            if (now - this.lastTypingSent > this.TYPING_THROTTLE_MS) {
+                this.updatePresence('online', chatId);
+                this.lastTypingSent = now;
             }
-        } catch (e) { }
-    }
 
-    private typingDebounceTimer: any = null;
-
-    /**
-     * High-performance debounced typing indicator (v10 Throttled)
-     */
-    sendTypingDebounced(chatId: string) {
-        if (this.typingDebounceTimer) {
-            clearTimeout(this.typingDebounceTimer);
+            // Auto-clear safety
+            this.typingDebounceTimer = setTimeout(() => {
+                this.setTyping(chatId, false);
+            }, 5000); // 5s ephemeral per request
+        } else {
+            this.updatePresence('online', ''); // Clear typing
+            this.lastTypingSent = 0;
         }
-
-        this.setTyping(chatId, true);
-
-        this.typingDebounceTimer = setTimeout(() => {
-            this.setTyping(chatId, false);
-            this.typingDebounceTimer = null;
-        }, 5000); // Reset after 5s of inactivity
     }
 
-    /**
-     * Force clear typing (e.g. after sending message)
-     */
     clearTyping(chatId: string) {
-        if (this.typingDebounceTimer) {
-            clearTimeout(this.typingDebounceTimer);
-            this.typingDebounceTimer = null;
-        }
         this.setTyping(chatId, false);
+    }
+
+    // Phase 19.2: Batch Query Implementation
+    // To be used by Contact List or Chat List
+    getPresenceBatch(userIds: string[]): Observable<any> {
+        return this.api.post('presence/query.php', { user_ids: userIds });
     }
 }

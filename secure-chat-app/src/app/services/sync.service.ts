@@ -76,6 +76,7 @@ export class SyncService {
                         }
                     } else {
                         // Standard Retry (Backoff logic could go here)
+                        this.logger.warn("OUTBOX_FLUSH_RETRY", { id: item.id, error: err.message });
                         await this.storage.incrementOutboxRetry(item.id);
                         // Break queue processing on generic error to preserve order
                         break;
