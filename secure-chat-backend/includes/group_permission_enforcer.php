@@ -62,7 +62,12 @@ class GroupPermissionEnforcer
 
     public function logAction($groupId, $userId, $action, $details = [])
     {
-        $stmt = $this->pdo->prepare("INSERT INTO group_audit_logs (group_id, actor_user_id, action_type, details) VALUES (?, ?, ?, ?)");
-        $stmt->execute([$groupId, $userId, $action, json_encode($details)]);
+        // Unifying with legacy group_audit_log (Epic 43)
+        // Table: group_audit_log (group_id, actor_user_id, target_user_id, action, metadata)
+        // Map details to metadata
+        $targetId = $details['target_user_id'] ?? $details['target'] ?? null;
+
+        $stmt = $this->pdo->prepare("INSERT INTO group_audit_log (group_id, actor_user_id, target_user_id, action, metadata) VALUES (?, ?, ?, ?, ?)");
+        $stmt->execute([$groupId, $userId, $targetId, $action, json_encode($details)]);
     }
 }
