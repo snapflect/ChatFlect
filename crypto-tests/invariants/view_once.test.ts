@@ -20,7 +20,7 @@ function markViewed(msgId: number) {
     if (!msg) return;
 
     if (msg.is_view_once) {
-        msg.content = null as any; // Burn
+        msg.content = null as any; // Cast to any to bypass string type check for test mock
         msg.viewed_at = new Date() as any;
     }
 }
