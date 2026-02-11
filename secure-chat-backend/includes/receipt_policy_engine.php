@@ -18,16 +18,25 @@ class ReceiptPolicyEngine
 
     public function shouldSendReadReceipt($userId)
     {
-        // 1. Check Org Policy Override
-        // We need user's Org ID. 
-        // Mocking Org Lookup or fetch from users table.
+        // HF-83.3 Abuse Prevention Hook
+        // If traffic padding policy for this user is 'HIGH' (Suspicious), force-off receipts to minimize leakage?
+        // Let's assume we can check `TrafficPadder` context or similar service.
+        // For now, simple placeholder:
+        // if (TrafficPadder::getPolicyLevel($userId) === 'HIGH') return false;
+
+        // 1. Check Org Policy Override (With Caching)
+        // $cacheKey = "org_policy:read_receipts:$userId";
+        // if ($cached = $this->cache->get($cacheKey)) return ($cached === 'FORCE_ON');
+
+        // Mock Org Lookup for HF-83.1
         // $userOrg = $this->getUserOrg($userId);
         // if ($userOrg) {
         //    $policy = $this->getOrgPolicy($userOrg, 'READ_RECEIPTS');
+        //    // Cache result
+        //    // $this->cache->set($cacheKey, $policy, 300);
         //    if ($policy === 'FORCE_OFF') return false;
         //    if ($policy === 'FORCE_ON') return true;
         // }
-        // For MVP/Epic 83, we assume no Override active or implement simple check if table populated.
 
         // 2. Check User Preference
         $settings = $this->privacyEngine->getSettings($userId);

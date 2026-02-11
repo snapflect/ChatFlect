@@ -32,4 +32,9 @@ assert.strictEqual(engine.shouldSend('userB'), false, 'Disabled user suppresses 
 // Case C: Org Override
 assert.strictEqual(engine.shouldSend('userC'), false, 'Org Policy overrides user preference');
 
+// Case D: Abuse Prevention (Mock)
+// Assuming abuse prevention Logic forces off
+// In mock, let's say userD is flagged
+// assert.strictEqual(engine.shouldSend('userD'), false);
+
 console.log('✅ Read Receipt Invariants Verified');
