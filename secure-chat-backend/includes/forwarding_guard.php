@@ -16,19 +16,30 @@ class ForwardingGuard
      * Check if forwarding is allowed based on source score and recipient count.
      * @param int $sourceScore The forwarding score of the ORIGINAL message.
      * @param int $recipientCount How many people we are forwarding to.
+     * @param string|null $orgId Optional Org ID for policy override.
      * @throws Exception if limit exceeded.
      */
-    public function checkLimit(int $sourceScore, int $recipientCount): void
+    public function checkLimit(int $sourceScore, int $recipientCount, $orgId = null): void
     {
-        // Global Hard Limit (WhatsApp style)
-        if ($recipientCount > self::LIMIT_NORMAL) {
-            throw new Exception("FORWARD_LIMIT_EXCEEDED: Max " . self::LIMIT_NORMAL . " recipients allowed.");
+        $limitNormal = self::LIMIT_NORMAL;
+        $limitFrequent = self::LIMIT_FREQUENT;
+
+        // HF-84.3: Org Policy Override
+        if ($orgId) {
+            // Mock fetching from DB or JSON
+            // $policy = OrgPolicyManager::getPolicy($orgId, 'forwarding');
+            // $limitNormal = $policy['limit_normal'] ?? self::LIMIT_NORMAL;
+        }
+
+        // Global Hard Limit
+        if ($recipientCount > $limitNormal) {
+            throw new Exception("FORWARD_LIMIT_EXCEEDED: Max $limitNormal recipients allowed.");
         }
 
         // Check Frequently Forwarded Status
         if ($this->isFrequentlyForwarded($sourceScore)) {
-            if ($recipientCount > self::LIMIT_FREQUENT) {
-                throw new Exception("FREQUENTLY_FORWARDED_LIMIT: Max " . self::LIMIT_FREQUENT . " recipient for frequently forwarded messages.");
+            if ($recipientCount > $limitFrequent) {
+                throw new Exception("FREQUENTLY_FORWARDED_LIMIT: Max $limitFrequent recipient for frequently forwarded messages.");
             }
         }
     }

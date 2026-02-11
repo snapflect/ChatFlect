@@ -29,6 +29,14 @@ try {
     $convIdBin = hex2bin($convId);
     $content = $input['content']; // Encrypted Blob
 
+    // HF-84: Hardening - Prevent Client Manipulation of Score
+    if (isset($input['forwarding_score'])) {
+        unset($input['forwarding_score']);
+        // Verify we don't accidentally use it. 
+        // The DB default 0 is what we want for NEW messages.
+        // Forwarded messages use `forward.php`.
+    }
+
     // HF-74.3: Traffic Padding & HF-74.4: Policy
     require_once __DIR__ . '/../../includes/traffic_padding.php';
 

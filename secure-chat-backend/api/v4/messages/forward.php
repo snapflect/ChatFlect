@@ -38,7 +38,9 @@ if ($count === 0) {
 }
 
 try {
-    $guard->checkLimit((int) $meta['forwarding_score'], $count);
+    // Note: $user['org_id'] should be available from authenticate() if joined.
+    $orgId = $user['org_id'] ?? null;
+    $guard->checkLimit((int) $meta['forwarding_score'], $count, $orgId);
 } catch (Exception $e) {
     http_response_code(403);
     echo json_encode(['error' => 'FORWARD_LIMIT', 'message' => $e->getMessage()]);
