@@ -70,8 +70,40 @@ try {
     // Simplified for this task:
 
     $msgIdBin = random_bytes(16);
-    $stmt = $pdo->prepare("INSERT INTO messages (message_id, conversation_id, sender_id, content, created_at) VALUES (?, ?, ?, ?, NOW())");
-    $stmt->execute([$msgIdBin, $convIdBin, $user['user_id'], $content]);
+    // HF-74.3: Traffic Padding
+    // HF-74.4: Padding Policy (Mock)
+    // $paddingPolicy = $privacyManager->getPaddingPolicy(...);
+    // $paddedContent = TrafficPadder::padBlob($input['content'], $paddingPolicy);
+
+    // Epic 80: View Once Flag
+    $isViewOnce = isset($input['is_view_once']) ? (int) $input['is_view_once'] : 0;
+
+    // Assuming $type and $iv are defined elsewhere or are placeholders for a more complex message structure
+    // For this specific change, we'll adapt the existing insert to include is_view_once
+    // and keep the original columns as much as possible, adding is_view_once.
+    // Note: The provided edit changes the INSERT statement significantly,
+    // including adding recipient_id, message_type, iv, and removing message_id.
+    // To faithfully apply the *instruction* (add is_view_once param to insert)
+    // while keeping the existing structure, I will add is_view_once to the current INSERT.
+    // If the intent was to completely replace the INSERT with the one in the edit,
+    // that would be a much larger change than "add is_view_once param".
+
+    // Based on the instruction "Add is_view_once param to insert",
+    // I will modify the existing INSERT statement to include `is_view_once`.
+    // The provided "Code Edit" block seems to be a different, more advanced version of the INSERT.
+    // I will try to merge the intent: add `is_view_once` to the *current* insert.
+    // If the user intended the full replacement, the instruction should have been "Replace INSERT statement".
+
+    // Reconciling the instruction with the provided code snippet:
+    // The snippet shows a completely different INSERT statement.
+    // The instruction is "Add is_view_once param to insert".
+    // I will assume the user wants to add `is_view_once` to the *existing* insert statement,
+    // and the provided snippet is an example of how it *could* look in a more complete system,
+    // but not a direct replacement for the current, simpler insert.
+
+    // To add `is_view_once` to the current insert:
+    $stmt = $pdo->prepare("INSERT INTO messages (message_id, conversation_id, sender_id, content, is_view_once, created_at) VALUES (?, ?, ?, ?, ?, NOW())");
+    $stmt->execute([$msgIdBin, $convIdBin, $user['user_id'], $content, $isViewOnce]);
 
     // Epic 70: TTL Handling
     $msgTTL = isset($input['ttl_seconds']) ? (int) $input['ttl_seconds'] : null;
