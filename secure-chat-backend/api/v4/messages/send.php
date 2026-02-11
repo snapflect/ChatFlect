@@ -48,6 +48,23 @@ try {
     // Let's assume we can get participants.
 
     require_once __DIR__ . '/../../includes/verification_manager.php';
+    require_once __DIR__ . '/../../includes/group_permission_enforcer.php';
+
+    // Epic 82: Group Permissions (Admins Only Send)
+    // Assuming we can detect if convId is a GROUP.
+    // If we don't have is_group flag in input, we might need lookup.
+    // For now, assume convId -> group_id mapping exists or usage of Group ID table.
+    // Let's try lookup on 'top' of flow if needed, but here:
+    // Simple check: `groups` table usually has `group_id` = `conversation_id` (if 1:1 mapping used)
+    // OR messages table links to `conversation_id`.
+
+    $gpe = new GroupPermissionEnforcer($pdo);
+    if (!$gpe->canSendMessage($convIdBin, $user['user_id'])) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Only admins can send messages in this group']);
+        exit;
+    }
+
     $vm = new VerificationManager($pdo);
 
     // Mock getting participant:
