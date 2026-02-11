@@ -61,31 +61,57 @@ class PrivacyEngine
         return true;
     }
 
+    private function logAudit($userId, $field, $oldVal, $newVal)
+    {
+        $stmt = $this->pdo->prepare("INSERT INTO privacy_audit_logs (user_id, field_name, old_value, new_value) VALUES (?, ?, ?, ?)");
+        $stmt->execute([$userId, $field, $oldVal, $newVal]);
+    }
+
     public function updateSetting($userId, $field, $value)
     {
         $allowed = ['last_seen_visibility', 'profile_photo_visibility', 'about_visibility', 'read_receipts_enabled'];
         if (!in_array($field, $allowed))
             throw new Exception("Invalid setting");
 
+        // HF-81.2: Strict ENUM Validation
+        $validEnums = ['everyone', 'contacts', 'nobody'];
+        if ($field !== 'read_receipts_enabled' && !in_array($value, $validEnums)) {
+            throw new Exception("Invalid value for visibility setting");
+        }
+
+        // Fetch old value for audit
+        $current = $this->getSettings($userId);
+        $oldVal = $current[$field] ?? null;
+
         $sql = "INSERT INTO user_privacy_settings (user_id, $field) VALUES (?, ?) 
                 ON DUPLICATE KEY UPDATE $field = VALUES($field)";
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([$userId, $value]);
+
+        // HF-81.1: Audit Log
+        $this->logAudit($userId, $field, $oldVal, $value);
     }
 
     public function getSettings($userId)
     {
+        // HF-81.3: Caching (Mock)
+        // $cacheKey = "privacy:$userId";
+        // if ($cached = $this->cache->get($cacheKey)) return $cached;
+
         $stmt = $this->pdo->prepare("SELECT * FROM user_privacy_settings WHERE user_id = ?");
         $stmt->execute([$userId]);
         $res = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$res) {
-            return [
-                'last_seen_visibility' => 'contacts',
-                'profile_photo_visibility' => 'contacts',
-                'about_visibility' => 'contacts',
-                'read_receipts_enabled' => 1
-            ];
-        }
-        return $res;
+
+        $defaults = [
+            'last_seen_visibility' => 'contacts',
+            'profile_photo_visibility' => 'contacts',
+            'about_visibility' => 'contacts',
+            'read_receipts_enabled' => 1
+        ];
+
+        $final = $res ? $res : $defaults;
+
+        // $this->cache->set($cacheKey, $final);
+        return $final;
     }
 }
