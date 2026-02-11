@@ -1,9 +1,10 @@
 <?php
 // api/v4/messages/view_receipt.php
-require_once __DIR__ . '/../../includes/auth_middleware.php';
-require_once __DIR__ . '/../../includes/view_once_manager.php';
+require_once __DIR__ . '/../../auth_middleware.php';
+require_once __DIR__ . '/../../../includes/view_once_manager.php';
+require_once __DIR__ . '/../../../includes/receipt_policy_engine.php'; // Corrected path
 
-$user = authenticate();
+$userId = requireAuth(); // Returns string
 $input = json_decode(file_get_contents('php://input'), true);
 
 if (!isset($input['message_id']) || !isset($input['sender_id'])) {
@@ -13,12 +14,9 @@ if (!isset($input['message_id']) || !isset($input['sender_id'])) {
 }
 
 try {
-    // Epic 80: View Receipt
-// Epic 83: Read Receipt Toggle Check
-    require_once __DIR__ . '/../../includes/receipt_policy_engine.php';
-
+    // Epic 80 & 83: Read Receipt Logic
     $rpe = new ReceiptPolicyEngine($pdo);
-    if (!$rpe->shouldSendReadReceipt($user['user_id'])) {
+    if (!$rpe->shouldSendReadReceipt($userId)) {
         // Suppress BLUE TICK. 
         // BUT: Does this also suppress "Burn on Read" for View Once?
         // CRITICAL: View Once MUST burn regardless of "Blue Tick" setting.
@@ -48,7 +46,7 @@ try {
     // 2. Call Manager
     $vom = new ViewOnceManager($pdo);
     // Client sends this when they OPEN the message
-    $burned = $vom->markViewed($input['message_id'], $user['user_id'], $input['sender_id']);
+    $burned = $vom->markViewed($input['message_id'], $userId, $input['sender_id']);
 
     if ($burned) {
         echo json_encode(['success' => true, 'status' => 'burned']);
