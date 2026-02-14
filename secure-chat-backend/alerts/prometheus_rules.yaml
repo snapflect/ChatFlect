@@ -1,0 +1,20 @@
+groups:
+  - name: chatflect-alerts
+    rules:
+      - alert: BackendDown
+        expr: chatflect_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ChatFlect Backend is Down"
+          description: "Health check failed for more than 1 minute."
+
+      - alert: LowPrekeys
+        expr: chatflect_prekeys_total < 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low Prekey Count"
+          description: "Server is running low on cryptographic prekeys."
