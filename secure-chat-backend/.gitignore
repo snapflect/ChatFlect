@@ -6,6 +6,8 @@ service-account.json
 *-service-account.json
 *.key
 *.pem
+benchmark/tokens.json
+benchmark/*.log
 
 # Logs
 logs/
