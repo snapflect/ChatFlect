@@ -1,0 +1,13 @@
+# /etc/logrotate.d/chatflect-backend
+# Epic 98-HF: Log Rotation Policy
+
+/var/www/html/logs/*.json.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 www-data www-data
+    su www-data www-data
+}
