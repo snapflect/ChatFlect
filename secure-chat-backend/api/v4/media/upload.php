@@ -2,11 +2,12 @@
 // api/v4/media/upload.php
 // Epic 75: Upload Encrypted Blob
 
-require_once __DIR__ . '/../../includes/auth_middleware.php';
+require_once __DIR__ . '/../../../api/auth_middleware.php';
 require_once __DIR__ . '/../../includes/attachment_manager.php';
 require_once __DIR__ . '/../../includes/attachment_encryptor.php';
 
-$user = authenticate();
+$authData = requireAuth();
+$userId = $authData['user_id'];
 
 // Expect Multipart/Form-Data
 // Fields: attachment_id, sha256_hash, mime_type, file (blob)

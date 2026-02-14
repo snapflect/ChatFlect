@@ -1,9 +1,11 @@
 <?php
 // api/v4/broadcast/create.php
-require_once __DIR__ . '/../../includes/auth_middleware.php';
+require_once __DIR__ . '/../../../api/auth_middleware.php';
 require_once __DIR__ . '/../../includes/broadcast_manager.php';
+require_once __DIR__ . '/../../includes/rate_limiter.php'; // Explicit inclusion
 
-$user = authenticate();
+$authData = requireAuth();
+$userId = $authData['user_id'];
 $input = json_decode(file_get_contents('php://input'), true);
 
 try {
