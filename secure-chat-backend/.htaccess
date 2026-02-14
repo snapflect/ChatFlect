@@ -2,6 +2,9 @@
 # ChatFlect API - CORS & Delivery
 # ================================
 
+# Security Hardening (Epic 87-HF)
+php_flag display_errors Off
+
 # ----------------
 # GLOBAL CORS & PREFLIGHT (CRITICAL for Mobile/Capacitor)
 # ----------------
