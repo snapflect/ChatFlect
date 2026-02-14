@@ -1,0 +1,75 @@
+# Staging Environment Overrides
+# Epic 95
+
+replicaCount: 2
+
+image:
+  repository: chatflect/backend
+  pullPolicy: IfNotPresent
+  tag: "v15.0-enterprise"
+
+nameOverride: "chatflect-staging"
+fullnameOverride: "chatflect-backend-staging"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: "chatflect-staging-sa"
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: "/api/metrics.php"
+  prometheus.io/port: "8080"
+
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 3000
+  fsGroup: 2000
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: staging.chatflect.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: chatflect-staging-tls
+      hosts:
+        - staging.chatflect.com
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
