@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `privacy_audit_logs` (
     `log_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `field_name` VARCHAR(50) NOT NULL,
     `old_value` VARCHAR(50),
     `new_value` VARCHAR(50) NOT NULL,

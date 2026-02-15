@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `calls` (
     `call_id` VARBINARY(32) PRIMARY KEY, -- Random ID
-    `initiator_user_id` INT NOT NULL,
+    `initiator_user_id` VARCHAR(255) NOT NULL,
     `status` ENUM('INIT', 'ACTIVE', 'ENDED') DEFAULT 'INIT',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `ended_at` TIMESTAMP NULL,

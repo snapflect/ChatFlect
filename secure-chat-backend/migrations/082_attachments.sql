@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `attachments` (
     `attachment_id` VARBINARY(32) PRIMARY KEY, -- Random ID
-    `owner_user_id` INT NOT NULL,
+    `owner_user_id` VARCHAR(255) NOT NULL,
     `encrypted_size_bytes` BIGINT NOT NULL,
     `mime_type` VARCHAR(100) NOT NULL,
     `sha256_hash` VARBINARY(32) NOT NULL, -- Integrity Check

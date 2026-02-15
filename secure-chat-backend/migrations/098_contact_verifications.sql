@@ -3,8 +3,8 @@
 
 CREATE TABLE IF NOT EXISTS `contact_verifications` (
     `verification_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
-    `contact_user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
+    `contact_user_id` VARCHAR(255) NOT NULL,
     `verified_key_hash` VARCHAR(64) NOT NULL, -- SHA256 of the Identity Key
     `status` ENUM('VERIFIED', 'UNVERIFIED', 'BROKEN') DEFAULT 'VERIFIED',
     `verified_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

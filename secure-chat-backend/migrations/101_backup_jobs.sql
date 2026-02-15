@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `backup_jobs` (
     `job_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `status` ENUM('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED') DEFAULT 'PENDING',
     `file_path` VARCHAR(255) DEFAULT NULL, -- Path to blob if strictly local, or ref ID
     `backup_size_bytes` BIGINT DEFAULT 0,

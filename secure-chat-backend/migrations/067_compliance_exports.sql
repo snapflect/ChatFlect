@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS `compliance_exports` (
     `export_id` BINARY(16) NOT NULL PRIMARY KEY,
     `org_id` BINARY(16) NOT NULL,
-    `requested_by_user_id` INT NOT NULL,
+    `requested_by_user_id` VARCHAR(255) NOT NULL,
     `start_date` DATETIME NOT NULL,
     `end_date` DATETIME NOT NULL,
     `status` ENUM('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED') DEFAULT 'PENDING',

@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `media_audit_logs` (
     `log_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `attachment_id` VARBINARY(32),
     `action` ENUM('UPLOAD', 'DOWNLOAD', 'KEY_FETCH', 'DELETE') NOT NULL,
     `details` JSON,
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS `media_audit_logs` (
 CREATE TABLE IF NOT EXISTS `attachment_receipts` (
     `receipt_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `attachment_id` VARBINARY(32) NOT NULL,
-    `uploader_id` INT NOT NULL,
+    `uploader_id` VARCHAR(255) NOT NULL,
     `sha256_hash` VARBINARY(32) NOT NULL,
     `timestamp` BIGINT NOT NULL,
     `signature` TEXT NOT NULL,

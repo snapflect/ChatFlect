@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `anonymous_profiles` (
     `profile_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `conversation_id` VARBINARY(32) NOT NULL, -- Specific to a conversation
     `alias_name` VARCHAR(50) NOT NULL, -- e.g., "Ghost-91"
     `alias_icon` VARCHAR(255) DEFAULT NULL, -- URL or icon ID

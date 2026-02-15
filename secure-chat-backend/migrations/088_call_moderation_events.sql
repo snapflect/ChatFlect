@@ -4,9 +4,9 @@
 CREATE TABLE IF NOT EXISTS `call_moderation_events` (
     `event_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `call_id` VARBINARY(32) NOT NULL,
-    `moderator_user_id` INT NOT NULL,
+    `moderator_user_id` VARCHAR(255) NOT NULL,
     `action` ENUM('FORCE_END', 'KICK_DEVICE', 'FLAG_ABUSE') NOT NULL,
-    `target_user_id` INT DEFAULT NULL,
+    `target_user_id` VARCHAR(255) DEFAULT NULL,
     `target_device_id` VARCHAR(64) DEFAULT NULL,
     `reason` VARCHAR(255),
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

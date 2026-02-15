@@ -10,4 +10,5 @@ CREATE INDEX idx_chat_receipt ON receipts (chat_id, receipt_id);
 -- Only create if not exists (MySQL syntax doesn't support IF NOT EXISTS for index directly usually)
 -- But we can try to add it, ignoring error if dup.
 -- Or just assume we are tuning:
-CREATE INDEX idx_messages_chat_seq ON messages (chat_id, server_seq);
+-- DUPLICATE: Already created in 009_message_ordering.sql
+-- CREATE INDEX idx_messages_chat_seq ON messages (chat_id, server_seq);

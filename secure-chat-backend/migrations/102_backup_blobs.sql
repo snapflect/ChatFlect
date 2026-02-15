@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS `backup_blobs` (
     `blob_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `job_id` BIGINT NOT NULL,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `encrypted_data` LONGBLOB, -- The actual encrypted bundle
     `iv` BINARY(12) NOT NULL, -- AES-GCM IV
     `auth_tag` BINARY(16) NOT NULL, -- AES-GCM Auth Tag

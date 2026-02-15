@@ -2,7 +2,7 @@
 -- Epic 70: Disappearing Messages Policies
 
 CREATE TABLE IF NOT EXISTS `conversation_ttl_rules` (
-    `conversation_id` BINARY(16) NOT NULL PRIMARY KEY,
+    `conversation_id` VARBINARY(32) NOT NULL PRIMARY KEY,
     `default_ttl_seconds` INT DEFAULT NULL, -- NULL = infinite/permanent
     `allow_shorter_overrides` BOOLEAN DEFAULT TRUE,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

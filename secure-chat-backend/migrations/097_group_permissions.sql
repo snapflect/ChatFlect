@@ -10,8 +10,8 @@ ADD COLUMN `approval_required_to_join` BOOLEAN DEFAULT FALSE;
 -- Audit Log for Group Settings
 CREATE TABLE IF NOT EXISTS `group_audit_logs` (
     `log_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `group_id` VARBINARY(32) NOT NULL,
-    `actor_user_id` INT NOT NULL,
+    `group_id` VARCHAR(100) NOT NULL,
+    `actor_user_id` VARCHAR(255) NOT NULL,
     `action_type` VARCHAR(50) NOT NULL, -- 'UPDATE_SETTINGS', 'CHANGE_ROLE'
     `details` JSON,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

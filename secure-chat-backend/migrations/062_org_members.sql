@@ -4,7 +4,7 @@
 
 CREATE TABLE IF NOT EXISTS `org_members` (
     `org_id` BINARY(16) NOT NULL,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `role` ENUM('OWNER', 'ADMIN', 'MEMBER', 'AUDITOR') NOT NULL DEFAULT 'MEMBER',
     `status` ENUM('ACTIVE', 'DISABLED') DEFAULT 'ACTIVE',
     `joined_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -3,7 +3,7 @@
 
 ALTER TABLE `messages` 
 ADD COLUMN `message_type_old` VARCHAR(50) DEFAULT 'text', -- Preserve old if needed or just use existing
-MODIFY COLUMN `message_type` VARCHAR(50) NOT NULL; 
+ADD COLUMN `message_type` VARCHAR(50) NOT NULL DEFAULT 'text'; 
 
 -- Or better, just add a flag if type is already generic
 ALTER TABLE `messages`

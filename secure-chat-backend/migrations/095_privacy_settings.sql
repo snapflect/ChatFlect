@@ -2,7 +2,7 @@
 -- Epic 81: Privacy Settings Metadata
 
 CREATE TABLE IF NOT EXISTS `user_privacy_settings` (
-    `user_id` INT NOT NULL PRIMARY KEY,
+    `user_id` VARCHAR(255) NOT NULL PRIMARY KEY,
     
     -- Visibility Rules: 'everyone', 'contacts', 'nobody', 'except'
     `last_seen_visibility` ENUM('everyone', 'contacts', 'nobody') DEFAULT 'contacts',
@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS `user_privacy_settings` (
 -- Exceptions table for 'My Contacts Except...'
 CREATE TABLE IF NOT EXISTS `privacy_exceptions` (
     `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
-    `blocked_viewer_id` INT NOT NULL, -- The contact who is EXCLUDED from seeing
+    `user_id` VARCHAR(255) NOT NULL,
+    `blocked_viewer_id` VARCHAR(255) NOT NULL, -- The contact who is EXCLUDED from seeing
     `setting_type` ENUM('last_seen', 'profile_photo', 'about') NOT NULL,
     
     UNIQUE KEY `uniq_exception` (`user_id`, `blocked_viewer_id`, `setting_type`),

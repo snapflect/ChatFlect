@@ -2,7 +2,7 @@
 -- Epic 73: Recovery Phrase Storage (Hashed)
 
 CREATE TABLE IF NOT EXISTS `recovery_phrases` (
-    `user_id` INT NOT NULL PRIMARY KEY,
+    `user_id` VARCHAR(255) NOT NULL PRIMARY KEY,
     `phrase_hash` VARBINARY(64) NOT NULL, -- SSHA256 or Argon2 hash of the mnemonic
     `salt` VARBINARY(32) NOT NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

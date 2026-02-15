@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `org_call_policies` (
     `policy_id` INT AUTO_INCREMENT PRIMARY KEY,
-    `org_id` INT NOT NULL,
+    `org_id` BINARY(16) NOT NULL,
     `allow_calls` BOOLEAN DEFAULT TRUE,
     `allow_video` BOOLEAN DEFAULT TRUE,
     `allow_recording` BOOLEAN DEFAULT FALSE, -- HF-77.5

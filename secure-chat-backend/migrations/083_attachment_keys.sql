@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS `attachment_keys` (
     `key_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `attachment_id` VARBINARY(32) NOT NULL,
-    `recipient_user_id` INT NOT NULL,
+    `recipient_user_id` VARCHAR(255) NOT NULL,
     `recipient_device_id` VARCHAR(64) NOT NULL,
     `wrapped_key` TEXT NOT NULL, -- Encrypted file key (base64)
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

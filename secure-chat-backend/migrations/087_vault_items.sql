@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `vault_items` (
     `item_id` INT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `key_id` INT NOT NULL, -- Which vault key encrypted this item
     `item_type` ENUM('NOTE', 'FILE') NOT NULL,
     `enc_metadata` BLOB NOT NULL, -- Encrypted title/filename/mime-type

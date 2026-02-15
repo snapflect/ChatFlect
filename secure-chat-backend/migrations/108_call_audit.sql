@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS `call_audit_logs` (
     `log_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `call_id` VARBINARY(32) NOT NULL,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `device_id` VARCHAR(64),
     `action` ENUM('JOIN_ATTEMPT', 'JOIN_FAILED', 'JOIN_SUCCESS', 'RATCHET', 'END') NOT NULL,
     `reason` VARCHAR(255),
