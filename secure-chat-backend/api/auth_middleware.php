@@ -318,7 +318,7 @@ function requireAuth($requestUserId = null)
         // 'firebase_auth.php' line 21: $userId = requireAuth();
 
         $scriptName = basename($_SERVER['SCRIPT_NAME']);
-        if ($scriptName === 'firebase_auth.php' || $scriptName === 'register.php' || $scriptName === 'devices.php' || $scriptName === 'profile.php') {
+        if ($scriptName === 'firebase_auth.php' || $scriptName === 'register.php' || $scriptName === 'devices.php' || $scriptName === 'profile.php' || $scriptName === 'upload.php') {
             // Allow raw tokens (Session Cookies) for exchange/registration/initial profile
         } else {
             auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'missing_device_binding']);
@@ -343,7 +343,7 @@ function requireAuth($requestUserId = null)
 
         if ($res->num_rows === 0) {
             $scriptName = basename($_SERVER['SCRIPT_NAME']);
-            $allowedOnboarding = ['firebase_auth.php', 'register.php', 'devices.php', 'profile.php'];
+            $allowedOnboarding = ['firebase_auth.php', 'register.php', 'devices.php', 'profile.php', 'upload.php'];
             if (in_array($scriptName, $allowedOnboarding)) {
                 // Allow missing device record for onboarding scripts
                 // This resolves the Catch-22 where registration is blocked by lack of registration
