@@ -51,3 +51,15 @@ UserInterfaceState.xcuserstate
 **/firebase-adminsdk*.json
 *.pem
 *.key
+
+# Maintenance & Diagnostic Scripts (Local Only)
+**/test_*.php
+**/debug_*.php
+**/fix_*.php
+**/check_*.php
+**/diagnostic_*.sql
+git_status_*.txt
+diff_sample.txt
+secure-chat-backend/scripts/*.php
+secure-chat-backend/scripts/*.ps1
+secure-chat-backend/.archive/
