@@ -42,10 +42,18 @@ export class AuthInterceptor implements HttpInterceptor {
                 }
 
                 if (error.status === 403) {
-                    // v8.1: Account Blocked
-                    const authService = this.injector.get(AuthService);
-                    authService.logout();
-                    alert("This account has been blocked. Please contact support.");
+                    const errorBody = error.error;
+                    if (errorBody?.status === 'blocked') {
+                        const authService = this.injector.get(AuthService);
+                        if (!(authService as any).userBlockedAlertShown) {
+                            (authService as any).userBlockedAlertShown = true;
+                            authService.logout();
+                            alert("This account has been blocked. Please contact support.");
+                        }
+                    } else {
+                        // Other 403s (Device Binding etc) are handled in background or ignored here
+                        console.warn('[AuthInterceptor] 403 Forbidden (Not a block)', errorBody);
+                    }
                 }
 
                 return throwError(() => error);

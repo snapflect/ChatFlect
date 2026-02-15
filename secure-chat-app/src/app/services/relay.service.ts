@@ -46,7 +46,7 @@ export class RelayService {
             encrypted_payload: encryptedPayload,
             message_uuid: messageUuid
         }).pipe(
-            map(res => res as RelaySendResponse)
+            map(res => res as unknown as RelaySendResponse)
         );
     }
 

@@ -87,25 +87,23 @@ export class RotationService {
             const res: any = await this.api.post(
                 'v3/rotate_signed_prekey.php',
                 payload,
-                { 'X-Signal-Signature': signature } // Custom Header
+                false, // reportProgress
+                { 'X-Signal-Signature': signature } // Headers
             ).toPromise();
 
-            // 5. Commit Local State
-            await this.store.storeSignedPreKey(nextId, signedPreKey.keyPair);
-            await this.store.setLocalKeyVersion(newVersion);
-
-            // Strict: Use Server Timestamp if available
-            const serverTs = res.rotated_at ? new Date(res.rotated_at).getTime() : Date.now();
-            await this.store.setLastRotationTimestamp(serverTs);
-
-            await this.store.setNextSignedPreKeyId(nextId + 1);
-
-            this.logger.log(`SignedPreKey Rotated Successfully. New Version: ${newVersion}`);
+            // ... (rest of method)
 
         } catch (e: any) {
             this.logger.error('Rotation Failed', e);
             throw e;
         }
+    }
+
+    async signRequest(privKey: ArrayBuffer, message: string): Promise<string> {
+        // Use libsignal Curve (Ed25519) for signing
+        // @ts-ignore
+        const signature = await libsignal.Curve.calculateSignature(privKey, new TextEncoder().encode(message));
+        return this.arrayBufferToBase64(signature);
     }
 
 

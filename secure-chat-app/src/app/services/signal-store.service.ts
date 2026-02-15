@@ -180,7 +180,7 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async getLocalRegistrationId(): Promise<number> {
-        return await get('registrationId');
+        return (await get('registrationId')) || 0;
     }
 
     async saveIdentity(identifier: string, identityKey: any): Promise<boolean> {
@@ -291,7 +291,7 @@ export class SignalStoreService implements SignalProtocolStore {
     async removeAllPreKeys(): Promise<void> {
         // Strict Fix: Do NOT use clear(). Only remove prekeys.
         const allKeys = await keys();
-        const targetKeys = allKeys.filter(k =>
+        const targetKeys = allKeys.filter((k: any) =>
             String(k).startsWith('preKey_') ||
             String(k).startsWith('signedPreKey_')
         );

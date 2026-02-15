@@ -30,9 +30,9 @@ export class SecurityAlertsService {
             let url = `/v4/security/alerts.php?limit=${limit}`;
             if (unreadOnly) url += '&unread=1';
 
-            const res = await this.api.get<{ alerts: SecurityAlert[], unread_count: number }>(url);
-            this._unreadCount$.next(res.unread_count || 0);
-            return res.alerts || [];
+            const res = await this.api.get(url).toPromise();
+            this._unreadCount$.next((res as any).unread_count || 0);
+            return (res as any).alerts || [];
         } catch (e) {
             console.error('[SecurityAlertsService] getAlerts error:', e);
             return [];
@@ -44,13 +44,13 @@ export class SecurityAlertsService {
      */
     async markRead(alertId: number): Promise<boolean> {
         try {
-            const res = await this.api.post<{ success: boolean }>('/v4/security/alerts_read.php', {
+            const res = await this.api.post('/v4/security/alerts_read.php', {
                 alert_id: alertId
-            });
-            if (res.success) {
+            }).toPromise();
+            if ((res as any).success) {
                 this._unreadCount$.next(Math.max(0, this._unreadCount$.value - 1));
             }
-            return res.success || false;
+            return (res as any).success || false;
         } catch (e) {
             console.error('[SecurityAlertsService] markRead error:', e);
             return false;

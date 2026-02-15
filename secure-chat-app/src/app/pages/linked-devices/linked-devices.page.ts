@@ -35,7 +35,7 @@ export class LinkedDevicesPage implements OnInit {
 
   loadDevices(userId: string) {
     this.isLoading = true;
-    this.deviceService.listDevices(userId).subscribe(
+    this.deviceService.listDevices().then(
       (data: any) => { // Fix: Explicit any cast or align Types
         this.devices = (data as DeviceInfo[]) || [];
         // Sort: Pending first (Action needed), then Active, then Revoked
@@ -49,10 +49,11 @@ export class LinkedDevicesPage implements OnInit {
           const statusDiff = score(a.status) - score(b.status);
           if (statusDiff !== 0) return statusDiff;
 
-          return new Date(b.last_active).getTime() - new Date(a.last_active).getTime();
+          return new Date(b.last_seen || 0).getTime() - new Date(a.last_seen || 0).getTime();
         });
         this.isLoading = false;
-      },
+      }
+    ).catch(
       (err) => {
         console.error(err);
         this.isLoading = false;
@@ -90,11 +91,11 @@ export class LinkedDevicesPage implements OnInit {
   }
 
   async approveDevice(device: DeviceInfo) {
-    this.deviceService.approveDevice(device.device_uuid).subscribe(async () => {
+    this.deviceService.approveDevice(device.device_uuid).then(async () => {
       const toast = await this.toastCtrl.create({ message: 'Device approved successfully', duration: 2000, color: 'success' });
       toast.present();
       if (this.currentUserId) this.loadDevices(this.currentUserId);
-    }, async (err) => {
+    }).catch(async (err) => {
       const toast = await this.toastCtrl.create({ message: 'Approval failed: ' + (err.error?.error || 'Unknown error'), duration: 3000 });
       toast.present();
     });
@@ -103,11 +104,11 @@ export class LinkedDevicesPage implements OnInit {
   async revokeDevice(device: DeviceInfo) {
     if (!this.currentUserId) return;
 
-    this.deviceService.revokeDevice(this.currentUserId, device.device_uuid).subscribe(async () => {
+    this.deviceService.revokeDevice(device.device_uuid).then(async () => {
       const toast = await this.toastCtrl.create({ message: 'Device revoked and wiped successfully', duration: 2000 });
       toast.present();
       this.loadDevices(this.currentUserId!);
-    }, async (err) => {
+    }).catch(async (err) => {
       const toast = await this.toastCtrl.create({ message: 'Failed to revoke device: ' + (err.error?.error || 'Unknown error'), duration: 3000 });
       toast.present();
     });

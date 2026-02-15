@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { StorageKDFService } from './storage-kdf.service'; // Adjust import if needed, assuming relative path
+import { StorageKDFService } from '../crypto/storage-kdf.service';
 
 /**
  * Encrypted IndexedDB Wrapper

@@ -10,6 +10,7 @@ export interface Device {
     registered_at: string;
     is_current: boolean;
     app_version?: string;
+    signing_public_key?: string;
 }
 
 export interface AuditEvent {
@@ -32,8 +33,8 @@ export class DeviceService {
      */
     async listDevices(): Promise<Device[]> {
         try {
-            const res = await this.api.get<{ devices: Device[] }>('/v4/devices/list.php');
-            return res.devices || [];
+            const res = await this.api.get('/v4/devices/list.php').toPromise();
+            return (res as any).devices || [];
         } catch (e) {
             console.error('[DeviceService] listDevices error:', e);
             return [];
@@ -47,11 +48,11 @@ export class DeviceService {
      */
     async revokeDevice(deviceUuid: string, forceLogout: boolean = false): Promise<boolean> {
         try {
-            const res = await this.api.post<{ success: boolean }>('/v4/devices/revoke.php', {
+            const res = await this.api.post('/v4/devices/revoke.php', {
                 device_uuid: deviceUuid,
                 force_logout: forceLogout
-            });
-            return res.success || false;
+            }).toPromise();
+            return (res as any).success || false;
         } catch (e) {
             console.error('[DeviceService] revokeDevice error:', e);
             return false;
@@ -69,11 +70,24 @@ export class DeviceService {
             if (deviceUuid) {
                 url += `&device_uuid=${deviceUuid}`;
             }
-            const res = await this.api.get<{ events: AuditEvent[] }>(url);
-            return res.events || [];
+            const res = await this.api.get(url).toPromise();
+            return (res as any).events || [];
         } catch (e) {
             console.error('[DeviceService] getAuditLogs error:', e);
             return [];
         }
     }
+    async approveDevice(deviceUuid: string): Promise<boolean> {
+        try {
+            const res = await this.api.post('/v4/devices/approve.php', {
+                device_uuid: deviceUuid
+            }).toPromise();
+            return (res as any).success || false;
+        } catch (e) {
+            console.error('[DeviceService] approveDevice error:', e);
+            return false;
+        }
+    }
 }
+
+export type DeviceInfo = Device;

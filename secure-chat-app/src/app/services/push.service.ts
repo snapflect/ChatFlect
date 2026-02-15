@@ -1,8 +1,8 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Injector } from '@angular/core';
+import { BehaviorSubject } from 'rxjs';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { Platform } from '@ionic/angular';
 import { ApiService } from './api.service';
-import { AuthService } from './auth.service';
 import { RelaySyncService } from './relay-sync.service';
 
 @Injectable({
@@ -10,10 +10,22 @@ import { RelaySyncService } from './relay-sync.service';
 })
 export class PushService {
 
+    public tapSubject = new BehaviorSubject<string | null>(null);
+
+    // Lazy-loaded to break circular DI: PushService <-> AuthService
+    private _auth: any = null;
+    private get auth(): any {
+        if (!this._auth) {
+            const { AuthService } = require('./auth.service');
+            this._auth = this.injector.get(AuthService);
+        }
+        return this._auth;
+    }
+
     constructor(
         private platform: Platform,
         private api: ApiService,
-        private auth: AuthService,
+        private injector: Injector,
         private relaySync: RelaySyncService
     ) { }
 
@@ -61,6 +73,10 @@ export class PushService {
         PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
             console.log('Push Action', notification);
             // Navigate to app, sync happens on visibility change anyway.
+            const data = notification.notification.data;
+            if (data && data.chatId) {
+                this.tapSubject.next(data.chatId);
+            }
         });
     }
 
@@ -93,5 +109,20 @@ export class PushService {
                 PushNotifications.register();
             }
         });
+    }
+    // Compatibility properties
+    // Compatibility Methods
+    initPush() { this.init(); }
+    saveToken(token: string) { this.registerToken(token); }
+
+    sendPush(targetId: string, title: string, body: string, data: any) {
+        console.log('sendPush shim called:', targetId, title);
+        return Promise.resolve();
+    }
+
+    clearNotifications() {
+        if (this.platform.is('capacitor')) {
+            PushNotifications.removeAllDeliveredNotifications();
+        }
     }
 }

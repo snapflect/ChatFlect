@@ -35,6 +35,36 @@ class SecretsManager
             return $_ENV[$envKey];
         }
 
+        // 4. Hostinger/Shared Hosting Fallback: Parse .env directly
+        // Because getenv() often fails if phpdotenv isn't fully integrated or blocked.
+        $envPath = __DIR__ . '/../.env';
+        if (file_exists($envPath)) {
+            $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            foreach ($lines as $line) {
+                if (strpos(trim($line), '#') === 0)
+                    continue;
+                list($name, $value) = explode('=', $line, 2) + [NULL, NULL];
+                if ($name && trim($name) === $envKey) {
+                    return trim($value);
+                }
+            }
+        }
+
+        // 4. Hostinger/Shared Hosting Fallback: Parse .env directly
+        // Because getenv() often fails if phpdotenv isn't fully integrated or blocked.
+        $envPath = __DIR__ . '/../.env';
+        if (file_exists($envPath)) {
+            $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+            foreach ($lines as $line) {
+                if (strpos(trim($line), '#') === 0)
+                    continue;
+                list($name, $value) = explode('=', $line, 2) + [NULL, NULL];
+                if ($name && trim($name) === $envKey) {
+                    return trim($value);
+                }
+            }
+        }
+
         return $default;
     }
 }
