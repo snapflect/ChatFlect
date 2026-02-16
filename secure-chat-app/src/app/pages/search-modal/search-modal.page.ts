@@ -34,7 +34,9 @@ export class SearchModalPage implements OnInit {
 
         this.isSearching = true;
         try {
-            this.results = await this.storage.searchMessages(this.query);
+            // v2.3: Message search disabled to preserve E2EE integrity.
+            // In future, implement searchable encryption or local indexing after decryption.
+            this.results = [];
         } catch (e) {
             console.error("Search failed", e);
         } finally {

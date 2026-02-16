@@ -59,18 +59,7 @@ export class StorageService {
         updated_at INTEGER
       );
 
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        chat_id TEXT,
-        sender_id TEXT,
-        type TEXT,
-        payload TEXT,
-        timestamp INTEGER,
-        expires_at INTEGER,
-        is_starred INTEGER DEFAULT 0
-      );
-      CREATE INDEX IF NOT EXISTS idx_msg_chat ON messages(chat_id);
-      CREATE INDEX IF NOT EXISTS idx_msg_ts ON messages(timestamp);
+
 
       CREATE TABLE IF NOT EXISTS chats (
         id TEXT PRIMARY KEY,
@@ -124,33 +113,7 @@ export class StorageService {
         return values.map((v: any) => JSON.parse(v.data));
     }
 
-    // --- Message Caching ---
 
-    async saveMessages(chatId: string, messages: any[]) {
-        for (const msg of messages) {
-            // We only store permanent messages (not system signals or revoked unless needed)
-            if (msg.type === 'revoked') continue;
-
-            await this.safeRun(
-                `INSERT OR REPLACE INTO messages (id, chat_id, sender_id, type, payload, timestamp, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [
-                    msg.id,
-                    chatId,
-                    msg.senderId,
-                    msg.type,
-                    JSON.stringify(msg), // Store full decoded payload for instant display
-                    msg.timestamp,
-                    msg.expiresAt || null
-                ]
-            );
-        }
-    }
-
-    async getCachedMessages(chatId: string) {
-        const values = await this.safeQuery('SELECT payload FROM messages WHERE chat_id = ? ORDER BY timestamp ASC', [chatId]);
-        return values.map((v: any) => JSON.parse(v.payload));
-    }
 
     // --- Contacts Caching ---
 
@@ -396,42 +359,14 @@ export class StorageService {
         }
     }
 
-    /**
-     * pruneMessageCache (v9): Delete old messages not marked as starred.
-     */
-    async pruneMessageCache(ttlDays: number = 14) {
-        // Safe run handles guard
-        try {
-            const ttlMs = ttlDays * 24 * 60 * 60 * 1000;
-            const expiry = Date.now() - ttlMs;
 
-            const res = await this.safeRun(
-                'DELETE FROM messages WHERE timestamp < ? AND is_starred = 0',
-                [expiry]
-            );
-            if (res && res.changes && res.changes.changes > 0) {
-                console.log(`[StorageService][v9] Pruned ${res.changes.changes} old messages.`);
-            }
-        } catch (e) {
-            console.error('[StorageService][v9] Prune messages failed', e);
-        }
-    }
 
-    // --- Search (v16) ---
-    async searchMessages(query: string, limit: number = 50): Promise<any[]> {
-        const term = `%${query}%`;
-        // Search in JSON payload
-        const values = await this.safeQuery(
-            'SELECT payload FROM messages WHERE payload LIKE ? ORDER BY timestamp DESC LIMIT ?',
-            [term, limit]
-        );
-        return values.map((v: any) => JSON.parse(v.payload));
-    }
+
 
     // --- Outbox Management (v9) ---
 
     async addToOutbox(chatId: string, action: 'send' | 'edit' | 'delete', payload: any) {
-        const id = `out_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const id = window.crypto.randomUUID();
         await this.safeRun(
             'INSERT INTO outbox (id, chat_id, action, payload, timestamp) VALUES (?, ?, ?, ?, ?)',
             [id, chatId, action, JSON.stringify(payload), Date.now()]

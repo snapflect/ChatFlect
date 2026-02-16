@@ -59,6 +59,9 @@ export class ChatService {
         // Start Reliability Engines
         this.retryScheduler.start();
         this.ackService.start();
+
+        // One-time sync on start
+        this.syncInbox();
     }
 
     protected initFirestore() {
@@ -113,18 +116,35 @@ export class ChatService {
     }
 
     getSharedMedia(chatId: string): Observable<any[]> {
-        // Reuse getMessages logic or implement specific media query
-        // For shared media gallery, we likely want ALL media, not just recent
-        // So a query is better than referencing a limited message list
-        const messagesRef = this.fsCollection('chats', chatId, 'messages');
-        const q = this.fsQuery(messagesRef, orderBy('timestamp', 'desc')); // Get all messages? Beware size.
-        // Optimization: In production, adding 'where type in [image, video]' requires composite index
-
         return new Observable(observer => {
-            return this.fsOnSnapshot(q, (snapshot: any) => {
-                const msgs = snapshot.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
-                observer.next(msgs);
-            });
+            const loadMedia = async () => {
+                try {
+                    const rows = await this.localDb.query(`
+                        SELECT * FROM local_messages 
+                        WHERE chat_id = ? AND type IN ('image', 'video', 'document', 'audio')
+                        ORDER BY COALESCE(server_timestamp, timestamp) DESC
+                    `, [chatId]);
+
+                    const msgs = rows.map((row: any) => {
+                        let payload: any = {};
+                        try {
+                            payload = JSON.parse(row.payload);
+                        } catch (e) { }
+
+                        return {
+                            id: row.id,
+                            ...row,
+                            ...payload,
+                            timestamp: row.server_timestamp || row.timestamp
+                        };
+                    });
+                    this.zone.run(() => observer.next(msgs));
+                } catch (err) {
+                    this.logger.error('[ChatService] getSharedMedia Local DB Error', err);
+                }
+            };
+
+            loadMedia();
         });
     }
 
@@ -162,12 +182,66 @@ export class ChatService {
     }
 
     /**
+     * HF-2.3C: Universal Sync (MySQL -> SQLite)
+     * Rapidly pulls all pending messages for this device.
+     */
+    async syncInbox(): Promise<void> {
+        if (this.isSyncing) return;
+        this.isSyncing = true;
+
+        try {
+            const response: any = await this.http.get(`${environment.apiUrl}/v4/messages/pull.php`).toPromise();
+
+            if (response && response.success && Array.isArray(response.messages)) {
+                for (const msg of response.messages) {
+                    await this.persistIncomingMessage(msg);
+                }
+                this.logger.log(`[ChatService] Inbox synced. ${response.messages.length} new messages.`);
+            }
+        } catch (err) {
+            this.logger.error('[ChatService] Inbox Sync Failed', err);
+        } finally {
+            this.isSyncing = false;
+        }
+    }
+
+    private async persistIncomingMessage(msg: any): Promise<void> {
+        // msg: { inbox_id, message_uuid, encrypted_payload, created_at, forwarding_score }
+        try {
+            // Deduplication (Enterprise HF-2.2 Check)
+            const existing = await this.localDb.query('SELECT id FROM local_messages WHERE id = ?', [msg.message_uuid]);
+            if (existing.length > 0) return;
+
+            // Prepare local persistence
+            // Note: We'd also handle decryption here or lazily in the UI
+            await this.localDb.run(`
+                INSERT INTO local_messages (id, server_id, chat_id, type, payload, timestamp, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `, [
+                msg.message_uuid,
+                msg.inbox_id,
+                'temp_chat', // In a real app, we'd extract chat_id from payload headers
+                'encrypted',
+                msg.encrypted_payload,
+                new Date(msg.created_at).getTime(),
+                'delivered'
+            ]);
+
+            // Signal the UI or Notification logic
+            this.newMessage$.next({ chatId: 'temp_chat', senderId: 'unknown', timestamp: Date.now() });
+
+        } catch (err) {
+            this.logger.warn('[ChatService] Failed to persist incoming message', err);
+        }
+    }
+
+    /**
      * sendInternal (v2.3 Core Pipeline)
      * Handles local-first persistence, encryption, and queueing.
      */
     private async sendInternal(chatId: string, type: string, plainPayload: any, metadata: any = {}): Promise<string> {
         const myId = String(localStorage.getItem('user_id'));
-        const messageId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const messageId = window.crypto.randomUUID();
 
         try {
             // 1. Prepare Encrypted Envelope
@@ -293,7 +367,7 @@ export class ChatService {
             const formData = new FormData();
             formData.append('file', encryptedBlob, 'secure_img.bin');
 
-            const tempId = `up_${Date.now()}`;
+            const tempId = window.crypto.randomUUID();
             this.progressService.updateProgress(tempId, 0, 'uploading');
 
             // Optimistic Add
@@ -362,7 +436,7 @@ export class ChatService {
             const formData = new FormData();
             formData.append('file', encryptedBlob, 'secure_vid.bin');
 
-            const tempId = `up_${Date.now()}`;
+            const tempId = window.crypto.randomUUID();
             this.progressService.updateProgress(tempId, 0, 'uploading');
 
             // Optimistic Add
@@ -441,7 +515,7 @@ export class ChatService {
             const formData = new FormData();
             formData.append('file', encryptedBlob, 'doc.bin');
 
-            const tempId = `up_${Date.now()}`;
+            const tempId = window.crypto.randomUUID();
             this.progressService.updateProgress(tempId, 0, 'uploading');
 
             // Optimistic Add
@@ -854,12 +928,19 @@ export class ChatService {
     }
 
     async toggleStarMessage(chatId: string, messageId: string, star: boolean) {
-        const myId = String(localStorage.getItem('user_id'));
-        const msgRef = this.fsDoc('chats', chatId, 'messages', messageId);
+        // WhatsApp-Style: Local-First Starring
+        try {
+            await this.localDb.run("UPDATE local_messages SET is_starred = ? WHERE id = ?", [star ? 1 : 0, messageId]);
 
-        await this.fsUpdateDoc(msgRef, {
-            starredBy: star ? arrayUnion(myId) : arrayRemove(myId)
-        });
+            // Optional: Backup to Firestore (Signal/WhatsApp typically don't unless doing cloud backup)
+            const myId = String(localStorage.getItem('user_id'));
+            const msgRef = this.fsDoc('chats', chatId, 'messages', messageId);
+            await this.fsUpdateDoc(msgRef, {
+                starredBy: star ? arrayUnion(myId) : arrayRemove(myId)
+            });
+        } catch (e) {
+            this.logger.error("Toggle Star Failed", e);
+        }
     }
 
     async setTyping(chatId: string, status: string | boolean) {
@@ -884,21 +965,35 @@ export class ChatService {
     }
 
     getStarredMessages(): Observable<any[]> {
-        const myId = String(localStorage.getItem('user_id'));
-        const starredQuery = this.fsQuery(
-            this.fsCollectionGroup('messages'),
-            where('starredBy', 'array-contains', myId)
-        );
-
         return new Observable(observer => {
-            return this.fsOnSnapshot(starredQuery, (snapshot: any) => {
-                const msgs = snapshot.docs.map((doc: any) => ({
-                    id: doc.id,
-                    chatId: doc.ref.parent.parent?.id,
-                    ...(doc.data() as any)
-                }));
-                observer.next(msgs);
-            }, (error: any) => observer.error(error));
+            const loadStarred = async () => {
+                try {
+                    const rows = await this.localDb.query(`
+                        SELECT * FROM local_messages 
+                        WHERE is_starred = 1 
+                        ORDER BY COALESCE(server_timestamp, timestamp) DESC
+                    `);
+
+                    const msgs = rows.map((row: any) => {
+                        let payload: any = {};
+                        try {
+                            payload = JSON.parse(row.payload);
+                        } catch (e) { }
+
+                        return {
+                            id: row.id,
+                            ...row,
+                            ...payload,
+                            timestamp: row.server_timestamp || row.timestamp
+                        };
+                    });
+                    this.zone.run(() => observer.next(msgs));
+                } catch (err) {
+                    this.logger.error('[ChatService] getStarredMessages Local DB Error', err);
+                }
+            };
+
+            loadStarred();
         });
     }
 

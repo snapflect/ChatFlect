@@ -22,6 +22,24 @@ export class PushService {
         return this._auth;
     }
 
+    private _chat: any = null;
+    private get chat(): any {
+        if (!this._chat) {
+            const { ChatService } = require('./chat.service');
+            this._chat = this.injector.get(ChatService);
+        }
+        return this._chat;
+    }
+
+    private _ack: any = null;
+    private get ack(): any {
+        if (!this._ack) {
+            const { MessageAckService } = require('./message-ack.service');
+            this._ack = this.injector.get(MessageAckService);
+        }
+        return this._ack;
+    }
+
     constructor(
         private platform: Platform,
         private api: ApiService,
@@ -57,14 +75,13 @@ export class PushService {
             // Just trigger a sync.
             const data = notification.data || {};
             if (data.type === 'SYNC') {
-                console.log('Push: WAKE SIGNAL RECEIVED -> Triggering Sync');
-                // We don't know chatId from payload per security, 
-                // so we rely on RelaySyncService to poll ALL active chats or specific logic.
-                // For MVP, RelaySyncService usually polls active chat.
-                // Ideally, we trigger a global check.
-                // Assuming RelaySyncService has a global poll or we iterate.
+                console.log('Push: WAKE SIGNAL RECEIVED -> Triggering Global Sync');
 
-                // For now, let's trigger the sync if a chat is active.
+                // HF-2.3C: Trigger WhatsApp-style sync flushes
+                this.chat.syncInbox();
+                this.ack.flush();
+
+                // Legacy fallback
                 this.relaySync.forceSync();
             }
         });

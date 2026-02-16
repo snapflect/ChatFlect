@@ -3,6 +3,8 @@ import { LocalDbService } from './local-db.service';
 import { LoggingService } from './logging.service';
 import { HttpClient } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
+import { App } from '@capacitor/app';
+import { Network } from '@capacitor/network';
 
 /**
  * MessageAckService (v2.3 Reliability Engine)
@@ -14,17 +16,35 @@ import { environment } from 'src/environments/environment';
 })
 export class MessageAckService {
     private isPolling = false;
-    private readonly POLL_INTERVAL = 45000; // 45s (slightly faster than retry)
+    private readonly BASE_POLL_INTERVAL = 45000; // 45s
+    private readonly MAX_POLL_INTERVAL = 600000; // 10m
+    private currentPollInterval = 45000;
+    private idleCounter = 0;
 
     constructor(
         private localDb: LocalDbService,
         private logger: LoggingService,
         private http: HttpClient
-    ) { }
+    ) {
+        this.initLifecycle();
+    }
+
+    private initLifecycle() {
+        App.addListener('appStateChange', ({ isActive }) => {
+            if (isActive) {
+                this.logger.log('[MessageAck] App foregrounded. Resetting poll speed.');
+                this.resetPollSpeed();
+            } else {
+                this.logger.log('[MessageAck] App backgrounded. Flushing receipts...');
+                this.flush();
+            }
+        });
+    }
 
     start() {
         if (this.isPolling) return;
         this.isPolling = true;
+        this.resetPollSpeed();
         this.poll();
     }
 
@@ -32,32 +52,67 @@ export class MessageAckService {
         if (!this.isPolling) return;
 
         try {
-            await this.syncReceipts();
+            const hasWork = await this.syncReceipts();
+
+            if (hasWork) {
+                this.idleCounter = 0;
+            } else {
+                this.idleCounter++;
+            }
+
+            // Adaptive interval: increase by 1.5x each idle cycle
+            this.currentPollInterval = Math.min(
+                this.BASE_POLL_INTERVAL * Math.pow(1.5, Math.min(this.idleCounter, 6)),
+                this.MAX_POLL_INTERVAL
+            );
+
         } catch (err) {
             this.logger.error('[MessageAck] Receipt Sync Error', err);
         }
 
-        setTimeout(() => this.poll(), this.POLL_INTERVAL);
+        setTimeout(() => this.poll(), this.currentPollInterval);
+    }
+
+    /**
+     * Reset the poll interval to base speed
+     */
+    resetPollSpeed() {
+        this.idleCounter = 0;
+        this.currentPollInterval = this.BASE_POLL_INTERVAL;
     }
 
     /**
      * Pull new receipts from the server
+     * @returns boolean true if receipts were found
      */
-    async syncReceipts(): Promise<void> {
-        // Optimization: Only pull receipts for messages that aren't 'read' yet
-        // In a real implementation, we'd use a 'last_receipt_sync_id'
+    async syncReceipts(): Promise<boolean> {
+        const net = await Network.getStatus();
+        if (!net.connected) return false;
 
         try {
             const response: any = await this.http.get(`${environment.apiUrl}/receipts/pull.php`).toPromise();
 
             if (response && response.status === 'success' && Array.isArray(response.receipts)) {
+                if (response.receipts.length === 0) return false;
+
                 for (const receipt of response.receipts) {
                     await this.processReceipt(receipt);
                 }
+                return true;
             }
+            return false;
         } catch (err) {
             this.logger.warn('[MessageAck] Failed to pull receipts', err);
+            return false;
         }
+    }
+
+    /**
+     * HF-2.3A: Background Flush Mode
+     */
+    async flush(): Promise<void> {
+        // Simple flush: trigger sync once.
+        await this.syncReceipts();
     }
 
     private async processReceipt(receipt: any): Promise<void> {
@@ -93,7 +148,7 @@ export class MessageAckService {
         const pkg = {
             acks: [{
                 message_uuid: messageId,
-                status: 'READ'
+                status: 'read'
             }]
         };
 

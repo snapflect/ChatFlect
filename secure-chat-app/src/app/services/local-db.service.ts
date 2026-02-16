@@ -59,13 +59,59 @@ export class LocalDbService {
 
     private async getOrCreatePassphrase(): Promise<string> {
         try {
-            const { value } = await SecureStoragePlugin.get({ key: 'sqlite_v2_passphrase' });
-            if (value) return value;
-        } catch (e) { }
+            // 1. Check for Legacy Passphrase (Backward Compatibility for initial v2.3 Alpha)
+            const legacy = await SecureStoragePlugin.get({ key: 'sqlite_v2_passphrase' }).catch(() => ({ value: null }));
+            if (legacy.value) {
+                this.logger.log("[LocalDb] Using legacy vault passphrase.");
+                return legacy.value;
+            }
 
-        const newPass = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
-        await SecureStoragePlugin.set({ key: 'sqlite_v2_passphrase', value: newPass });
-        return newPass;
+            // 2. Hybrid Derivation Strategy (HF-2.1)
+            let masterSeed = (await SecureStoragePlugin.get({ key: 'sqlite_master_seed' }).catch(() => ({ value: null }))).value;
+            let deviceSalt = (await SecureStoragePlugin.get({ key: 'sqlite_device_salt' }).catch(() => ({ value: null }))).value;
+
+            if (!masterSeed || !deviceSalt) {
+                this.logger.log("[LocalDb] Generating new hardware-bound vault secrets...");
+                masterSeed = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
+                deviceSalt = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
+
+                await SecureStoragePlugin.set({ key: 'sqlite_master_seed', value: masterSeed });
+                await SecureStoragePlugin.set({ key: 'sqlite_device_salt', value: deviceSalt });
+            }
+
+            return await this.derivePassphrase(masterSeed, deviceSalt);
+        } catch (err) {
+            this.logger.error("[LocalDb] Vault Access Failure - Hardware Lockout?", err);
+            // HF-2.1D: Critical Error State
+            throw new Error("SECURE_VAULT_UNREACHABLE: Handset security module rejected request.");
+        }
+    }
+
+    private async derivePassphrase(seed: string, salt: string): Promise<string> {
+        const encoder = new TextEncoder();
+        const seedBuffer = encoder.encode(seed);
+        const saltBuffer = encoder.encode(salt);
+
+        const keyMaterial = await window.crypto.subtle.importKey(
+            'raw',
+            seedBuffer,
+            'PBKDF2',
+            false,
+            ['deriveBits', 'deriveKey']
+        );
+
+        const derivedKey = await window.crypto.subtle.deriveBits(
+            {
+                name: 'PBKDF2',
+                salt: saltBuffer,
+                iterations: 100000,
+                hash: 'SHA-256'
+            },
+            keyMaterial,
+            256
+        );
+
+        return btoa(String.fromCharCode(...new Uint8Array(derivedKey)));
     }
 
     private async createTables() {
@@ -97,6 +143,7 @@ export class LocalDbService {
                 server_timestamp INTEGER, -- Definitive Sync Order from MySQL
                 status TEXT DEFAULT 'pending', -- pending, sent, delivered, read
                 forward_count INTEGER DEFAULT 0,
+                is_starred INTEGER DEFAULT 0,
                 reply_to_id TEXT,
                 metadata TEXT
             );
