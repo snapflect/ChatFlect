@@ -2,6 +2,7 @@
 require_once 'db.php';
 require_once 'audit_log.php';
 require_once 'rate_limiter.php'; // v12
+require_once 'cache_service.php'; // Fix for 500 Error
 require_once __DIR__ . '/../includes/deprecation.php'; // Epic 34
 
 // v15.2: Ensure consistent JSON headers for all functional endpoints
@@ -187,9 +188,30 @@ function authenticateRequest()
         // Normalize CACHE return
         return [
             'user_id' => $cached['user_id'],
-            'device_uuid' => $cached['device_uuid'] ?? $cached['metadata']['device_uuid'] ?? null
+            'device_uuid' => $cached['device_uuid'] ?? $cached['metadata']['device_uuid'] ?? $cached['metadata']['device'] ?? null
         ];
     }
+
+    // 3.5 Fallback: DB SESSION CHECK (Medium Path)
+    // If cache is empty (e.g. after TRUNCATE), check the user_sessions table
+    global $conn;
+    $stmt = $conn->prepare("SELECT user_id, device_uuid FROM user_sessions WHERE id_token_jti = ? AND expires_at > NOW()");
+    $stmt->bind_param("s", $token);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    if ($row = $res->fetch_assoc()) {
+        $userId = strtoupper(trim($row['user_id']));
+        $deviceUuid = $row['device_uuid'];
+
+        // Refill the cache for next hit
+        CacheService::cacheSession($token, $userId, ['device_uuid' => $deviceUuid]);
+
+        return [
+            'user_id' => $userId,
+            'device_uuid' => $deviceUuid
+        ];
+    }
+    $stmt->close();
 
     // 4. Fallback: Full JWT/DB Validation (Slow Path)
     $authResult = validateFirebaseToken($token); // Now returns array or null
@@ -296,8 +318,8 @@ function requireAuth($requestUserId = null)
         // 'firebase_auth.php' line 21: $userId = requireAuth();
 
         $scriptName = basename($_SERVER['SCRIPT_NAME']);
-        if ($scriptName === 'firebase_auth.php' || $scriptName === 'register.php') {
-            // Allow raw tokens for exchange/registration
+        if ($scriptName === 'firebase_auth.php' || $scriptName === 'register.php' || $scriptName === 'devices.php' || $scriptName === 'profile.php' || $scriptName === 'upload.php') {
+            // Allow raw tokens (Session Cookies) for exchange/registration/initial profile
         } else {
             auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'missing_device_binding']);
             http_response_code(403);
@@ -320,22 +342,32 @@ function requireAuth($requestUserId = null)
         $res = $stmt->get_result();
 
         if ($res->num_rows === 0) {
-            // Device not found (spoofed UUID?)
-            auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'device_not_found', 'device' => $deviceUuid]);
-            http_response_code(403);
-            echo json_encode(["error" => "Device not recognized."]);
-            exit;
+            $scriptName = basename($_SERVER['SCRIPT_NAME']);
+            $allowedOnboarding = ['firebase_auth.php', 'register.php', 'devices.php', 'profile.php', 'upload.php'];
+            if (in_array($scriptName, $allowedOnboarding)) {
+                // Allow missing device record for onboarding scripts
+                // This resolves the Catch-22 where registration is blocked by lack of registration
+                error_log("[Auth] Allowing missing device record for onboarding script: $scriptName");
+            } else {
+                // Device not found (spoofed UUID?)
+                auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'device_not_found', 'device' => $deviceUuid]);
+                http_response_code(403);
+                echo json_encode(["error" => "Device not recognized."]);
+                exit;
+            }
         }
 
         $devRow = $res->fetch_assoc();
-        if ($devRow['status'] !== 'active' || $devRow['revoked_at'] !== null) {
-            auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'device_revoked_or_pending', 'device' => $deviceUuid, 'status' => $devRow['status']]);
-            http_response_code(403);
-            echo json_encode([
-                "error" => "Device not trusted.",
-                "status" => $devRow['status']
-            ]);
-            exit;
+        if ($devRow) {
+            if ($devRow['status'] !== 'active' || $devRow['revoked_at'] !== null) {
+                auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'device_revoked_or_pending', 'device' => $deviceUuid, 'status' => $devRow['status']]);
+                http_response_code(403);
+                echo json_encode([
+                    "error" => "Device not trusted.",
+                    "status" => $devRow['status']
+                ]);
+                exit;
+            }
         }
 
         // --- Epic 26: Security Alerts Integration ---
@@ -391,17 +423,18 @@ function requireAuth($requestUserId = null)
 
 
     // Verify it matches the requested user ID if one was provided
-    if ($requestUserId !== null && $authUserId !== $requestUserId) {
+    // v16.0: Strict Zero-Trust Comparison (Case-Insensitive)
+    if ($requestUserId !== null && strtoupper(trim($authUserId)) !== strtoupper(trim($requestUserId))) {
         auditLog(AUDIT_AUTH_FAILED, $authUserId, [
-            'reason' => 'user_mismatch',
-            'requested_user' => $requestUserId,
-            'authenticated_user' => $authUserId
+            "reason" => "identity_mismatch",
+            "auth_id" => $authUserId,
+            "req_id" => $requestUserId
         ]);
         http_response_code(403);
         echo json_encode([
             "error" => "Forbidden - You can only access your own data",
-            "auth_id" => $authUserId,
-            "req_id" => $requestUserId
+            "debug_auth_id" => $authUserId,
+            "debug_req_id" => $requestUserId
         ]);
         exit;
     }
@@ -429,7 +462,8 @@ function validateCSRF()
         'http://localhost:4200', // Angular Serve
         'http://localhost',      // Android Cap
         'capacitor://localhost', // iOS Cap
-        'https://localhost'      // Secure Local
+        'https://localhost',      // Secure Local
+        'https://chat.snapflect.com' // Production Web
     ];
 
     $origin = $_SERVER['HTTP_ORIGIN'] ?? $_SERVER['HTTP_REFERER'] ?? null;

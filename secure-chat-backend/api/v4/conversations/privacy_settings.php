@@ -2,11 +2,12 @@
 // api/v4/conversations/privacy_settings.php
 // Epic 71: Configure Screen Shield
 
-require_once __DIR__ . '/../../includes/auth_middleware.php';
+require_once __DIR__ . '/../../../api/auth_middleware.php';
 require_once __DIR__ . '/../../includes/ops_manager.php';
 require_once __DIR__ . '/../../includes/privacy_policy_enforcer.php';
 
-$user = authenticate();
+$authData = requireAuth();
+$userId = $authData['user_id'];
 $input = json_decode(file_get_contents('php://input'), true);
 $convId = $input['conversation_id'];
 $shield = (bool) $input['shield_mode'];

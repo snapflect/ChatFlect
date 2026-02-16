@@ -10,14 +10,25 @@ require_once __DIR__ . '/../../../includes/rate_limiter.php';
 header('Content-Type: application/json');
 
 try {
+    // Epic 82: Group Admin Controls (Add Users)
+    require_once __DIR__ . '/../../../includes/group_permission_enforcer.php';
+
     $authData = requireAuth();
     $userId = strtoupper($authData['user_id']);
 
-    // Rate limit: 10 per 10 min
-    checkRateLimit($pdo, $userId, 'group_admin_action', 10, 600);
-
     $input = json_decode(file_get_contents('php://input'), true);
     $groupId = $input['group_id'] ?? '';
+
+    // Check Permissions BEFORE rate limit or logic
+    $gpe = new GroupPermissionEnforcer($pdo);
+    if (!$gpe->canAddParticipants($groupId, $userId)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Only admins can add members']);
+        exit;
+    }
+
+    // Rate limit: 10 per 10 min
+    checkRateLimit($pdo, $userId, 'group_admin_action', 10, 600);
     $newMemberId = strtoupper($input['user_id'] ?? '');
 
     if (!$groupId || !$newMemberId) {

@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `alias_history_receipts` (
     `receipt_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `conversation_id` VARBINARY(32) NOT NULL,
     `old_alias` VARCHAR(50),
     `new_alias` VARCHAR(50) NOT NULL,

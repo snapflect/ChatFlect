@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS `org_invites` (
     `invite_id` INT AUTO_INCREMENT PRIMARY KEY,
     `org_id` BINARY(16) NOT NULL,
     `invited_email` VARCHAR(255) NOT NULL,
-    `invited_by_user_id` INT NOT NULL,
+    `invited_by_user_id` VARCHAR(255) NOT NULL,
     `invite_token` CHAR(64) NOT NULL, -- SHA256 of random token
     `role` ENUM('OWNER', 'ADMIN', 'MEMBER', 'AUDITOR') NOT NULL DEFAULT 'MEMBER',
     `expires_at` DATETIME NOT NULL,

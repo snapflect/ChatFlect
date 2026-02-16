@@ -32,7 +32,7 @@
       </ion-icon>
       <ion-label>
         <h2>{{ device.device_name }}</h2>
-        <p>Last active: {{ device.last_active }}</p>
+        <p>Last active: {{ device.last_seen || 'Unknown' }}</p>
         <p class="fingerprint-label">
           <ion-icon name="finger-print-outline" class="fingerprint-icon"></ion-icon>
           Key ID: {{ getFingerprint(device) }}
@@ -42,8 +42,8 @@
           [color]="device.status === 'active' ? 'success' : (device.status === 'revoked' ? 'medium' : 'warning')">
           {{ device.status | titlecase }}
         </ion-badge>
-        <p *ngIf="device.revoked_at" style="font-size: 0.8em; color: var(--ion-color-medium);">Revoked: {{
-          device.revoked_at }}</p>
+        <!-- <p *ngIf="device.revoked_at" style="font-size: 0.8em; color: var(--ion-color-medium);">Revoked: {{
+          device.revoked_at }}</p> -->
       </ion-label>
 
       <ion-button *ngIf="device.status !== 'active' && device.status !== 'revoked'" fill="clear" color="success"

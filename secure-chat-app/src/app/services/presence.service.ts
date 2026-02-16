@@ -137,4 +137,7 @@ export class PresenceService implements OnDestroy {
     getPresenceBatch(userIds: string[]): Observable<any> {
         return this.api.post('presence/query.php', { user_ids: userIds });
     }
+    // Compatibility Methods
+    setPresence(status: 'online' | 'offline') { this.updatePresence(status); }
+    getPresence(userId: string) { return this.getPresenceBatch([userId]); }
 }

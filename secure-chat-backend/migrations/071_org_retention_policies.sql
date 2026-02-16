@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS `org_retention_policies` (
     `item_type` VARCHAR(50) NOT NULL, -- 'audit_log', 'chat_message', 'file', 'compliance_export'
     `retention_days` INT NOT NULL,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    `updated_by` INT NOT NULL,
+    `updated_by` VARCHAR(255) NOT NULL,
     
     UNIQUE KEY `idx_org_item` (`org_id`, `item_type`),
     FOREIGN KEY (`org_id`) REFERENCES `organizations`(`org_id`) ON DELETE CASCADE

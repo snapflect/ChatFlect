@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `vault_keys` (
     `key_id` INT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `version` INT NOT NULL, -- 1, 2, 3...
     `salt` BINARY(32) NOT NULL, -- Salt for KDF
     `is_active` BOOLEAN DEFAULT TRUE,

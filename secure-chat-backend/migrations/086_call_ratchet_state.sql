@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS `call_ratchet_state` (
     `state_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `call_id` VARBINARY(32) NOT NULL,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `device_id` VARCHAR(64) NOT NULL,
     `current_ratchet_counter` INT DEFAULT 0,
     `last_key_rotation_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

@@ -3,8 +3,8 @@
 
 CREATE TABLE IF NOT EXISTS `verification_receipts` (
     `receipt_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-    `user_id` INT NOT NULL,
-    `contact_user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
+    `contact_user_id` VARCHAR(255) NOT NULL,
     `key_hash` VARCHAR(64) NOT NULL,
     `verified_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `signature` TEXT NOT NULL, -- Server signature of the event

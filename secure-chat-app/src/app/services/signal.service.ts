@@ -174,7 +174,7 @@ export class SignalService {
 
         return {
             type: ciphertext.type, // 3 (PreKeyBundle) or 1 (Whisper)
-            body: this.arrayBufferToBase64(ciphertext.body),
+            body: this.arrayBufferToBase64(ciphertext.body as any),
             registrationId: ciphertext.registrationId,
             senderUserId: myUserId,
             senderDeviceId: myDeviceId,

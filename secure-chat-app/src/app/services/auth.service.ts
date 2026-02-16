@@ -32,6 +32,8 @@ export class AuthService {
     private blockedUnsub?: Unsubscribe;
     private firebaseSigningIn = false;
 
+    private userBlockedAlertShown = false;
+
     // ... (rest of props)
 
     constructor(
@@ -77,9 +79,10 @@ export class AuthService {
         }, 3000);
 
         const savedId = localStorage.getItem('user_id');
-        if (savedId) {
+        if (savedId && savedId.trim()) {
             const norm = savedId.trim().toUpperCase();
             this.userIdSource.next(norm);
+            this.userBlockedAlertShown = false; // Reset on new user login
             this.initBlockedListener(norm);
             // v16.1 Fix: Ensure Firebase is authenticated on app restart
             this.signInToFirebase(norm);
@@ -115,7 +118,7 @@ export class AuthService {
 
     // --- Device Management (Phase 2) ---
 
-    private getOrGenerateDeviceUUID(): string {
+    public getOrGenerateDeviceUUID(): string {
         let uuid = localStorage.getItem('device_uuid');
         if (!uuid) {
             uuid = 'dev_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -126,7 +129,11 @@ export class AuthService {
 
     private async registerDevice(userId: string) {
         const uuid = this.getOrGenerateDeviceUUID();
-        const pubKey = localStorage.getItem('public_key');
+        let pubKey = localStorage.getItem('public_key');
+        if (!pubKey) {
+            // Fallback: email OTP login stores key in secureStorage only
+            pubKey = await this.secureStorage.getItem('public_key');
+        }
         if (!pubKey) return; // Should have key by now
 
         // Get friendly name
@@ -141,9 +148,14 @@ export class AuthService {
         }).toPromise();
     }
 
-    setSession(userId: string, token?: string, isProfileComplete?: boolean, refreshToken?: string) {
+    async setSession(userId: string, token?: string, isProfileComplete?: boolean, refreshToken?: string) {
         // v16.0: Strict Normalization
-        const normalizedId = String(userId).trim().toUpperCase();
+        const normalizedId = String(userId || '').trim().toUpperCase();
+
+        if (!normalizedId || normalizedId === 'UNDEFINED' || normalizedId === 'NULL') {
+            this.logger.error('[Auth] setSession called with invalid userId:', userId);
+            return;
+        }
 
         localStorage.setItem('user_id', normalizedId);
         // Cookie Migration: Tokens now invalid in LocalStorage - removed to enforce Cookie usage
@@ -156,14 +168,18 @@ export class AuthService {
         this.userIdSource.next(normalizedId);
         this.initBlockedListener(normalizedId);
 
-        // Register Device (Phase 2) 
-        this.registerDevice(normalizedId).catch(e => console.error("Device Reg Failed", e));
+        // Register Device FIRST (must complete before Firebase auth)
+        try {
+            await this.registerDevice(normalizedId);
+        } catch (e) {
+            console.error('Device Reg Failed', e);
+        }
 
         // Force Push Registration / Sync
         // this.pushService.syncToken(); // Moved to signInToFirebase result
         this.callService.init();
 
-        // Ensure Firebase Auth
+        // Ensure Firebase Auth (device must be registered first)
         this.signInToFirebase(normalizedId);
     }
 
@@ -186,10 +202,17 @@ export class AuthService {
                 return res.token;
             }
         } catch (e: any) {
-            // v8.1: If 403 Forbidden, the account is blocked
-            if (e?.status === 403) {
-                this.logout();
-                alert("This account has been blocked. Please contact support.");
+            // v8.1: Only treat as blocked if backend explicitly says so
+            const errorBody = e?.error;
+            if (e?.status === 403 && errorBody?.status === 'blocked') {
+                if (!this.userBlockedAlertShown) {
+                    this.userBlockedAlertShown = true;
+                    this.logout();
+                    alert("This account has been blocked. Please contact support.");
+                }
+            } else if (e?.status === 403) {
+                // Device error or session issue — don't force logout
+                this.logger.warn('[Auth] 403 from refresh (device/session issue, not blocked)', errorBody);
             }
             this.logger.error("Token Refresh Failed", e);
         }
@@ -219,11 +242,13 @@ export class AuthService {
         }
         this.firebaseSigningIn = true;
 
+        const deviceUuid = localStorage.getItem('device_uuid') || this.getOrGenerateDeviceUUID();
+
         try {
             this.logger.log(`[Auth] Starting Custom Token Exchange for ${userId}...`);
 
             // Exchange PHP session for Firebase Token
-            const res: any = await this.api.post('firebase_auth.php', { user_id: userId }).toPromise();
+            const res: any = await this.api.post('firebase_auth.php', { user_id: userId, device_uuid: deviceUuid }).toPromise();
 
             if (res && res.status === 'success') {
                 const customToken = res.firebase_token || res.token;
@@ -240,6 +265,35 @@ export class AuthService {
                 this.logger.error("[Auth] Token Exchange FAILED. Response:", res);
             }
         } catch (e: any) {
+            // Handle 403: distinguish blocked vs device issues
+            if (e?.status === 403) {
+                const errorBody = e?.error;
+                if (errorBody?.error === 'Device not registered' || errorBody?.error === 'Device is not active or has been revoked') {
+                    this.logger.warn('[Auth] Device not registered/active. Retrying registration...');
+                    try {
+                        await this.registerDevice(userId);
+                        // Retry Firebase auth after re-registering device
+                        const retryRes: any = await this.api.post('firebase_auth.php', { user_id: userId, device_uuid: deviceUuid }).toPromise();
+                        if (retryRes?.status === 'success') {
+                            const customToken = retryRes.firebase_token || retryRes.token;
+                            if (customToken) {
+                                await signInWithCustomToken(authInstance, customToken);
+                                this.logger.log('[Auth] Firebase auth RETRY SUCCESS');
+                                return;
+                            }
+                        }
+                    } catch (retryErr) {
+                        this.logger.error('[Auth] Device re-registration retry failed', retryErr);
+                    }
+                } else if (errorBody?.status === 'blocked') {
+                    if (!this.userBlockedAlertShown) {
+                        this.userBlockedAlertShown = true;
+                        this.logout();
+                        alert('This account has been blocked. Please contact support.');
+                    }
+                    return;
+                }
+            }
             this.logger.error("[Auth] Firebase Custom Auth EXCEPTION", e);
         } finally {
             this.firebaseSigningIn = false;
@@ -323,18 +377,22 @@ export class AuthService {
 
             // 3. Send to backend for verification/registration
             const googleUserAny = googleUser as any;
+            const platform = (Capacitor.getPlatform() || 'web').toUpperCase(); // 'ANDROID', 'IOS', 'WEB'
+
             const response: any = await this.api.post('oauth.php', {
                 provider: 'google',
                 id_token: googleUserAny.authentication?.idToken || googleUserAny.idToken,
                 email: googleUser.email,
                 name: googleUser.name || googleUser.givenName,
                 photo_url: googleUser.imageUrl,
-                public_key: publicKeyStr
+                public_key: publicKeyStr,
+                platform: platform, // Dynamic Platform Field (Security Hardening)
+                device_uuid: this.getOrGenerateDeviceUUID() // Ensure valid UUID is generated & sent
             }).toPromise();
 
             if (response && response.status === 'success') {
                 const token = response.token || googleUserAny.authentication?.idToken || googleUserAny.idToken;
-                this.setSession(response.user_id, token, !!response.is_profile_complete, response.refresh_token);
+                await this.setSession(response.user_id, token, !!response.is_profile_complete, response.refresh_token);
 
                 // Cache user info
                 if (googleUser.name || googleUser.givenName) {

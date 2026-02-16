@@ -5,6 +5,8 @@
 require_once __DIR__ . '/../../../includes/db_connect.php';
 require_once __DIR__ . '/../../../api/auth_middleware.php';
 require_once __DIR__ . '/../../../includes/group_auth.php';
+// Epic 82: Group Admin Controls (Edit Info)
+require_once __DIR__ . '/../../../includes/group_permission_enforcer.php';
 
 header('Content-Type: application/json');
 

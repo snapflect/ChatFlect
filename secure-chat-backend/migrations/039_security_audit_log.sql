@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS `security_audit_log` (
     `audit_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `event_type` VARCHAR(64) NOT NULL, -- e.g. 'DEVICE_REVOKED', 'DECRYPT_FAIL'
     `severity` ENUM('INFO', 'WARNING', 'CRITICAL', 'BLOCKER') NOT NULL DEFAULT 'INFO',
-    `user_id` INT DEFAULT NULL, -- Nullable for unauth events
+    `user_id` VARCHAR(255) DEFAULT NULL, -- Nullable for unauth events
     `device_id` VARCHAR(64) DEFAULT NULL,
     `ip_address` VARCHAR(45) DEFAULT NULL,
     `metadata` JSON DEFAULT NULL, -- Context: msg_id, payload_hash, etc.

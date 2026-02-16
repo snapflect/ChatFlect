@@ -28,12 +28,20 @@ try {
     $limit = 50;
 
     // Hardening: Explicitly bind query to auth token's device_id
+    // Epic 84: Join messages to expose forwarding_score
     $stmt = $pdo->prepare("
-        SELECT inbox_id, message_uuid, encrypted_payload, nonce, created_at 
-        FROM device_inbox 
-        WHERE recipient_device_id = :authDeviceId 
-          AND status = 'PENDING'
-        ORDER BY inbox_id ASC
+        SELECT 
+            di.inbox_id, 
+            di.message_uuid, 
+            di.encrypted_payload, 
+            di.nonce, 
+            di.created_at,
+            m.forwarding_score
+        FROM device_inbox di
+        LEFT JOIN messages m ON UNHEX(di.message_uuid) = m.message_id
+        WHERE di.recipient_device_id = :authDeviceId 
+          AND di.status = 'PENDING'
+        ORDER BY di.inbox_id ASC
         LIMIT :limit
     ");
 

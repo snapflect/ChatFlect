@@ -1,0 +1,8 @@
+{
+    "forwarding": {
+        "limit_normal": 5,
+        "limit_frequent": 1,
+        "threshold_frequent": 5,
+        "allow_view_once_forward": false
+    }
+}

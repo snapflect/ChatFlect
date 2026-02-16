@@ -31,9 +31,28 @@ function auditLog($action, $userId = null, $details = null)
         );
         $stmt->bind_param("sssss", $userId, $action, $details, $ipAddress, $userAgent);
         $stmt->execute();
+        $stmt->execute();
     } catch (Exception $e) {
         // Don't let audit logging failures break the main flow
         error_log("Audit log failed: " . $e->getMessage());
+    }
+
+    // SIEM Integration (Epic 89): Write structured JSON to file
+    try {
+        $logEntry = [
+            'timestamp' => date('c'),
+            'environment' => 'production',
+            'event_id' => $action,
+            'user_id' => $userId,
+            'ip_address' => $ipAddress,
+            'user_agent' => $userAgent,
+            'details' => json_decode($details, true) // decode if it was encoded for DB
+        ];
+
+        $logFile = __DIR__ . '/../logs/compliance.json.log';
+        file_put_contents($logFile, json_encode($logEntry) . "\n", FILE_APPEND | LOCK_EX);
+    } catch (Exception $e) {
+        error_log("SIEM log failed: " . $e->getMessage());
     }
 
     // v12: Probabilistic Garbage Collection (1/1000 chance)

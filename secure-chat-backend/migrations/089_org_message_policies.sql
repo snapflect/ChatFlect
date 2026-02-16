@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS `org_message_policies` (
     `policy_id` INT AUTO_INCREMENT PRIMARY KEY,
-    `org_id` INT NOT NULL,
+    `org_id` BINARY(16) NOT NULL,
     `allow_external_contacts` BOOLEAN DEFAULT TRUE,
     `allow_media` BOOLEAN DEFAULT TRUE,
     `allow_forwarding` BOOLEAN DEFAULT TRUE,

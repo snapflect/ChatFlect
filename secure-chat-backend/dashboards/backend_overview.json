@@ -1,0 +1,32 @@
+{
+    "title": "ChatFlect Backend Overview",
+    "panels": [
+        {
+            "title": "Total Users",
+            "type": "stat",
+            "targets": [
+                {
+                    "expr": "chatflect_users_total"
+                }
+            ]
+        },
+        {
+            "title": "Total Messages",
+            "type": "graph",
+            "targets": [
+                {
+                    "expr": "rate(chatflect_messages_total[5m])"
+                }
+            ]
+        },
+        {
+            "title": "System Uptime",
+            "type": "gauge",
+            "targets": [
+                {
+                    "expr": "chatflect_up"
+                }
+            ]
+        }
+    ]
+}

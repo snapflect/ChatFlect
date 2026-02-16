@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    // 🔒 Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    // ✅ Chats & Messages
+    match /chats/{chatId} {
+      allow read, write: if isSignedIn();
+      match /messages/{msgId} {
+        allow read, write: if isSignedIn();
+      }
+      match /typing/{userId} {
+        allow read, write: if isSignedIn();
+      }
+    }
+    // ✅ Users (profile, presence, sync, blocked, etc.)
+    match /users/{userId} {
+      allow read, write: if isSignedIn();
+      match /blocked/{targetId} {
+        allow read, write: if isSignedIn();
+      }
+      match /sync_requests/{reqId} {
+        allow read, write: if isSignedIn();
+      }
+    }
+    // ✅ Signaling (Calls)
+    match /calls/{callId} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}

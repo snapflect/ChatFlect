@@ -16,10 +16,32 @@ if (!function_exists('str_contains')) {
 
 require_once 'db.php';
 require_once 'rate_limiter.php';
+require_once 'sanitizer.php';
 require_once 'auth_middleware.php';
 
 // Enforce rate limiting
 enforceRateLimit();
+
+// Global Error Handler for JSON Responses
+set_error_handler(function ($errno, $errstr, $errfile, $errline) {
+    if (!(error_reporting() & $errno))
+        return;
+    http_response_code(500);
+    echo json_encode([
+        "error" => "PHP Error [$errno]: $errstr in " . basename($errfile) . ":$errline",
+        "status" => "error"
+    ]);
+    exit;
+});
+
+set_exception_handler(function ($e) {
+    http_response_code(500);
+    echo json_encode([
+        "error" => "PHP Exception: " . $e->getMessage() . " in " . basename($e->getFile()) . ":" . $e->getLine(),
+        "status" => "error"
+    ]);
+    exit;
+});
 
 // Headers handled by db.php
 
@@ -98,7 +120,7 @@ if ($method === 'POST') {
         if ($userRes->num_rows > 0) {
             // Existing
             $row = $userRes->fetch_assoc();
-            $userId = trim(strtoupper($data->user_id)); // v16.0 Zero-Trust Normalization
+            $userId = trim(strtoupper($row['user_id'])); // Fix: Read from DB, not request
             $isProfileComplete = (int) $row['is_profile_complete'];
 
             // Update Key
@@ -139,10 +161,16 @@ if ($method === 'POST') {
         $sess->bind_param("ssssssss", $userId, $deviceUuid, $jti, $refreshToken, $expires, $jti, $refreshToken, $expires);
         $sess->execute();
 
-        // 5. Cache Session for instant auth
-        CacheService::cacheSession($jti, $userId, ['device' => $deviceUuid]);
+        // 5. Auto-register Device (v16.1 Ensure subsequent requireAuth calls pass during onboarding)
+        $devReg = $conn->prepare("INSERT IGNORE INTO user_devices (user_id, device_uuid, status) VALUES (?, ?, 'active')");
+        $devReg->bind_param("ss", $userId, $deviceUuid);
+        $devReg->execute();
+        $devReg->close();
 
-        // 6. Set HTTP-Only Cookie
+        // 6. Cache Session for instant auth
+        CacheService::cacheSession($jti, $userId, ['device_uuid' => $deviceUuid]);
+
+        // 7. Set HTTP-Only Cookie
         $cookieExpires = strtotime($expires);
         setcookie('auth_token', $jti, [
             'expires' => $cookieExpires,
@@ -240,8 +268,8 @@ if ($method === 'POST') {
 
     /* ---------- PROFILE UPDATE ---------- */
     if (isset($data->user_id)) {
-        // Require authentication and verify user matches
-        $userId = sanitizeUserId($data->user_id);
+        // Normalize for v16.0 comparison
+        $userId = strtoupper(trim(sanitizeUserId($data->user_id)));
         requireAuth($userId);
 
         $check = $conn->prepare("SELECT id, phone_number, is_profile_complete FROM users WHERE user_id = ?");
@@ -336,14 +364,27 @@ if ($method === 'POST') {
         $types .= "s";
         $params[] = $userId;
 
-        $stmt = $conn->prepare($sql);
+        if (!$stmt = $conn->prepare($sql)) {
+            http_response_code(500);
+            echo json_encode(["error" => "DB Prepare Failed: " . $conn->error]);
+            exit;
+        }
+
         $stmt->bind_param($types, ...$params);
-        $stmt->execute();
+        if (!$stmt->execute()) {
+            http_response_code(500);
+            echo json_encode(["error" => "DB Execute Failed: " . $stmt->error, "sql" => $sql]);
+            exit;
+        }
 
-        echo json_encode(["status" => "profile_updated"]);
+        echo json_encode(["status" => "profile_updated", "user_id" => $userId]);
+    } else {
+        // Fallback for POST without specific action
+        http_response_code(400);
+        echo json_encode(["error" => "No valid action or user_id provided in POST"]);
     }
-
-} elseif ($method === 'GET') {
+} // <--- Closes the $method === 'POST' block at line 46
+elseif ($method === 'GET') {
 
     $userId = isset($_GET['user_id']) ? trim(strtoupper($_GET['user_id'])) : ''; // v16.0 Zero-Trust Normalization
     if (!$userId) {

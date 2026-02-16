@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS `privacy_events` (
     `event_id` BIGINT AUTO_INCREMENT PRIMARY KEY,
     `conversation_id` BINARY(16) NOT NULL,
-    `user_id` INT NOT NULL,
+    `user_id` VARCHAR(255) NOT NULL,
     `device_id` VARCHAR(64) DEFAULT NULL,
     `event_type` ENUM('SCREENSHOT_TAKEN', 'SCREEN_RECORDING_STARTED', 'SCREEN_RECORDING_STOPPED') NOT NULL,
     `platform` VARCHAR(20) DEFAULT NULL, -- ANDROID, IOS, WEB
