@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
-import { get, set, del, keys, clear } from 'idb-keyval';
-import { SecureStorageService } from './secure-storage.service';
 import { Subject } from 'rxjs';
+import { SecureStorageService } from './secure-storage.service';
+import { LocalDbService } from './local-db.service';
 
 export interface IdentityMismatchEvent {
     identifier: string;
@@ -33,26 +33,37 @@ export class SignalStoreService implements SignalProtocolStore {
     private readonly IV_LENGTH = 12;
     private initPromise: Promise<void> | null = null;
 
-    // Story 6.2: Identity Mismatch Observable
     private identityMismatchSubject = new Subject<IdentityMismatchEvent>();
     public identityMismatch$ = this.identityMismatchSubject.asObservable();
 
-    // STRICT FIX: Prevent repeated alerts for same identifier
     private mismatchAlreadyAlerted = new Set<string>();
-
-    // STRICT FIX: Track permanently blocked identities
     private blockedIdentities = new Set<string>();
 
-    constructor(private secureStorage: SecureStorageService) {
-        // Load blocked identities from storage on init
+    constructor(private secureStorage: SecureStorageService, private localDb: LocalDbService) {
         this.loadBlockedIdentities();
+    }
+
+    private async getMeta(key: string): Promise<any> {
+        const res = await this.localDb.query('SELECT value FROM local_signal_meta WHERE key = ?', [key]);
+        return res.length > 0 ? JSON.parse(res[0].value) : null;
+    }
+
+    private async setMeta(key: string, value: any): Promise<void> {
+        await this.localDb.run('INSERT OR REPLACE INTO local_signal_meta (key, value) VALUES (?, ?)', [key, JSON.stringify(value)]);
+    }
+
+    private async delMeta(key: string): Promise<void> {
+        await this.localDb.run('DELETE FROM local_signal_meta WHERE key = ?', [key]);
     }
 
     private async loadBlockedIdentities(): Promise<void> {
         try {
-            const blocked = await get('blocked_identities');
-            if (blocked && Array.isArray(blocked)) {
-                this.blockedIdentities = new Set(blocked);
+            const res = await this.localDb.query('SELECT value FROM local_signal_meta WHERE key = ?', ['blocked_identities']);
+            if (res.length > 0 && res[0].value) {
+                const blocked = JSON.parse(res[0].value);
+                if (Array.isArray(blocked)) {
+                    this.blockedIdentities = new Set(blocked);
+                }
             }
         } catch (e) {
             console.warn('Could not load blocked identities', e);
@@ -61,17 +72,15 @@ export class SignalStoreService implements SignalProtocolStore {
 
     async markIdentityBlocked(identifier: string): Promise<void> {
         this.blockedIdentities.add(identifier);
-        await set('blocked_identities', Array.from(this.blockedIdentities));
+        await this.localDb.run('INSERT OR REPLACE INTO local_signal_meta (key, value) VALUES (?, ?)',
+            ['blocked_identities', JSON.stringify(Array.from(this.blockedIdentities))]);
         console.log(`Identity blocked: ${identifier}`);
     }
 
     async unblockIdentity(identifier: string): Promise<void> {
         this.blockedIdentities.delete(identifier);
-        await set('blocked_identities', Array.from(this.blockedIdentities));
-    }
-
-    isIdentityBlocked(identifier: string): boolean {
-        return this.blockedIdentities.has(identifier);
+        await this.localDb.run('INSERT OR REPLACE INTO local_signal_meta (key, value) VALUES (?, ?)',
+            ['blocked_identities', JSON.stringify(Array.from(this.blockedIdentities))]);
     }
 
     // Clear alert lock (call after user makes a decision)
@@ -165,8 +174,8 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async reservePreKeyIds(count: number): Promise<number> {
-        const current = (await get('nextPreKeyId')) || 1;
-        await set('nextPreKeyId', current + count);
+        const current = (await this.getMeta('nextPreKeyId')) || 1;
+        await this.setMeta('nextPreKeyId', current + count);
         return current;
     }
 
@@ -175,17 +184,17 @@ export class SignalStoreService implements SignalProtocolStore {
 
     // --- Identity Key (Encrypted) ---
     async getIdentityKeyPair(): Promise<any> {
-        const data = await get('identityKey');
+        const data = await this.getMeta('identityKey');
         return this.decryptData(data);
     }
 
     async getLocalRegistrationId(): Promise<number> {
-        return (await get('registrationId')) || 0;
+        return (await this.getMeta('registrationId')) || 0;
     }
 
     async saveIdentity(identifier: string, identityKey: any): Promise<boolean> {
         const encrypted = await this.encryptData(identityKey);
-        await set(`identityKey_${identifier}`, encrypted);
+        await this.setMeta(`identityKey_${identifier}`, encrypted);
         return true;
     }
 
@@ -196,7 +205,7 @@ export class SignalStoreService implements SignalProtocolStore {
             return false;
         }
 
-        const existing = await get(`identityKey_${identifier}`);
+        const existing = await this.getMeta(`identityKey_${identifier}`);
         if (!existing) {
             // TOFU: Trust On First Use
             await this.saveIdentity(identifier, identityKey);
@@ -244,7 +253,7 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async loadIdentityKey(identifier: string): Promise<any> {
-        const encrypted = await get(`identityKey_${identifier}`);
+        const encrypted = await this.getMeta(`identityKey_${identifier}`);
         if (!encrypted) return null;
         return this.decryptData(encrypted);
     }
@@ -276,34 +285,26 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async loadPreKey(keyId: string | number): Promise<any> {
-        const res = await get(`preKey_${keyId}`);
-        return res ? res : undefined;
+        const res = await this.localDb.query('SELECT key_pair FROM local_prekeys WHERE id = ?', [keyId]);
+        return res.length > 0 ? JSON.parse(res[0].key_pair) : undefined;
     }
 
     async storePreKey(keyId: string | number, keyPair: any): Promise<void> {
-        await set(`preKey_${keyId}`, keyPair);
+        await this.localDb.run('INSERT OR REPLACE INTO local_prekeys (id, key_pair) VALUES (?, ?)', [keyId, JSON.stringify(keyPair)]);
     }
 
     async removePreKey(keyId: string | number): Promise<void> {
-        await del(`preKey_${keyId}`);
+        await this.localDb.run('DELETE FROM local_prekeys WHERE id = ?', [keyId]);
     }
 
     async removeAllPreKeys(): Promise<void> {
-        // Strict Fix: Do NOT use clear(). Only remove prekeys.
-        const allKeys = await keys();
-        const targetKeys = allKeys.filter((k: any) =>
-            String(k).startsWith('preKey_') ||
-            String(k).startsWith('signedPreKey_')
-        );
-        for (const k of targetKeys) {
-            await del(k);
-        }
+        await this.localDb.execute('DELETE FROM local_prekeys; DELETE FROM local_signed_prekeys;');
     }
 
     // --- Story 3.1: Key Versioning Support ---
     async getLocalKeyVersion(): Promise<number> {
         try {
-            const v = await get('local_key_version');
+            const v = await this.getMeta('local_key_version');
             return v ? Number(v) : 1;
         } catch (e) {
             return 1;
@@ -311,27 +312,27 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async setLocalKeyVersion(version: number): Promise<void> {
-        await set('local_key_version', version);
+        await this.setMeta('local_key_version', version);
     }
 
     async getLastRotationTimestamp(): Promise<number | undefined> {
-        return await get('last_rotation_timestamp');
+        return await this.getMeta('last_rotation_timestamp');
     }
 
     async setLastRotationTimestamp(ts: number): Promise<void> {
-        await set('last_rotation_timestamp', ts);
+        await this.setMeta('last_rotation_timestamp', ts);
     }
 
     // --- Signed PreKeys ---
     async getNextSignedPreKeyId(): Promise<number> {
-        const current = (await get('nextSignedPreKeyId')) || 1;
+        const current = (await this.getMeta('nextSignedPreKeyId')) || 1;
         // Do not auto-increment here if we want manual control, 
         // but consistent with getNextPreKeyId, we usually standard increment.
         return current;
     }
 
     async setNextSignedPreKeyId(id: number): Promise<void> {
-        await set('nextSignedPreKeyId', id);
+        await this.setMeta('nextSignedPreKeyId', id);
     }
 
     async getSignedPreKey(keyId: string | number): Promise<any> {
@@ -339,16 +340,18 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async loadSignedPreKey(keyId: string | number): Promise<any> {
-        const res = await get(`signedPreKey_${keyId}`);
-        return res ? res : undefined;
+        const res = await this.localDb.query('SELECT key_pair FROM local_signed_prekeys WHERE id = ?', [keyId]);
+        return res.length > 0 ? JSON.parse(res[0].key_pair) : undefined;
     }
 
     async storeSignedPreKey(keyId: string | number, keyPair: any): Promise<void> {
-        await set(`signedPreKey_${keyId}`, keyPair);
+        const signature = keyPair.signature;
+        await this.localDb.run('INSERT OR REPLACE INTO local_signed_prekeys (id, key_pair, signature) VALUES (?, ?, ?)',
+            [keyId, JSON.stringify(keyPair), signature]);
     }
 
     async removeSignedPreKey(keyId: string | number): Promise<void> {
-        await del(`signedPreKey_${keyId}`);
+        await this.localDb.run('DELETE FROM local_signed_prekeys WHERE id = ?', [keyId]);
     }
 
     // --- Sessions ---
@@ -357,17 +360,22 @@ export class SignalStoreService implements SignalProtocolStore {
     }
 
     async loadSession(identifier: string): Promise<any> {
-        const encrypted = await get(`session_${identifier}`);
-        return encrypted ? this.decryptData(encrypted) : undefined;
+        const res = await this.localDb.query('SELECT record FROM local_signal_sessions WHERE identifier = ?', [identifier]);
+        if (res.length > 0 && res[0].record) {
+            const encrypted = JSON.parse(res[0].record);
+            return this.decryptData(encrypted);
+        }
+        return undefined;
     }
 
     async storeSession(identifier: string, record: any): Promise<void> {
         const encrypted = await this.encryptData(record);
-        await set(`session_${identifier}`, encrypted);
+        await this.localDb.run('INSERT OR REPLACE INTO local_signal_sessions (identifier, record) VALUES (?, ?)',
+            [identifier, JSON.stringify(encrypted)]);
     }
 
     async removeSession(identifier: string): Promise<void> {
-        await del(`session_${identifier}`);
+        await this.localDb.run('DELETE FROM local_signal_sessions WHERE identifier = ?', [identifier]);
     }
 
     async deleteSession(identifier: string): Promise<void> {
@@ -376,21 +384,17 @@ export class SignalStoreService implements SignalProtocolStore {
 
     // --- Identity Management ---
     async removeIdentity(identifier: string): Promise<void> {
-        await del(`identityKey_${identifier}`);
+        await this.delMeta(`identityKey_${identifier}`);
     }
 
     async deleteAllSessions(): Promise<void> {
-        const allKeys = await keys();
-        const sessions = allKeys.filter((k: any) => String(k).startsWith('session_'));
-        for (const k of sessions) {
-            await del(k);
-        }
+        await this.localDb.execute('DELETE FROM local_signal_sessions');
     }
 
     async setLocalIdentity(identityKeyPair: any, registrationId: number): Promise<void> {
         const encKey = await this.encryptData(identityKeyPair);
-        await set('identityKey', encKey);
-        await set('registrationId', registrationId);
+        await this.setMeta('identityKey', encKey);
+        await this.setMeta('registrationId', registrationId);
     }
 
     // --- ECDSA Signing Key (Epic 5 Strict) ---
@@ -399,11 +403,11 @@ export class SignalStoreService implements SignalProtocolStore {
         const priv = await window.crypto.subtle.exportKey('jwk', keyPair.privateKey);
         const data = { pub, priv };
         const enc = await this.encryptData(data);
-        await set('ecdsa_signing_key', enc);
+        await this.setMeta('ecdsa_signing_key', enc);
     }
 
     async loadSigningKey(): Promise<CryptoKeyPair | null> {
-        const enc = await get('ecdsa_signing_key');
+        const enc = await this.getMeta('ecdsa_signing_key');
         if (!enc) return null;
 
         try {

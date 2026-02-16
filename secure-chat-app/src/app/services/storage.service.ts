@@ -1,182 +1,35 @@
 import { Injectable } from '@angular/core';
-import { Capacitor } from '@capacitor/core';
-import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
-import { SecureStoragePlugin } from 'capacitor-secure-storage-plugin';
+import { LocalDbService } from './local-db.service';
 
 @Injectable({
     providedIn: 'root'
 })
 export class StorageService {
-    private sqlite: SQLiteConnection = new SQLiteConnection(CapacitorSQLite);
-    private db!: SQLiteDBConnection;
-    private isInitialized: boolean = false;
     private isProcessing = false;
     private currentOperationId = 0;
-    private initPromise: Promise<void> | null = null;
-    private mode: 'persistent' | 'ephemeral' | 'none' = 'none';
-    private fatal = false; // Track fatal state
 
-    private readonly DB_NAME = 'chatflect_cache_v9'; // v9: Force reset for encryption migration
-
-    constructor() {
-        // Strict singleton call
-        this.initDatabase();
+    constructor(private localDb: LocalDbService) {
+        // v2.3: Redundant initDatabase removed as LocalDbService handles it in APP_INITIALIZER
     }
 
-    /**
-     * Wait for database initialization before running queries
-     * MUST NEVER THROW to avoid global unhandled exceptions.
-     */
     /**
      * Public readiness check (v15.2)
      */
     async isReady(): Promise<boolean> {
-        if (this.isInitialized) return true;
-        if (this.initPromise) {
-            try { await this.initPromise; } catch (e) { }
-        }
-        return this.isInitialized;
+        await this.localDb.initialize();
+        return true;
     }
 
-
-
     private async safeRun(statement: string, values: any[] = []): Promise<any> {
-        if (!(await this.isReady())) {
-            console.warn('[StorageService][SafeMode] Run skipped');
-            return null;
-        }
-        return this.db.run(statement, values);
+        return this.localDb.run(statement, values);
     }
 
     private async safeQuery<T = any>(statement: string, values: any[] = []): Promise<T[]> {
-        if (!(await this.isReady())) {
-            console.warn('[StorageService][SafeMode] Query skipped');
-            return [];
-        }
-        const res = await this.db.query(statement, values);
-        return (res.values as T[]) || [];
+        return this.localDb.query<T>(statement, values);
     }
 
     private async safeExecute(statements: string): Promise<any> {
-        if (!(await this.isReady())) {
-            console.warn('[StorageService][SafeMode] Execute skipped');
-            return null;
-        }
-        return this.db.execute(statements);
-    }
-
-    async initDatabase(): Promise<void> {
-        // 3. Strict Singleton Pattern
-        if (this.initPromise) return this.initPromise;
-
-        this.initPromise = (async () => {
-            // 1. Try Persistent Mode
-            try {
-                await this.setupConnection({ ephemeral: false }); // persistent
-                this.mode = 'persistent';
-                this.isInitialized = true;
-                console.log('[StorageService][v9] SQLite Database Initialized (Persistent)');
-
-                await this.postInitSetup();
-                return; // ✅ Success
-            } catch (e1) {
-                console.warn('[StorageService][v9] Persistent Init Failed - Attempting Fallback', e1);
-
-                // 2. Fallback to Ephemeral Mode (Reset DB + Ephemeral Key)
-                try {
-                    await this.safeDeleteDb();
-
-                    // True ephemeral fallback: In-memory key only. Bypasses SecureStorage.
-                    await this.setupConnection({ ephemeral: true });
-                    this.mode = 'ephemeral';
-                    this.isInitialized = true;
-                    console.info('[StorageService][v9] SQLite Database Initialized (Ephemeral/Reset)'); // INFO level
-
-                    await this.postInitSetup();
-                    return; // ✅ Success - DO NOT THROW
-                } catch (e2) {
-                    console.error('[StorageService][v9] Fatal Init Error (Ephemeral Failed)', e2);
-                    this.mode = 'none';
-                    this.isInitialized = false;
-                    this.fatal = true; // Mark as fatal
-                    // DO NOT THROW. Let isReady handle it.
-                }
-            }
-        })();
-
-        return this.initPromise;
-    }
-
-    private async setupConnection(options: { ephemeral: boolean }) {
-        let passphrase: string;
-
-        if (options.ephemeral) {
-            // Generate random in-memory key. Do NOT save to SecureStorage.
-            passphrase = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
-            console.log('[StorageService] Using Ephemeral Key');
-        } else {
-            // Retrieve or create persistent key
-            passphrase = await this.getOrCreatePassphrase();
-        }
-
-        this.db = await this.sqlite.createConnection(
-            this.DB_NAME,
-            true,
-            'secret',
-            1,
-            false
-        );
-        await this.db.open();
-        await (this.db as any).setEncryptionSecret(passphrase);
-        await this.createTables();
-    }
-
-    private async safeDeleteDb() {
-        try {
-            if (this.sqlite) {
-                await this.sqlite.closeConnection(this.DB_NAME, false).catch(() => { });
-            }
-            await CapacitorSQLite.deleteDatabase({ database: this.DB_NAME }).catch(() => { });
-        } catch (e) {
-            console.warn('[StorageService] Delete DB warning', e);
-        }
-    }
-
-    private async postInitSetup() {
-        // Validate Integrity (v14)
-        await this.runHealthCheck();
-
-        // v15 Migration
-        try {
-            await this.db.execute('ALTER TABLE media_cache ADD COLUMN last_used INTEGER');
-        } catch (e) { }
-
-        // v16.0 Migration: fetched_at for contacts
-        try {
-            await this.db.execute('ALTER TABLE contacts ADD COLUMN fetched_at INTEGER');
-        } catch (e) { }
-
-        this.pruneMessageCache();
-        this.enforceMediaCacheLimit(200);
-    }
-
-    private async getOrCreatePassphrase(): Promise<string> {
-        try {
-            const { value } = await SecureStoragePlugin.get({ key: 'sqlite_passphrase' });
-            if (value) return value;
-        } catch (e) {
-            // Not found or error reading
-        }
-
-        const newPass = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
-        try {
-            await SecureStoragePlugin.set({ key: 'sqlite_passphrase', value: newPass });
-        } catch (e) {
-            console.error('[StorageService] SecureStorage Set Failed - Using ephemeral passphrase', e);
-            // Fallback: Return newPass anyway. DB will work for this session, but will need reset next time.
-            // This is better than crashing.
-        }
-        return newPass;
+        return this.localDb.execute(statements);
     }
 
     private async createTables() {
@@ -252,7 +105,7 @@ export class StorageService {
       );
       CREATE INDEX IF NOT EXISTS idx_outbox_chat ON outbox(chat_id);
     `;
-        await this.db.execute(queries);
+        await this.safeExecute(queries);
     }
 
     // --- Chat List Caching ---
@@ -416,7 +269,7 @@ export class StorageService {
             // Implementation:
             const { Filesystem, Directory } = await import('@capacitor/filesystem');
 
-            const res = await this.db.query('SELECT url, blob_path, last_used FROM media_cache ORDER BY last_used ASC');
+            const res = await this.localDb.query('SELECT url, blob_path, last_used FROM media_cache ORDER BY last_used ASC');
             if (!res.values) throw new Error('No values');
 
             let totalSize = 0;
@@ -424,7 +277,7 @@ export class StorageService {
 
             // This Scan is heavy. Optimization: Store size in DB on save?
             // For now, scan.
-            for (const row of res.values) {
+            for (const row of res) {
                 try {
                     const stat = await Filesystem.stat({ path: row.blob_path, directory: Directory.Cache });
                     items.push({ ...row, size: stat.size });
@@ -451,21 +304,21 @@ export class StorageService {
 
                 console.log(`[StorageService][v15] Evicting ${toDelete.length} items to reclaim ${(totalSize - currentSize) / 1024 / 1024} MB`);
 
-                await this.db.execute('BEGIN TRANSACTION');
+                await this.safeExecute('BEGIN TRANSACTION');
                 for (const item of toDelete) {
                     try {
                         if (!item.missing) {
                             await Filesystem.deleteFile({ path: item.blob_path, directory: Directory.Cache });
                         }
-                        await this.db.run('DELETE FROM media_cache WHERE url = ?', [item.url]);
+                        await this.safeRun('DELETE FROM media_cache WHERE url = ?', [item.url]);
                     } catch (e) { }
                 }
-                await this.db.execute('COMMIT');
+                await this.safeExecute('COMMIT');
             }
 
         } catch (e) {
             console.error('[StorageService][v15] Eviction Error', e);
-            await this.db.execute('ROLLBACK').catch(() => { });
+            await this.safeExecute('ROLLBACK').catch(() => { });
         } finally {
             if (this.currentOperationId === opId) this.isProcessing = false;
         }
@@ -506,7 +359,7 @@ export class StorageService {
                 for (const row of values) {
                     if (this.currentOperationId !== opId) {
                         console.warn(`[StorageService][v9] Prune (Op ${opId}) canceled by Op ${this.currentOperationId}`);
-                        await this.db.execute('ROLLBACK');
+                        await this.safeExecute('ROLLBACK');
                         return;
                     }
 
@@ -515,27 +368,27 @@ export class StorageService {
                             path: row.blob_path,
                             directory: Directory.Cache
                         });
-                        await this.db.run('DELETE FROM media_cache WHERE url = ?', [row.url]);
-                        await this.db.run('DELETE FROM media_retries WHERE url = ?', [row.url]);
+                        await this.safeRun('DELETE FROM media_cache WHERE url = ?', [row.url]);
+                        await this.safeRun('DELETE FROM media_retries WHERE url = ?', [row.url]);
                     } catch (e) {
                         const err = e as any;
                         const normErr = this.normalizeError(err);
 
                         if (normErr === 'ERROR_FILE_NOT_FOUND') {
-                            await this.db.run('DELETE FROM media_cache WHERE url = ?', [row.url]);
-                            await this.db.run('DELETE FROM media_retries WHERE url = ?', [row.url]);
+                            await this.safeRun('DELETE FROM media_cache WHERE url = ?', [row.url]);
+                            await this.safeRun('DELETE FROM media_retries WHERE url = ?', [row.url]);
                         } else {
                             console.error(`[StorageService][v8] Prune Fail (Op ${opId}): Path=${this.redactPath(row.blob_path)}, Code=${normErr}`);
                         }
                     }
                 }
 
-                await this.db.execute('COMMIT');
+                await this.safeExecute('COMMIT');
                 console.log(`[StorageService][v8] Pruned ${values.length} items (Op ${opId})`);
             }
         } catch (err) {
             console.error(`[StorageService][v8] Prune Exception (Op ${opId})`, err);
-            await this.db.execute('ROLLBACK').catch(() => { });
+            await this.safeExecute('ROLLBACK').catch(() => { });
         } finally {
             if (this.currentOperationId === opId) {
                 this.isProcessing = false;
@@ -629,16 +482,16 @@ export class StorageService {
                             console.error(`[StorageService][v8] Purge File Fail: ${this.redactPath(row.blob_path)}`, err);
                         }
                     }
-                    await this.db.run('DELETE FROM media_cache WHERE url = ?', [row.url]);
-                    await this.db.run('DELETE FROM media_retries WHERE url = ?', [row.url]);
+                    await this.safeRun('DELETE FROM media_cache WHERE url = ?', [row.url]);
+                    await this.safeRun('DELETE FROM media_retries WHERE url = ?', [row.url]);
                 }
             }
 
-            await this.db.execute('COMMIT');
+            await this.safeExecute('COMMIT');
             console.log(`[StorageService][v8] Media cache purged completely (Op ${opId})`);
         } catch (err) {
             console.error(`[StorageService][v8] Purge failed (Op ${opId})`, err);
-            await this.db.execute('ROLLBACK').catch(() => { });
+            await this.safeExecute('ROLLBACK').catch(() => { });
         } finally {
             if (this.currentOperationId === opId) {
                 this.isProcessing = false;
@@ -671,12 +524,12 @@ export class StorageService {
                             directory: Directory.Cache
                         });
                     } catch (e) {
-                        await this.db.run('DELETE FROM media_cache WHERE url = ?', [row.url]);
-                        await this.db.run('DELETE FROM media_retries WHERE url = ?', [row.url]);
+                        await this.safeRun('DELETE FROM media_cache WHERE url = ?', [row.url]);
+                        await this.safeRun('DELETE FROM media_retries WHERE url = ?', [row.url]);
                         totalHealed++;
                     }
                 }
-                await this.db.execute('COMMIT');
+                await this.safeExecute('COMMIT');
 
                 if (values.length < batchSize) break;
                 offset += batchSize;
@@ -687,7 +540,7 @@ export class StorageService {
             }
         } catch (err) {
             console.error(`[StorageService][v8] Reconciliation failed at offset ${offset}`, err);
-            await this.db.execute('ROLLBACK').catch(() => { });
+            await this.safeExecute('ROLLBACK').catch(() => { });
         }
     }
 
@@ -742,11 +595,11 @@ export class StorageService {
             if (result !== 'ok') {
                 console.error('[StorageService][v14] CORRUPTION DETECTED:', result);
                 // Attempt VACUUM to rebuild
-                await this.db.execute('VACUUM');
+                await this.safeExecute('VACUUM');
                 console.log('[StorageService][v14] VACUUM completed. Re-checking...');
 
-                const res2 = await this.db.query('PRAGMA integrity_check');
-                const result2 = res2.values && res2.values.length > 0 ? Object.values(res2.values[0])[0] : 'unknown';
+                const res2 = await this.localDb.query('PRAGMA integrity_check');
+                const result2 = res2.length > 0 ? Object.values(res2[0])[0] : 'unknown';
 
                 if (result2 !== 'ok') {
                     console.error('[StorageService][v14] FATAL: VACUUM failed. Database may be unsafe.');
@@ -757,10 +610,10 @@ export class StorageService {
                 console.log('[StorageService][v14] Integrity Check Passed (ok)');
 
                 // Optional: Log Size
-                const sizeRes = await this.db.query('PRAGMA page_count');
-                const pageSizeRes = await this.db.query('PRAGMA page_size');
-                if (sizeRes.values && pageSizeRes.values) {
-                    const size = (Object.values(sizeRes.values[0])[0] as number) * (Object.values(pageSizeRes.values[0])[0] as number);
+                const sizeRes = await this.localDb.query('PRAGMA page_count');
+                const pageSizeRes = await this.localDb.query('PRAGMA page_size');
+                if (sizeRes.length > 0 && pageSizeRes.length > 0) {
+                    const size = (Object.values(sizeRes[0])[0] as number) * (Object.values(pageSizeRes[0])[0] as number);
                     console.log(`[StorageService][v14] DB Size: ${(size / 1024 / 1024).toFixed(2)} MB`);
                 }
             }

@@ -28,6 +28,13 @@ import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { HTTP_INTERCEPTORS } from '@angular/common/http';
 import { AuthInterceptor } from './interceptors/auth.interceptor';
 
+import { APP_INITIALIZER } from '@angular/core';
+import { LocalDbService } from './services/local-db.service';
+
+export function initLocalDatabase(localDb: LocalDbService) {
+  return () => localDb.initialize();
+}
+
 @NgModule({
   declarations: [AppComponent, ReactionPickerComponent, GifPickerComponent, ViewerHistoryComponent],
   imports: [
@@ -45,7 +52,13 @@ import { AuthInterceptor } from './interceptors/auth.interceptor';
   providers: [
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
     { provide: ErrorHandler, useClass: GlobalErrorHandler },
-    { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true }
+    { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
+    {
+      provide: APP_INITIALIZER,
+      useFactory: initLocalDatabase,
+      deps: [LocalDbService],
+      multi: true
+    }
   ],
   bootstrap: [AppComponent],
 })
