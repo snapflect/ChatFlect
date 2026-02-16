@@ -28,14 +28,16 @@ export class GroupSignalService {
     uploadSenderKey(
         groupId: string,
         senderKeyId: number,
-        recipientKeys: RecipientKey[]
+        recipientKeys: RecipientKey[],
+        bundleVersion: number // HF-5B.2
     ): Observable<{ success: boolean; count: number }> {
         return this.http.post<{ success: boolean; count: number }>(
             `${this.baseUrl}/upload_sender_key.php`,
             {
                 group_id: groupId,
                 sender_key_id: senderKeyId,
-                recipient_keys: recipientKeys
+                recipient_keys: recipientKeys,
+                bundle_version: bundleVersion
             }
         );
     }

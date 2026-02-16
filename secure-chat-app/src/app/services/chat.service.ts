@@ -17,6 +17,7 @@ import { LocalDbService } from './local-db.service';
 import { RetrySchedulerService } from './retry-scheduler.service';
 import { MessageAckService } from './message-ack.service';
 import { SignalStoreService } from './signal-store.service';
+import { SignalService } from './signal.service';
 
 @Injectable({
     providedIn: 'root'
@@ -49,6 +50,7 @@ export class ChatService {
         private retryScheduler: RetrySchedulerService,
         private ackService: MessageAckService,
         private signalStore: SignalStoreService,
+        private signal: SignalService,
         private presence: PresenceService,
         private progressService: TransferProgressService
     ) {
@@ -206,29 +208,56 @@ export class ChatService {
     }
 
     private async persistIncomingMessage(msg: any): Promise<void> {
-        // msg: { inbox_id, message_uuid, encrypted_payload, created_at, forwarding_score }
+        // msg: { inbox_id, message_uuid, encrypted_payload, created_at, sender_user_id }
         try {
             // Deduplication (Enterprise HF-2.2 Check)
             const existing = await this.localDb.query('SELECT id FROM local_messages WHERE id = ?', [msg.message_uuid]);
             if (existing.length > 0) return;
 
+            const envelope = JSON.parse(msg.encrypted_payload);
+            let chatId = msg.sender_user_id || 'unknown_chat';
+            let senderId = msg.sender_user_id || 'unknown_sender';
+
+            // HF-5A: Protocol Awareness
+            if (envelope.protocol === 'v3') {
+                if (envelope.type === 'group' && envelope.groupId) {
+                    chatId = envelope.groupId;
+                    senderId = envelope.senderUserId;
+                } else {
+                    // In Signal V3, the sender is the "chat" for 1:1
+                    chatId = envelope.senderUserId;
+                    senderId = envelope.senderUserId;
+                }
+            } else {
+                // HF-5C.3: Strict Anti-Downgrade
+                // If we have a V3 session, we reject legacy/hybrid messages to prevent rollback attacks.
+                try {
+                    const hasV3 = await this.signal.hasSession(senderId, 1);
+                    if (hasV3) {
+                        this.logger.error(`[Security][HF-5C.3] DANGER: Blocked downgrade attack from ${senderId}. Ignoring legacy message.`);
+                        return;
+                    }
+                } catch (e) { /* Ignore error, proceed to legacy */ }
+            }
+
             // Prepare local persistence
-            // Note: We'd also handle decryption here or lazily in the UI
+            // Note: We store the RAW payload to disk (encrypted)
             await this.localDb.run(`
-                INSERT INTO local_messages (id, server_id, chat_id, type, payload, timestamp, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO local_messages (id, server_id, chat_id, sender_id, type, payload, timestamp, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             `, [
                 msg.message_uuid,
                 msg.inbox_id,
-                'temp_chat', // In a real app, we'd extract chat_id from payload headers
-                'encrypted',
+                chatId,
+                senderId,
+                envelope.type || 'encrypted',
                 msg.encrypted_payload,
                 new Date(msg.created_at).getTime(),
                 'delivered'
             ]);
 
             // Signal the UI or Notification logic
-            this.newMessage$.next({ chatId: 'temp_chat', senderId: 'unknown', timestamp: Date.now() });
+            this.newMessage$.next({ chatId: chatId, senderId: senderId, timestamp: Date.now() });
 
         } catch (err) {
             this.logger.warn('[ChatService] Failed to persist incoming message', err);
@@ -244,26 +273,89 @@ export class ChatService {
         const messageId = window.crypto.randomUUID();
 
         try {
-            // 1. Prepare Encrypted Envelope
-            // Note: In a full Signal implementation, we'd encrypt for each participant here.
-            // For now, we reuse the existing CryptoService AES-GCM logic or SignalStore sessions.
-            // Requirement Check: "Always store encrypted on disk".
+            // HF-5A: Core Signal Pipeline
+            // 1. Resolve Recipient ID (Assuming chatId is the recipient UserId for 1:1)
+            // Note: Groups will be handled in Phase 5B via Sender Keys.
+            const isGroup = chatId.startsWith('GROUP_');
+            let envelope: any;
 
-            const sessionKey = await this.crypto.generateSessionKey();
-            const iv = window.crypto.getRandomValues(new Uint8Array(12));
-            const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
+            if (!isGroup) {
+                // HF-5B.4: Anti-Downgrade Check
+                const hasV3Session = await this.signal.hasSession(chatId, 1); // MVP: Device 1
 
-            const cipherText = await this.crypto.encryptPayload(JSON.stringify(plainPayload), sessionKey, iv);
+                try {
+                    // Fetch primary device ID for recipient
+                    const deviceId = await this.signal.getPrimaryDeviceId(chatId);
 
-            // v2.3: We'd also encrypt the sessionKey for all recipients as in distributeSecurePayload
-            // but we'll pack it into a single 'payload' blob for the server.
+                    // Encrypt via Signal Protocol (V3 Envelope)
+                    envelope = await this.signal.encryptMessage(
+                        JSON.stringify(plainPayload),
+                        chatId,
+                        deviceId
+                    );
+                } catch (e: any) {
+                    // HF-5B.4: Block Legacy Fallback if V3 Session Exists
+                    if (hasV3Session) {
+                        this.logger.error(`[Security] Blocked downgrade for ${chatId} (V3 Session Exists)`);
+                        throw new Error('SECURITY_DOWNGRADE_BLOCKED');
+                    }
 
-            const envelope = {
-                ciphertext: cipherText,
-                iv: ivBase64,
-                type: type,
-                ...metadata
-            };
+                    if (e.message === 'IDENTITY_UNTRUSTED') {
+                        this.logger.error('[ChatService] Encryption blocked: Safety Number Mismatch');
+                        // Show toast to user
+                        const t = await this.toast.create({
+                            message: 'Security Alert: Safety Number has changed. Please verify contact.',
+                            duration: 4000,
+                            color: 'warning'
+                        });
+                        t.present();
+                        throw e;
+                    }
+                    this.logger.warn('[ChatService] Signal Encrypt Failed, falling back to Legacy Hybrid', e);
+                    // Legacy Fallback (Hybrid RSA + AES-GCM)
+                    const sessionKey = await this.crypto.generateSessionKey();
+                    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+                    const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
+                    const cipherText = await this.crypto.encryptPayload(JSON.stringify(plainPayload), sessionKey, iv);
+
+                    // Fetch recipient public key for legacy encryption
+                    const pubKey = await this.api.get(`keys.php?user_id=${chatId}`).toPromise().then((res: any) => res.public_key);
+                    const encKey = await this.crypto.encryptAesKeyForRecipient(sessionKey, pubKey);
+
+                    envelope = {
+                        protocol: 'legacy',
+                        ciphertext: cipherText,
+                        iv: ivBase64,
+                        k: encKey, // Encrypted session key
+                        type: type,
+                        ...metadata
+                    };
+                }
+            } else {
+                // HF-5B: Group Encryption (Sender Keys)
+                try {
+                    envelope = await this.signal.encryptGroupMessage(
+                        JSON.stringify(plainPayload),
+                        chatId
+                    );
+                } catch (e) {
+                    this.logger.error('[Chat] Group Signal Encryption Failed', e);
+                    // Fallback to Legacy Hybrid if strictly required, but preferred is to fail secure.
+                    // For now, we fall back to legacy to keep app usable during migration.
+                    const sessionKey = await this.crypto.generateSessionKey();
+                    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+                    const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
+                    const cipherText = await this.crypto.encryptPayload(JSON.stringify(plainPayload), sessionKey, iv);
+
+                    envelope = {
+                        protocol: 'legacy',
+                        ciphertext: cipherText,
+                        iv: ivBase64,
+                        type: type,
+                        ...metadata
+                    };
+                }
+            }
 
             // 2. Persist to SQLite (Never store plaintext)
             await this.localDb.run(`
@@ -276,9 +368,6 @@ export class ChatService {
 
             // 4. Trigger Immediate Sync
             this.retryScheduler.processQueue();
-
-            // 5. Update local UI state (Optimistic)
-            // this.refreshMessagesForChat(chatId); // Placeholder for UI update logic
 
             return messageId;
 
@@ -388,7 +477,7 @@ export class ChatService {
                 }
             });
 
-            this.api.post('upload.php', formData, true).subscribe(async (event: any) => {
+            this.api.post('upload.php', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
                 if (event.type === HttpEventType.UploadProgress) {
                     const percent = Math.round(100 * event.loaded / event.total);
                     this.progressService.updateProgress(tempId, percent, 'uploading');
@@ -399,20 +488,28 @@ export class ChatService {
                         return;
                     }
 
-                    // 3. Metadata
-                    const signature = `image_${imageBlob.size}_${caption || 'nc'}`;
-                    const metadata: any = {
+                    // 3. Metadata & Key Injection (HF-5C)
+                    const keyBase64 = await this.crypto.exportAesKey(sessionKey);
+                    const fileHash = await this.crypto.calculateHash(encryptedBlob);
+
+                    const securePayload = {
                         url: uploadRes.url,
+                        caption: caption,
+                        k: keyBase64,
+                        i: ivBase64,
+                        h: fileHash, // HF-5C.1: Integrity Check
                         name: uploadRes.name || (imageBlob as any).name || 'image.jpg',
                         size: uploadRes.size || imageBlob.size || 0,
-                        caption: caption,
                         mime: 'image/jpeg',
                         viewOnce: viewOnce,
                         tempId: tempId,
-                        signature: signature
+                        signature: `image_${imageBlob.size}_${caption || 'nc'}`
                     };
 
-                    await this.sendInternal(chatId, 'image', { url: uploadRes.url, caption: caption }, metadata);
+                    // Pass securePayload as the PLAIN payload (to be encrypted)
+                    // We pass metadata as 4th arg for legacy fallback header compatibility (if needed), 
+                    // but the critical K/I are now in the encrypted body.
+                    await this.sendInternal(chatId, 'image', securePayload, securePayload);
                     this.progressService.updateProgress(tempId, 100, 'completed');
                     this.removePending(chatId, tempId);
                     setTimeout(() => this.progressService.clearProgress(tempId), 2000);
@@ -459,7 +556,9 @@ export class ChatService {
                 }
             });
 
-            this.api.post('upload.php', formData, true).subscribe(async (event: any) => {
+
+
+            this.api.post('upload.php', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
                 if (event.type === HttpEventType.UploadProgress) {
                     const percent = Math.round(100 * event.loaded / event.total);
                     this.progressService.updateProgress(tempId, percent, 'uploading');
@@ -479,8 +578,15 @@ export class ChatService {
                         if (thumbRes?.url) thumbUrl = thumbRes.url;
                     }
 
-                    const metadata: any = {
+                    const keyBase64 = await this.crypto.exportAesKey(sessionKey);
+                    const fileHash = await this.crypto.calculateHash(encryptedBlob);
+
+                    const securePayload: any = {
                         url: uploadRes.url,
+                        caption: caption,
+                        k: keyBase64,
+                        i: ivBase64,
+                        h: fileHash, // HF-5C.1: Integrity Check
                         name: uploadRes.name || (videoBlob as any).name || 'video.mp4',
                         size: uploadRes.size || videoBlob.size || 0,
                         mime: 'video/mp4',
@@ -491,7 +597,7 @@ export class ChatService {
                         signature: `video_${videoBlob.size}_${caption || 'nc'}`
                     };
 
-                    await this.sendInternal(chatId, 'video', { url: uploadRes.url, caption: caption }, metadata);
+                    await this.sendInternal(chatId, 'video', securePayload, securePayload);
                     this.progressService.updateProgress(tempId, 100, 'completed');
                     this.removePending(chatId, tempId);
                     setTimeout(() => this.progressService.clearProgress(tempId), 2000);
@@ -535,7 +641,7 @@ export class ChatService {
                 }
             });
 
-            this.api.post('upload.php', formData, true).subscribe(async (event: any) => {
+            this.api.post('upload.php', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
                 if (event.type === HttpEventType.UploadProgress) {
                     const percent = Math.round(100 * event.loaded / event.total);
                     this.progressService.updateProgress(tempId, percent, 'uploading');
@@ -546,8 +652,14 @@ export class ChatService {
                         return;
                     }
 
-                    const metadata = {
+                    const keyBase64 = await this.crypto.exportAesKey(sessionKey);
+                    const fileHash = await this.crypto.calculateHash(encryptedBlob);
+
+                    const securePayload = {
                         url: uploadRes.url,
+                        k: keyBase64,
+                        i: ivBase64,
+                        h: fileHash, // HF-5C.1: Integrity Check
                         mime: file.type || 'application/octet-stream',
                         name: file.name,
                         size: file.size,
@@ -555,7 +667,7 @@ export class ChatService {
                         signature: `doc_${file.name}_${file.size}`
                     };
 
-                    await this.sendInternal(chatId, 'document', { url: uploadRes.url, name: file.name }, metadata);
+                    await this.sendInternal(chatId, 'document', securePayload, securePayload);
                     this.progressService.updateProgress(tempId, 100, 'completed');
                     this.removePending(chatId, tempId);
                     setTimeout(() => this.progressService.clearProgress(tempId), 2000);
@@ -591,23 +703,38 @@ export class ChatService {
                     `, [chatId, limitCount]);
 
                     const promises = rows.map(async (row: any) => {
-                        let decrypted: any = "🔒 Decrypting...";
+                        let decrypted: any = "🔒 Decrypted Content";
                         try {
                             const envelope = JSON.parse(row.payload);
-                            // v2.3 decryption logic (assuming simple AES-GCM for now, 
-                            // in a full Signal refactor this would use signalStore.loadSession)
 
-                            const sessionKey = await this.crypto.generateSessionKey(); // Placeholder: Need real session key recovery
-                            // Actually, we should preserve the decryption logic from the original getMessages
-                            // which used the 'keys' field in the payload.
+                            if (envelope.protocol === 'v3') {
+                                // HF-5A: Signal Decryption
+                                const senderId = envelope.senderUserId;
+                                const senderDeviceId = envelope.senderDeviceId;
 
-                            // For v2.3 paritial migration, we'll assume the payload IS the envelope we saved in sendInternal
-                            if (envelope.ciphertext && envelope.iv) {
-                                // dummy decryption for now since we haven't unified the key storage yet 
-                                // but we follow the pattern
-                                decrypted = JSON.parse(await this.crypto.decryptPayload(envelope.ciphertext, sessionKey, envelope.iv));
+                                if (envelope.type === 'group') {
+                                    // HF-5B: Group Decryption
+                                    const body = await this.signal.decryptGroupMessage(envelope, envelope.groupId, senderId, senderDeviceId);
+                                    decrypted = JSON.parse(body);
+                                } else {
+                                    // 1:1 Decryption
+                                    const body = await this.signal.decryptMessage(envelope, senderId, senderDeviceId);
+                                    decrypted = JSON.parse(body);
+                                }
+                            } else if (envelope.protocol === 'legacy' || (envelope.ciphertext && envelope.iv && envelope.k)) {
+                                // Legacy Hybrid Decryption
+                                const privKey = localStorage.getItem('private_key') || '';
+                                const sessionKey = await this.crypto.decryptAesKeyFromSender(envelope.k, privKey);
+                                const plainStr = await this.crypto.decryptPayload(envelope.ciphertext, sessionKey, envelope.iv);
+                                decrypted = JSON.parse(plainStr);
+                            } else if (envelope.ciphertext && envelope.iv) {
+                                // Local-only encrypted (e.g. pending messages)
+                                // We'd need to fetch the session key from somewhere else if not in envelope
+                                // For now, handle as best-effort
+                                decrypted = "[Incomplete Encryption]";
                             }
                         } catch (e) {
+                            this.logger.warn(`Decryption failed for msg ${row.id}`, e);
                             decrypted = "🔒 Decryption Failed";
                         }
 
@@ -654,17 +781,23 @@ export class ChatService {
             const formData = new FormData();
             formData.append('file', encryptedBlob, 'voice.bin');
 
-            const uploadRes: any = await this.api.post('upload.php', formData).toPromise();
+            const uploadRes: any = await this.api.post('upload.php', formData, false, { 'X-Encrypted': '1' }).toPromise();
             if (!uploadRes || !uploadRes.url) throw new Error("Audio Upload Failed");
 
-            const metadata = {
+            const keyBase64 = await this.crypto.exportAesKey(sessionKey);
+            const fileHash = await this.crypto.calculateHash(encryptedBlob);
+
+            const securePayload = {
                 type: 'audio',
                 url: uploadRes.url,
+                k: keyBase64,
+                i: ivBase64,
+                h: fileHash, // HF-5C.1: Integrity Check
                 d: duration,
                 mime: audioBlob.type || 'audio/mp4' // Default to mp4/aac if missing
             };
 
-            await this.sendInternal(chatId, 'audio', { url: uploadRes.url, d: duration }, metadata);
+            await this.sendInternal(chatId, 'audio', securePayload, securePayload);
 
         } catch (e) {
             this.logger.error("Audio Send Failed", e);

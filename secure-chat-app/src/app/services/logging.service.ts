@@ -6,7 +6,7 @@ import { ApiService } from './api.service';
 })
 export class LoggingService {
     // Audit-grade Blacklist (HF-2.5)
-    private readonly SENSITIVE_KEYS = ['ciphertext', 'key', 'seed', 'salt', 'passphrase', 'private_key', 'payload'];
+    private readonly SENSITIVE_KEYS = ['ciphertext', 'key', 'seed', 'salt', 'passphrase', 'private_key', 'payload', 'k', 'i', 'h', 's', 'signature', 'mac'];
     private readonly ID_PATTERN = /^(user|chat|msg|device)_[a-z0-9-_]+$/i;
 
     constructor(private api: ApiService) { }

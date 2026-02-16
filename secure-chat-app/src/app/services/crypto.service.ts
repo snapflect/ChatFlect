@@ -173,6 +173,11 @@ swIDAQAB
         );
     }
 
+    async exportAesKey(key: CryptoKey): Promise<string> {
+        const raw = await window.crypto.subtle.exportKey("raw", key);
+        return this.arrayBufferToBase64(raw);
+    }
+
     // 2. Encrypt AES Key for Recipient (RSA-OAEP)
     // Requirement 3: RSA-OAEP.encrypt(base64(aesKey), recipientPublicKey)
     async encryptAesKeyForRecipient(aesKey: CryptoKey, recipientPublicKeyStr: string): Promise<string> {
@@ -300,6 +305,12 @@ swIDAQAB
     }
 
     // --- File Encryption (Blob) --- //
+
+    async calculateHash(data: Blob | ArrayBuffer): Promise<string> {
+        const buffer = (data instanceof Blob) ? await data.arrayBuffer() : data;
+        const hashBuffer = await window.crypto.subtle.digest('SHA-256', buffer);
+        return this.arrayBufferToBase64(hashBuffer);
+    }
 
     async encryptBlob(blob: Blob): Promise<{ encryptedBlob: Blob, key: CryptoKey, iv: Uint8Array }> {
         const key = await this.generateSessionKey();

@@ -90,6 +90,13 @@ $isEncrypted = false;
 if ($ext === 'bin') {
     // Encrypted files MUST be uploaded as .bin
     $isEncrypted = true;
+
+    // HF-5C.2 (P0 Audit): Enforce Anti-Tamper Header
+    if (!isset($_SERVER['HTTP_X_ENCRYPTED']) || $_SERVER['HTTP_X_ENCRYPTED'] !== '1') {
+        http_response_code(403);
+        echo json_encode(["error" => "Security Policy Violation: Encrypted payload must have X-Encrypted header"]);
+        exit;
+    }
 }
 
 // Generate safe unique filename

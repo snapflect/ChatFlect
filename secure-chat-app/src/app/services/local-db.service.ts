@@ -206,6 +206,18 @@ export class LocalDbService {
                 photo_url TEXT,
                 last_synced_at INTEGER
             );
+
+            -- 10. Sender Keys (Phase 5B: Group Encryption)
+            CREATE TABLE IF NOT EXISTS local_sender_keys (
+                sender_key_name TEXT PRIMARY KEY, -- "groupId::senderId::deviceId"
+                record TEXT 
+            );
+
+            -- 11. Sender Signing Key (HF-5B.1)
+            CREATE TABLE IF NOT EXISTS local_sender_signing_key (
+                id INTEGER PRIMARY KEY CHECK (id = 1), -- Singleton
+                key_pair TEXT 
+            );
         `;
         await this.db.execute(schema);
     }

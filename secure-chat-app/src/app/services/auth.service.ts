@@ -15,6 +15,8 @@ import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
 import { Capacitor } from '@capacitor/core';
 import { SecureMediaService } from './secure-media.service';
 import { SecureStorageService } from './secure-storage.service';
+import { SignalService } from './signal.service';
+import { SignalStoreService } from './signal-store.service';
 
 import { db, auth } from './firebase.config';
 
@@ -43,7 +45,9 @@ export class AuthService {
         private logger: LoggingService,
         private callService: CallService,
         private mediaService: SecureMediaService,
-        private secureStorage: SecureStorageService // v13
+        private secureStorage: SecureStorageService,
+        private signal: SignalService,
+        private signalStore: SignalStoreService
     ) {
         // App initialized in firebase.config.ts
         // this.db assigned above
@@ -146,6 +150,33 @@ export class AuthService {
             public_key: pubKey,
             device_name: deviceName
         }).toPromise();
+
+        // HF-4.1: Fetch ZK-S salt after registration/login
+        await this.getOrFetchContactSalt(userId);
+    }
+
+    /**
+     * HF-4.1: Retrieve device-specific salt for ZK-S contact hashing
+     */
+    async getOrFetchContactSalt(userId: string): Promise<string | null> {
+        try {
+            // 1. Check Secure Storage
+            let salt = await this.secureStorage.getItem('contact_device_salt');
+            if (salt) return salt;
+
+            // 2. Fetch from Backend
+            this.logger.log('[Auth] Fetching ZK-S device salt...');
+            const res: any = await this.api.get(`auth_salt.php?user_id=${userId}&device_uuid=${this.getOrGenerateDeviceUUID()}`).toPromise();
+
+            if (res && res.success && res.salt) {
+                await this.secureStorage.setItem('contact_device_salt', res.salt);
+                return res.salt;
+            }
+            return null;
+        } catch (e) {
+            this.logger.error('[Auth] Failed to fetch ZK-S salt', e);
+            return null;
+        }
     }
 
     async setSession(userId: string, token?: string, isProfileComplete?: boolean, refreshToken?: string) {
@@ -160,19 +191,27 @@ export class AuthService {
         localStorage.setItem('user_id', normalizedId);
         // Cookie Migration: Tokens now invalid in LocalStorage - removed to enforce Cookie usage
         // if (token) localStorage.setItem('id_token', token);
-        // if (refreshToken) localStorage.setItem('refresh_token', refreshToken);
+        if (isProfileComplete) localStorage.setItem('is_profile_complete', '1');
+        if (refreshToken) localStorage.setItem('refresh_token', refreshToken);
 
-        if (isProfileComplete !== undefined) {
-            localStorage.setItem('is_profile_complete', isProfileComplete ? '1' : '0');
-        }
         this.userIdSource.next(normalizedId);
         this.initBlockedListener(normalizedId);
-
-        // Register Device FIRST (must complete before Firebase auth)
+        this.signInToFirebase(normalizedId);
         try {
             await this.registerDevice(normalizedId);
         } catch (e) {
             console.error('Device Reg Failed', e);
+        }
+
+        // HF-5A: Proactive Signal Registration
+        try {
+            const hasIdentity = await this.signalStore.getIdentityKeyPair();
+            if (!hasIdentity) {
+                this.logger.log('[Auth] No Signal Identity found. Registering keys...');
+                await this.signal.register();
+            }
+        } catch (e) {
+            this.logger.error('[Auth] Signal Registration Failed during setSession', e);
         }
 
         // Force Push Registration / Sync
@@ -456,6 +495,7 @@ export class AuthService {
         localStorage.removeItem('refresh_token'); // Just in case
         localStorage.removeItem('blocked_users');
         localStorage.removeItem('device_uuid'); // v16.0: Full wipe on logout to force fresh session
+        await this.secureStorage.removeItem('contact_device_salt'); // HF-4.1
         this.userIdSource.next(null);
 
         // 🔥 Robust Subject Reset

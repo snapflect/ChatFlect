@@ -84,7 +84,7 @@ export class SecureMediaService implements OnDestroy {
         this.clearCache('destroy');
     }
 
-    getMedia(url: string, key?: string, iv?: string, mimeType: string = ''): Observable<string> {
+    getMedia(url: string, key?: string, iv?: string, mimeType: string = '', integrity?: { hash: string, size: number }): Observable<string> {
         if (!url || typeof url !== 'string') return of('assets/placeholder_broken.png');
 
         const userId = localStorage.getItem('user_id') || 'anon';
@@ -141,6 +141,11 @@ export class SecureMediaService implements OnDestroy {
 
                         if (key && iv) {
                             blob = await this.decryptMedia(blob, key, iv, mimeType || entry.mime);
+                        }
+
+                        // HF-5C.1: Integrity Check (Disk Cache)
+                        if (integrity) {
+                            await this.verifyBlob(blob, integrity.hash, integrity.size);
                         }
 
                         const objectUrl = URL.createObjectURL(blob);
@@ -202,6 +207,11 @@ export class SecureMediaService implements OnDestroy {
 
                                 if (mimeType) {
                                     finalBlob = new Blob([finalBlob], { type: mimeType });
+                                }
+
+                                // HF-5C.1: Integrity Check (Download)
+                                if (integrity) {
+                                    await this.verifyBlob(finalBlob, integrity.hash, integrity.size);
                                 }
 
                                 const objectUrl = URL.createObjectURL(finalBlob);
@@ -494,5 +504,19 @@ export class SecureMediaService implements OnDestroy {
 
     private zoneRun(fn: Function) {
         this.zone.run(() => fn());
+    }
+
+    private async verifyBlob(blob: Blob, hash: string, size: number): Promise<void> {
+        if (size > 0 && blob.size !== size) {
+            this.logger.error(`[SecureMedia] Size mismatch. Expected ${size}, got ${blob.size}`);
+            throw new Error(`Integrity size mismatch`);
+        }
+        if (hash) {
+            const calculated = await this.crypto.calculateHash(blob);
+            if (calculated !== hash) {
+                this.logger.error(`[SecureMedia] Hash mismatch. Expected ${hash}, got ${calculated}`);
+                throw new Error(`Integrity hash mismatch`);
+            }
+        }
     }
 }

@@ -148,9 +148,9 @@
               <!-- Normal Image -->
               <ng-container *ngIf="!msg.text.viewOnce">
                 <img [secureSrc]="msg.text.url" [pymKey]="msg.text.k || msg.text.ks" [pymIv]="msg.text.i"
-                  class="message-image" (click)="openImage(msg.text)"
-                  (error)="$any($event).target.src = 'assets/placeholder_broken.png'" role="img"
-                  aria-label="Encrypted Image Content" />
+                  [pymHash]="msg.text.h" [pymSize]="msg.text.size" [pymMime]="msg.text.mime" class="message-image"
+                  (click)="openImage(msg.text)" (error)="$any($event).target.src = 'assets/placeholder_broken.png'"
+                  role="img" aria-label="Encrypted Image Content" />
 
                 <!-- Progress Overlay -->
                 <div class="media-progress-overlay" *ngIf="getMediaProgress(msg) | async as progress"
@@ -183,7 +183,8 @@
             <div *ngIf="getMsgType(msg.text) === 'video'" class="media-content">
               <!-- Normal Video -->
               <ng-container *ngIf="!msg.text.viewOnce">
-                <video [secureSrc]="msg.text.url" [pymKey]="msg.text.k || msg.text.ks" [pymIv]="msg.text.i" controls
+                <video [secureSrc]="msg.text.url" [pymKey]="msg.text.k || msg.text.ks" [pymIv]="msg.text.i"
+                  [pymHash]="msg.text.h" [pymSize]="msg.text.size" [pymMime]="msg.text.mime || 'video/mp4'" controls
                   class="message-video"></video>
 
                 <!-- Progress Overlay -->

@@ -19,6 +19,9 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
     @Input('secureSrc') src: string | null = null;
     @Input('pymKey') key?: string;
     @Input('pymIv') iv?: string;
+    @Input('pymHash') hash?: string;
+    @Input('pymSize') size?: number;
+    @Input('pymMime') mime?: string;
     @Input('thumb') thumb?: string; // v15 Progressive
 
     private sub: Subscription | null = null;
@@ -31,7 +34,7 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
     ) { }
 
     ngOnChanges(changes: SimpleChanges): void {
-        if (changes['src'] || changes['key'] || changes['iv'] || changes['thumb']) {
+        if (changes['src'] || changes['key'] || changes['iv'] || changes['thumb'] || changes['hash']) {
             this.load();
         }
     }
@@ -73,7 +76,8 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
         }
 
         // 2. Fetch High-Res
-        this.sub = this.mediaService.getMedia(this.src, this.key, this.iv).subscribe({
+        const integrity = (this.hash || this.size) ? { hash: this.hash || '', size: this.size || 0 } : undefined;
+        this.sub = this.mediaService.getMedia(this.src, this.key, this.iv, this.mime, integrity).subscribe({
             next: (url: string) => {
                 // Revoke previously resolved object URL usage (v8)
                 if (this.resolvedUrl && this.resolvedUrl !== url) {

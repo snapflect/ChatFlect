@@ -4,6 +4,7 @@ import { Contacts } from '@capacitor-community/contacts';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 import { LocalDbService } from './local-db.service';
 import { LoggingService } from './logging.service';
+import { AuthService } from './auth.service';
 import { environment } from 'src/environments/environment';
 import { BehaviorSubject } from 'rxjs';
 
@@ -24,7 +25,8 @@ export class ContactResolverService {
     constructor(
         private http: HttpClient,
         private localDb: LocalDbService,
-        private logger: LoggingService
+        private logger: LoggingService,
+        private auth: AuthService
     ) { }
 
     async syncContacts(force: boolean = false): Promise<void> {
@@ -63,7 +65,7 @@ export class ContactResolverService {
                 if (!contact.phones || contact.phones.length === 0) continue;
 
                 for (const phoneItem of contact.phones) {
-                    const normalized = this.normalizePhoneNumber(phoneItem.number);
+                    const normalized = this.normalizePhoneNumber(phoneItem.number || '');
                     if (!normalized) continue;
 
                     const hash = await this.hashString(normalized);
@@ -103,7 +105,11 @@ export class ContactResolverService {
     }
 
     private async hashString(input: string): Promise<string> {
-        const msgUint8 = new TextEncoder().encode(input);
+        // HF-4.1: Retrieve ZK-S salt from AuthService
+        const salt = await this.auth.getOrFetchContactSalt(this.auth.getUserId());
+        const combined = (salt || '') + input;
+
+        const msgUint8 = new TextEncoder().encode(combined);
         const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -119,9 +125,15 @@ export class ContactResolverService {
             const chunk = payload.slice(i, i + chunkSize);
             const hashes = chunk.map(c => c.hash);
 
+            // HF-4.3: Replay Protection Parameters
+            const timestamp = Date.now();
+            const nonce = window.crypto.randomUUID ? window.crypto.randomUUID() : Math.random().toString(36).substring(2);
+
             const response: any = await this.http.post(`${environment.apiUrl}/contacts/map.php`, {
                 hashes,
-                device_uuid: localStorage.getItem('device_uuid')
+                device_uuid: localStorage.getItem('device_uuid'),
+                timestamp: timestamp,
+                nonce: nonce
             }).toPromise();
 
             if (response && response.success && Array.isArray(response.matches)) {

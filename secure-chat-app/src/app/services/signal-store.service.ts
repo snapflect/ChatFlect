@@ -23,6 +23,9 @@ export interface SignalProtocolStore {
     removePreKey(keyId: string | number): Promise<void>;
     removeSignedPreKey(keyId: string | number): Promise<void>;
     removeAllPreKeys(): Promise<void>;
+    // Phase 5B: Sender Keys
+    loadSenderKey(senderKeyName: string): Promise<any>;
+    storeSenderKey(senderKeyName: string, senderKeyRecord: any): Promise<void>;
 }
 
 @Injectable({
@@ -433,5 +436,25 @@ export class SignalStoreService implements SignalProtocolStore {
             console.error('Failed to load ECDSA signing key', e);
             return null;
         }
+    }
+
+    // --- Sender Keys (Phase 5B: Group Encryption) ---
+    async saveSenderKey(senderKeyName: string, senderKeyRecord: any): Promise<void> {
+        return this.storeSenderKey(senderKeyName, senderKeyRecord);
+    }
+
+    async loadSenderKey(senderKeyName: string): Promise<any> {
+        const res = await this.localDb.query('SELECT record FROM local_sender_keys WHERE sender_key_name = ?', [senderKeyName]);
+        if (res.length > 0 && res[0].record) {
+            const encrypted = JSON.parse(res[0].record);
+            return this.decryptData(encrypted);
+        }
+        return undefined;
+    }
+
+    async storeSenderKey(senderKeyName: string, senderKeyRecord: any): Promise<void> {
+        const encrypted = await this.encryptData(senderKeyRecord);
+        await this.localDb.run('INSERT OR REPLACE INTO local_sender_keys (sender_key_name, record) VALUES (?, ?)',
+            [senderKeyName, JSON.stringify(encrypted)]);
     }
 }
