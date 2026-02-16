@@ -89,10 +89,16 @@ export class MessageAckService {
     async markAsRead(messageId: string): Promise<void> {
         await this.localDb.run("UPDATE local_messages SET status = 'read' WHERE id = ?", [messageId]);
 
-        // Notify server (fire and forget, if it fails, the pull loop should stay 'delivered' until retry)
-        this.http.post(`${environment.apiUrl}/receipts/send.php`, {
-            message_uuid: messageId,
-            status: 'read'
-        }).toPromise().catch(() => { });
+        // HF-Extra: Standardized ACK Sync
+        const pkg = {
+            acks: [{
+                message_uuid: messageId,
+                status: 'READ'
+            }]
+        };
+
+        this.http.post(`${environment.apiUrl}/v4/messages/ack.php`, pkg).toPromise().catch(err => {
+            this.logger.warn('[MessageAck] Read Receipt Failed', err);
+        });
     }
 }

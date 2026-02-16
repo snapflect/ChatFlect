@@ -73,8 +73,8 @@ export class RetrySchedulerService {
             // In a real implementation, this would call ChatService.sendInternal
             // For now, we simulate the network call to the send.php endpoint
 
-            const response: any = await this.http.post(`${environment.apiUrl}/send.php`, {
-                client_uuid: item.message_id,
+            const response: any = await this.http.post(`${environment.apiUrl}/v4/messages/send.php`, {
+                client_id: item.message_id, // v4 expectations
                 chat_id: item.chat_id,
                 payload: item.payload,
                 type: item.type
