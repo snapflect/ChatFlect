@@ -12,19 +12,30 @@ export class LoggingService {
     constructor(private api: ApiService) { }
 
     log(message: string, ...details: any[]) {
-        const safeDetails = details.map(d => this.maskPII(d));
+        // HF-5C.4B: Safe Serialization
+        // We mask PII *before* any console output to prevent leaking via object inspection
+        const safeDetails = details.map(d => this.maskPII(JSON.parse(JSON.stringify(d, this.getCircularReplacer()))));
         console.log(`%c[APP Info]`, 'color: blue; font-weight: bold', message, ...safeDetails);
         this.sendToBackend('INFO', message, safeDetails);
     }
 
     warn(message: string, ...details: any[]) {
-        const safeDetails = details.map(d => this.maskPII(d));
+        const safeDetails = details.map(d => this.maskPII(JSON.parse(JSON.stringify(d, this.getCircularReplacer()))));
         console.warn(`%c[APP Warn]`, 'color: orange; font-weight: bold', message, ...safeDetails);
         this.sendToBackend('WARN', message, safeDetails);
     }
 
     error(message: string, error?: any) {
-        const safeError = this.maskPII(error);
+        // Handle Error objects specifically before serialization
+        let rawError = error;
+        if (error instanceof Error) {
+            rawError = {
+                message: error.message,
+                name: error.name,
+                stack: error.stack
+            };
+        }
+        const safeError = this.maskPII(JSON.parse(JSON.stringify(rawError, this.getCircularReplacer())));
         console.error(`%c[APP Error]`, 'color: red; font-weight: bold', message, safeError);
 
         // Format error object safely
@@ -94,5 +105,18 @@ export class LoggingService {
         } catch (e) {
             // Silently discard logging errors
         }
+    }
+
+    private getCircularReplacer() {
+        const seen = new WeakSet();
+        return (key: string, value: any) => {
+            if (typeof value === 'object' && value !== null) {
+                if (seen.has(value)) {
+                    return '[Circular]';
+                }
+                seen.add(value);
+            }
+            return value;
+        };
     }
 }

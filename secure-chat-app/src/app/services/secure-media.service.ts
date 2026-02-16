@@ -376,7 +376,7 @@ export class SecureMediaService implements OnDestroy {
             tokenLength: idToken.length
         });
 
-        const response = await fetch(`https://chat.snapflect.com/api/upload.php`, {
+        const response = await fetch(`https://chat.snapflect.com/api/upload.php?mode=secure`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${idToken || userId}`,

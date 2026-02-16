@@ -99,6 +99,23 @@ if ($ext === 'bin') {
     }
 }
 
+// HF-5C.2B (Polish): Strict Mode Enforcement
+// If ?mode=secure is passed, we REJECT any upload that isn't explicitly marked as encrypted.
+// This prevents bypassing the check by simply renaming .bin to .jpg
+if (isset($_GET['mode']) && $_GET['mode'] === 'secure') {
+    if (!isset($_SERVER['HTTP_X_ENCRYPTED']) || $_SERVER['HTTP_X_ENCRYPTED'] !== '1') {
+        http_response_code(403);
+        echo json_encode(["error" => "Security Policy Violation: Secure mode requires encrypted payload"]);
+        exit;
+    }
+    // Strict extension check (audit requirement)
+    if ($ext !== 'bin') {
+        http_response_code(403);
+        echo json_encode(["error" => "Security Policy Violation: Secure mode only accepts .bin files"]);
+        exit;
+    }
+}
+
 // Generate safe unique filename
 $filename = uniqid('med_', true) . '.' . $ext;
 $targetPath = $uploadDir . $filename;

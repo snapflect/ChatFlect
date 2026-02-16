@@ -477,7 +477,7 @@ export class ChatService {
                 }
             });
 
-            this.api.post('upload.php', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
+            this.api.post('upload.php?mode=secure', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
                 if (event.type === HttpEventType.UploadProgress) {
                     const percent = Math.round(100 * event.loaded / event.total);
                     this.progressService.updateProgress(tempId, percent, 'uploading');
@@ -558,7 +558,7 @@ export class ChatService {
 
 
 
-            this.api.post('upload.php', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
+            this.api.post('upload.php?mode=secure', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
                 if (event.type === HttpEventType.UploadProgress) {
                     const percent = Math.round(100 * event.loaded / event.total);
                     this.progressService.updateProgress(tempId, percent, 'uploading');
@@ -574,6 +574,7 @@ export class ChatService {
                     if (thumbnailBlob) {
                         const formThumb = new FormData();
                         formThumb.append('file', thumbnailBlob, 'thumb.jpg');
+                        // Thumbnails are plaintext/public references, so we don't use secure mode (which requires encrypted header)
                         const thumbRes: any = await this.api.post('upload.php', formThumb).toPromise();
                         if (thumbRes?.url) thumbUrl = thumbRes.url;
                     }
@@ -641,7 +642,7 @@ export class ChatService {
                 }
             });
 
-            this.api.post('upload.php', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
+            this.api.post('upload.php?mode=secure', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
                 if (event.type === HttpEventType.UploadProgress) {
                     const percent = Math.round(100 * event.loaded / event.total);
                     this.progressService.updateProgress(tempId, percent, 'uploading');
@@ -781,7 +782,7 @@ export class ChatService {
             const formData = new FormData();
             formData.append('file', encryptedBlob, 'voice.bin');
 
-            const uploadRes: any = await this.api.post('upload.php', formData, false, { 'X-Encrypted': '1' }).toPromise();
+            const uploadRes: any = await this.api.post('upload.php?mode=secure', formData, false, { 'X-Encrypted': '1' }).toPromise();
             if (!uploadRes || !uploadRes.url) throw new Error("Audio Upload Failed");
 
             const keyBase64 = await this.crypto.exportAesKey(sessionKey);
