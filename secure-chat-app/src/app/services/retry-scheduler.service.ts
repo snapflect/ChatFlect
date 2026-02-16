@@ -121,7 +121,8 @@ export class RetrySchedulerService {
                 client_id: item.message_id, // v4 expectations
                 chat_id: item.chat_id,
                 payload: item.payload,
-                type: item.type
+                type: item.type,
+                sender_device_uuid: localStorage.getItem('device_uuid') // HF-5D.3: Ownership Proof
             }).toPromise();
 
             if (response && response.success === true) {

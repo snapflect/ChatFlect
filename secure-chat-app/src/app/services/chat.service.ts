@@ -715,12 +715,30 @@ export class ChatService {
 
                                 if (envelope.type === 'group') {
                                     // HF-5B: Group Decryption
+                                    // HF-5B: Group Decryption
                                     const body = await this.signal.decryptGroupMessage(envelope, envelope.groupId, senderId, senderDeviceId);
-                                    decrypted = JSON.parse(body);
+                                    const inner = JSON.parse(body);
+
+                                    // HF-5D.1: Double-Check Binding (Group)
+                                    if (inner._duid && envelope.senderDeviceUuid && inner._duid !== envelope.senderDeviceUuid) {
+                                        this.logger.error(`[Security][HF-5D.1] SPOOF DETECTED (Group)! Inner: ${inner._duid}, Outer: ${envelope.senderDeviceUuid}`);
+                                        decrypted = "⚠️ Security Alert: Identity verification failed (Group Spoofed)";
+                                    } else {
+                                        decrypted = inner;
+                                    }
                                 } else {
                                     // 1:1 Decryption
                                     const body = await this.signal.decryptMessage(envelope, senderId, senderDeviceId);
-                                    decrypted = JSON.parse(body);
+                                    const inner = JSON.parse(body);
+
+                                    // HF-5D.1: Double-Check Binding (Spoof Protection)
+                                    // We verify that the authenticated identity (inner) matches the routing identity (outer)
+                                    if (inner._duid && envelope.senderDeviceUuid && inner._duid !== envelope.senderDeviceUuid) {
+                                        this.logger.error(`[Security][HF-5D.1] SPOOF DETECTED! Encrypted by ${inner._duid} but envelope claims ${envelope.senderDeviceUuid}`);
+                                        decrypted = "⚠️ Security Alert: Identity verification failed (Device Spoofed)";
+                                    } else {
+                                        decrypted = inner;
+                                    }
                                 }
                             } else if (envelope.protocol === 'legacy' || (envelope.ciphertext && envelope.iv && envelope.k)) {
                                 // Legacy Hybrid Decryption

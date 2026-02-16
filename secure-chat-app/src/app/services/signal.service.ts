@@ -210,517 +210,558 @@ export class SignalService {
 
         const myDeviceId = this.authService.getDeviceId() || 1;
         const myUserId = this.authService.getUserId();
+        const myUserId = this.authService.getUserId();
         const myDeviceUuid = localStorage.getItem('device_uuid') || '';
 
-        // HF-5A: Return V3 Envelope
-        return {
-            protocol: 'v3',
+        // HF-5D.1: Double-Check Binding
+        // We inject the Device UUID and a Message UUID into the encrypted payload.
+        // This binds the identity to the Signal Session (which is authenticated).
+        let innerPayload = plaintext;
+        try {
+            // Try to parse if it's JSON, or wrap it
+            // Actually, for simplicity and backward compat, we just wrap everything in a standardized internal envelope
+            // IF the plaintext is already a JSON string of an object, we can merge?
+            // Risk: modifying structure might break ChatService expectations if it expects raw string.
+            // Safe bet: Parse, invalid -> assume string, wrap.
+            let content = plaintext;
+            try { content = JSON.parse(plaintext); } catch (e) { }
+
+            // If content is object, merge. If string, wrap in 'content' field?
+            // ChatService sends JSON.stringify(plainPayload). So it IS an object.
+            if (typeof content === 'object' && content !== null) {
+                content['_duid'] = myDeviceUuid;
+                content['_mid'] = crypto.randomUUID(); // HF-5D.2: Inner Message ID for Replay Protection
+                innerPayload = JSON.stringify(content);
+            }
+        } catch (e) {
+            this.logger.warn('[Signal] Failed to inject identity binding', e);
+        }
+
+        const copy = new TextEncoder().encode(innerPayload).buffer;
+        protocol: 'v3',
             type: ciphertext.type, // 3 (PreKeyBundle) or 1 (Whisper)
-            body: this.arrayBufferToBase64(ciphertext.body as any),
-            registrationId: ciphertext.registrationId,
-            senderUserId: myUserId,
-            senderDeviceId: myDeviceId,
-            senderDeviceUuid: myDeviceUuid,
-            receiverUserId: remoteUserId,
-            receiverDeviceId: remoteDeviceId,
-            timestamp: Date.now(),
-            messageType: ciphertext.type === 3 ? 'PREKEY' : 'WHISPER'
-        };
-    }
+                body: this.arrayBufferToBase64(ciphertext.body as any),
+                    registrationId: ciphertext.registrationId,
+                        senderUserId: myUserId,
+                            senderDeviceId: myDeviceId,
+                                senderDeviceUuid: myDeviceUuid,
+                                    receiverUserId: remoteUserId,
+                                        receiverDeviceId: remoteDeviceId,
+                                            timestamp: Date.now(),
+                                                messageType: ciphertext.type === 3 ? 'PREKEY' : 'WHISPER'
+    };
+}
 
     /**
      * HF-5B: Group Encryption (Sender Keys - Manual Implementation)
      * Uses: HMAC-SHA256 (Ratchet), AES-GCM (Cipher), Ed25519 (Sign - Placeholder)
      */
-    async encryptGroupMessage(plainText: string, groupId: string): Promise<any> {
-        const myUserId = this.authService.getUserId();
-        const myDeviceId = this.authService.getDeviceId() || 1;
-        const senderKeyName = `sender_key_${groupId}_${myUserId}_${myDeviceId}`;
+    async encryptGroupMessage(plainText: string, groupId: string): Promise < any > {
+    const myUserId = this.authService.getUserId();
+    const myDeviceId = this.authService.getDeviceId() || 1;
+    const myUserId = this.authService.getUserId();
+    const myDeviceId = this.authService.getDeviceId() || 1;
+    const myDeviceUuid = localStorage.getItem('device_uuid') || '';
+    const senderKeyName = `sender_key_${groupId}_${myUserId}_${myDeviceId}`;
 
-        // 0. Check for Member Changes (Rotation Trigger)
-        const groupDetails = await this.groupService.getGroupDetail(groupId).toPromise();
-        const currentMemberHash = groupDetails && groupDetails.members
-            ? JSON.stringify(groupDetails.members.map(m => m.user_id).sort())
-            : '';
+    // HF-5D.1: Inject Identity in Group Message
+    let innerPayload = plainText;
+    try {
+        let content = plainText;
+        try { content = JSON.parse(plainText); } catch(e) { }
+            
+            if(typeof content === 'object' && content !== null) {
+    content['_duid'] = myDeviceUuid;
+    content['_mid'] = crypto.randomUUID();
+    innerPayload = JSON.stringify(content);
+}
+        } catch (e) { }
 
-        // 1. Load or Create Sender Key
-        let record = await this.store.loadSenderKey(senderKeyName);
-        let shouldRotate = false;
+// 0. Check for Member Changes (Rotation Trigger)
+const groupDetails = await this.groupService.getGroupDetail(groupId).toPromise();
+const currentMemberHash = groupDetails && groupDetails.members
+    ? JSON.stringify(groupDetails.members.map(m => m.user_id).sort())
+    : '';
 
-        if (record && record.memberHash && record.memberHash !== currentMemberHash) {
-            this.logger.log(`[Signal] Member list changed for ${groupId}. Rotating Sender Key...`);
-            shouldRotate = true;
-        }
+// 1. Load or Create Sender Key
+let record = await this.store.loadSenderKey(senderKeyName);
+let shouldRotate = false;
 
-        if (!record || !record.senderKeyStates || record.senderKeyStates.length === 0 || shouldRotate) {
-            if (!shouldRotate) this.logger.log(`[Signal] Generating new Sender Key for ${groupId}`);
+if (record && record.memberHash && record.memberHash !== currentMemberHash) {
+    this.logger.log(`[Signal] Member list changed for ${groupId}. Rotating Sender Key...`);
+    shouldRotate = true;
+}
 
-            const newRecord = await this.generateSenderKey();
-            newRecord.memberHash = currentMemberHash;
+if (!record || !record.senderKeyStates || record.senderKeyStates.length === 0 || shouldRotate) {
+    if (!shouldRotate) this.logger.log(`[Signal] Generating new Sender Key for ${groupId}`);
 
-            // Should we keep old states? Yes, for decryption of in-flight messages.
-            // But simple implementation replaces.
-            // Better: Prepend new state.
-            if (record && record.senderKeyStates) {
-                newRecord.senderKeyStates.push(...record.senderKeyStates.slice(0, 5)); // Keep last 5
-            }
-            record = newRecord;
+    const newRecord = await this.generateSenderKey();
+    newRecord.memberHash = currentMemberHash;
 
-            await this.store.storeSenderKey(senderKeyName, record);
+    // Should we keep old states? Yes, for decryption of in-flight messages.
+    // But simple implementation replaces.
+    // Better: Prepend new state.
+    if (record && record.senderKeyStates) {
+        newRecord.senderKeyStates.push(...record.senderKeyStates.slice(0, 5)); // Keep last 5
+    }
+    record = newRecord;
 
-            // HF-5B.2: Trigger Distribution
-            this.distributeSenderKey(groupId, record.senderKeyStates[0], record.bundleVersion).catch(e => {
-                this.logger.error(`[Signal] Failed to distribute key for ${groupId}`, e);
-            });
-        }
+    await this.store.storeSenderKey(senderKeyName, record);
 
-        const state = record.senderKeyStates[0]; // Active state
+    // HF-5B.2: Trigger Distribution
+    this.distributeSenderKey(groupId, record.senderKeyStates[0], record.bundleVersion).catch(e => {
+        this.logger.error(`[Signal] Failed to distribute key for ${groupId}`, e);
+    });
+}
 
-        // 2. Derive Message Key (Ratchet)
-        // Message Key = HMAC(ChainKey, "0x01")
-        const chainKeyBytes = this.base64ToArrayBuffer(state.chainKey);
-        const messageKey = await this.deriveMessageKey(chainKeyBytes);
+const state = record.senderKeyStates[0]; // Active state
 
-        // 3. Advance Chain Key
-        // Next Chain Key = HMAC(ChainKey, "0x02")
-        const nextChainKey = await this.deriveNextChainKey(chainKeyBytes);
-        state.chainKey = this.arrayBufferToBase64(nextChainKey);
-        state.iteration++;
-        await this.store.storeSenderKey(senderKeyName, record);
+// 2. Derive Message Key (Ratchet)
+// Message Key = HMAC(ChainKey, "0x01")
+const chainKeyBytes = this.base64ToArrayBuffer(state.chainKey);
+const messageKey = await this.deriveMessageKey(chainKeyBytes);
 
-        // 4. Encrypt Payload
-        const iv = messageKey.slice(0, 12);
-        const cipherKey = await window.crypto.subtle.importKey(
-            'raw', messageKey.slice(16, 48),
-            { name: 'AES-GCM' }, false, ['encrypt']
-        );
+// 3. Advance Chain Key
+// Next Chain Key = HMAC(ChainKey, "0x02")
+const nextChainKey = await this.deriveNextChainKey(chainKeyBytes);
+state.chainKey = this.arrayBufferToBase64(nextChainKey);
+state.iteration++;
+await this.store.storeSenderKey(senderKeyName, record);
 
-        const ciphertext = await window.crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv: new Uint8Array(iv) },
-            cipherKey,
-            new TextEncoder().encode(plainText)
-        );
+// 4. Encrypt Payload
+const iv = messageKey.slice(0, 12);
+const cipherKey = await window.crypto.subtle.importKey(
+    'raw', messageKey.slice(16, 48),
+    { name: 'AES-GCM' }, false, ['encrypt']
+);
 
-        return {
-            protocol: 'v3',
-            type: 'group',
-            ciphertext: this.arrayBufferToBase64(ciphertext),
-            senderUserId: myUserId,
-            senderDeviceId: myDeviceId,
-            senderDeviceUuid: localStorage.getItem('device_uuid'),
-            groupId: groupId,
-            timestamp: Date.now(),
-            senderKeyId: state.keyId,
-            iteration: state.iteration - 1 // The iteration used for this message
-        };
+const ciphertext = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: new Uint8Array(iv) },
+    cipherKey,
+    cipherKey,
+    new TextEncoder().encode(innerPayload) // Use injected payload
+);
+
+return {
+    protocol: 'v3',
+    type: 'group',
+    ciphertext: this.arrayBufferToBase64(ciphertext),
+    senderUserId: myUserId,
+    senderDeviceId: myDeviceId,
+    senderDeviceUuid: localStorage.getItem('device_uuid'),
+    groupId: groupId,
+    timestamp: Date.now(),
+    senderKeyId: state.keyId,
+    iteration: state.iteration - 1 // The iteration used for this message
+};
     }
 
     // --- HF-5B.2 Key Distribution ---
     private async distributeSenderKey(groupId: string, state: SenderKeyState, version: number) {
-        // 1. Fetch Members
-        const details = await this.groupService.getGroupDetail(groupId).toPromise();
-        if (!details || !details.members) return;
+    // 1. Fetch Members
+    const details = await this.groupService.getGroupDetail(groupId).toPromise();
+    if (!details || !details.members) return;
 
-        const myUserId = this.authService.getUserId();
-        const recipients = details.members.filter(m => m.user_id !== myUserId);
+    const myUserId = this.authService.getUserId();
+    const recipients = details.members.filter(m => m.user_id !== myUserId);
 
-        const distributionMessage = {
-            type: 'SenderKeyDistributionMessage',
-            groupId: groupId,
-            senderKeyId: state.keyId,
-            chainKey: state.chainKey,
-            signingKey: state.signingKey,
-            identityKey: this.arrayBufferToBase64((await this.store.getIdentityKeyPair()).pubKey), // HF-5B.1 Binding
-            bundleVersion: version, // HF-5B.2
-            createdAt: Date.now()
-        };
+    const distributionMessage = {
+        type: 'SenderKeyDistributionMessage',
+        groupId: groupId,
+        senderKeyId: state.keyId,
+        chainKey: state.chainKey,
+        signingKey: state.signingKey,
+        identityKey: this.arrayBufferToBase64((await this.store.getIdentityKeyPair()).pubKey), // HF-5B.1 Binding
+        bundleVersion: version, // HF-5B.2
+        createdAt: Date.now()
+    };
 
-        // HF-5B.1: Sign the Bundle with Identity Key
-        const signedBundle = await this.signSenderKeyBundle(distributionMessage);
-        const signedPayload = JSON.stringify(signedBundle);
+    // HF-5B.1: Sign the Bundle with Identity Key
+    const signedBundle = await this.signSenderKeyBundle(distributionMessage);
+    const signedPayload = JSON.stringify(signedBundle);
 
-        const recipientKeys = [];
+    const recipientKeys = [];
 
-        for (const member of recipients) {
-            try {
-                // Get Device ID (optimistic: primary only for now - Phase 5.3 Multi-Device will loop all)
-                const deviceId = await this.getPrimaryDeviceId(member.user_id);
+    for (const member of recipients) {
+        try {
+            // Get Device ID (optimistic: primary only for now - Phase 5.3 Multi-Device will loop all)
+            const deviceId = await this.getPrimaryDeviceId(member.user_id);
 
-                // 1:1 Encrypt
-                const envelope = await this.encryptMessage(signedPayload, member.user_id, deviceId);
+            // 1:1 Encrypt
+            const envelope = await this.encryptMessage(signedPayload, member.user_id, deviceId);
 
-                recipientKeys.push({
-                    recipient_id: member.user_id,
-                    device_uuid: 'pk', // Placeholder since we encrypt for specific device but upload structure asks for UUID? 
-                    // Actually upload_sender_key.php expects device_uuid of recipient.
-                    // We don't have it easily. We can fetch it or just use '1' if legacy?
-                    // Let's assume fetching Public Keys returns device UUIDs.
-                    // For now, use a hack or fix fetch keys.
-                    // REVISIT: We should fetch target device UUID. 
-                    // Assuming '1' for legacy single-device assumption.
-                    encrypted_key: JSON.stringify(envelope)
-                });
-            } catch (e) {
-                this.logger.warn(`[Signal] Failed to encrypt bundle for ${member.user_id}`, e);
-            }
-        }
-
-        if (recipientKeys.length > 0) {
-            await this.groupSignalService.uploadSenderKey(groupId, state.keyId, recipientKeys as any[], version).toPromise();
-            this.logger.log(`[Signal] Distributed Sender Key to ${recipientKeys.length} members.`);
+            recipientKeys.push({
+                recipient_id: member.user_id,
+                device_uuid: 'pk', // Placeholder since we encrypt for specific device but upload structure asks for UUID? 
+                // Actually upload_sender_key.php expects device_uuid of recipient.
+                // We don't have it easily. We can fetch it or just use '1' if legacy?
+                // Let's assume fetching Public Keys returns device UUIDs.
+                // For now, use a hack or fix fetch keys.
+                // REVISIT: We should fetch target device UUID. 
+                // Assuming '1' for legacy single-device assumption.
+                encrypted_key: JSON.stringify(envelope)
+            });
+        } catch (e) {
+            this.logger.warn(`[Signal] Failed to encrypt bundle for ${member.user_id}`, e);
         }
     }
 
-    private async fetchAndStoreSenderKey(groupId: string, senderId: string, deviceId: number): Promise<void> {
-        try {
-            const res = await this.groupSignalService.fetchSenderKeys(groupId).toPromise();
-            if (!res || !res.keys) return;
+    if (recipientKeys.length > 0) {
+        await this.groupSignalService.uploadSenderKey(groupId, state.keyId, recipientKeys as any[], version).toPromise();
+        this.logger.log(`[Signal] Distributed Sender Key to ${recipientKeys.length} members.`);
+    }
+}
 
-            // Find key from specific sender/device
-            // Note: fetchSenderKeys returns keys encrypted FOR ME, but we need to find the one FROM target.
-            // The API returns 'sender_id', 'sender_device_uuid', 'sender_key_id', 'encrypted_sender_key'
-            // We need to match sender_id.
+    private async fetchAndStoreSenderKey(groupId: string, senderId: string, deviceId: number): Promise < void> {
+    try {
+        const res = await this.groupSignalService.fetchSenderKeys(groupId).toPromise();
+        if(!res || !res.keys) return;
 
-            // TODO: Match sender_device_uuid. But we have senderDeviceId (integer).
-            // We might need to map ID -> UUID or just try all keys from that sender_id.
-            // For now, allow any key from that sender_id.
+    // Find key from specific sender/device
+    // Note: fetchSenderKeys returns keys encrypted FOR ME, but we need to find the one FROM target.
+    // The API returns 'sender_id', 'sender_device_uuid', 'sender_key_id', 'encrypted_sender_key'
+    // We need to match sender_id.
 
-            const targetKey = res.keys.find(k => k.sender_id === senderId);
-            // Better: && k.sender_device_id match if available? 
-            // The API has sender_device_uuid. We only have int ID here.
+    // TODO: Match sender_device_uuid. But we have senderDeviceId (integer).
+    // We might need to map ID -> UUID or just try all keys from that sender_id.
+    // For now, allow any key from that sender_id.
 
-            if (!targetKey) return;
+    const targetKey = res.keys.find(k => k.sender_id === senderId);
+    // Better: && k.sender_device_id match if available? 
+    // The API has sender_device_uuid. We only have int ID here.
 
-            const envelope = JSON.parse(targetKey.encrypted_sender_key);
-            const plaintext = await this.decryptMessage(envelope, senderId, deviceId);
-            const distribution = JSON.parse(plaintext);
+    if(!targetKey) return;
 
-            if (distribution.type !== 'SenderKeyDistributionMessage') return;
+    const envelope = JSON.parse(targetKey.encrypted_sender_key);
+    const plaintext = await this.decryptMessage(envelope, senderId, deviceId);
+    const distribution = JSON.parse(plaintext);
 
-            // HF-5B.1: Verify Signature
-            if (!distribution.signature || !distribution.identityKey) {
-                this.logger.warn(`[Signal] Rejected unsigned Sender Key from ${senderId}`);
-                return;
-            }
+    if(distribution.type !== 'SenderKeyDistributionMessage') return;
 
-            const isValid = await this.verifySenderKeySignature(distribution, distribution.identityKey);
-            if (!isValid) {
-                this.logger.error(`[Signal] Invalid Signature on Sender Key from ${senderId}`);
-                return;
-            }
+    // HF-5B.1: Verify Signature
+    if(!distribution.signature || !distribution.identityKey) {
+    this.logger.warn(`[Signal] Rejected unsigned Sender Key from ${senderId}`);
+    return;
+}
 
-            const senderKeyName = `sender_key_${groupId}_${senderId}_${deviceId}`;
-            // HF-5B.2: Replay Protection
-            const record = await this.store.loadSenderKey(senderKeyName);
-            if (record) {
-                if (distribution.bundleVersion <= record.bundleVersion) {
-                    this.logger.warn(`[Signal] Rejected Replay/Old Key for ${senderId} (v${distribution.bundleVersion} vs v${record.bundleVersion})`);
-                    return;
-                }
-            }
+const isValid = await this.verifySenderKeySignature(distribution, distribution.identityKey);
+if (!isValid) {
+    this.logger.error(`[Signal] Invalid Signature on Sender Key from ${senderId}`);
+    return;
+}
 
-            const newRecord: SenderKeyRecord = {
-                senderKeyStates: [{
-                    keyId: distribution.senderKeyId,
-                    chainKey: distribution.chainKey,
-                    signingKey: distribution.signingKey,
-                    iteration: 0 // Start fresh or from distribution
-                }],
-                bundleVersion: distribution.bundleVersion || 1,
-                createdAt: distribution.createdAt || Date.now()
-            };
+const senderKeyName = `sender_key_${groupId}_${senderId}_${deviceId}`;
+// HF-5B.2: Replay Protection
+const record = await this.store.loadSenderKey(senderKeyName);
+if (record) {
+    if (distribution.bundleVersion <= record.bundleVersion) {
+        this.logger.warn(`[Signal] Rejected Replay/Old Key for ${senderId} (v${distribution.bundleVersion} vs v${record.bundleVersion})`);
+        return;
+    }
+}
 
-            await this.store.storeSenderKey(senderKeyName, newRecord);
-            this.logger.log(`[Signal] Fetched & Stored Sender Key (v${newRecord.bundleVersion}) for ${senderId}`);
+const newRecord: SenderKeyRecord = {
+    senderKeyStates: [{
+        keyId: distribution.senderKeyId,
+        chainKey: distribution.chainKey,
+        signingKey: distribution.signingKey,
+        iteration: 0 // Start fresh or from distribution
+    }],
+    bundleVersion: distribution.bundleVersion || 1,
+    createdAt: distribution.createdAt || Date.now()
+};
+
+await this.store.storeSenderKey(senderKeyName, newRecord);
+this.logger.log(`[Signal] Fetched & Stored Sender Key (v${newRecord.bundleVersion}) for ${senderId}`);
 
         } catch (e) {
-            this.logger.warn(`[Signal] Failed to fetch/store sender key for ${senderId}`, e);
-        }
+    this.logger.warn(`[Signal] Failed to fetch/store sender key for ${senderId}`, e);
+}
     }
 
-    async decryptGroupMessage(envelope: any, groupId: string, senderId: string, senderDeviceId: number): Promise<string> {
-        const senderKeyName = `sender_key_${groupId}_${senderId}_${senderDeviceId}`;
-        let record = await this.store.loadSenderKey(senderKeyName);
+    async decryptGroupMessage(envelope: any, groupId: string, senderId: string, senderDeviceId: number): Promise < string > {
+    const senderKeyName = `sender_key_${groupId}_${senderId}_${senderDeviceId}`;
+    let record = await this.store.loadSenderKey(senderKeyName);
 
-        if (!record) {
-            this.logger.log(`[Signal] Missing Sender Key for ${groupId}:${senderId}, fetching...`);
-            await this.fetchAndStoreSenderKey(groupId, senderId, senderDeviceId);
-            record = await this.store.loadSenderKey(senderKeyName);
-        }
+    if(!record) {
+        this.logger.log(`[Signal] Missing Sender Key for ${groupId}:${senderId}, fetching...`);
+        await this.fetchAndStoreSenderKey(groupId, senderId, senderDeviceId);
+        record = await this.store.loadSenderKey(senderKeyName);
+    }
 
-        if (!record) throw new Error('NO_SESSION_KEY_AFTER_FETCH');
+        if(!record) throw new Error('NO_SESSION_KEY_AFTER_FETCH');
 
-        // Find relevant state by keyId (if multiple)
-        const state = record.senderKeyStates.find((s: SenderKeyState) => s.keyId === envelope.senderKeyId);
-        if (!state) throw new Error('UNKNOWN_KEY_ID');
+    // Find relevant state by keyId (if multiple)
+    const state = record.senderKeyStates.find((s: SenderKeyState) => s.keyId === envelope.senderKeyId);
+    if(!state) throw new Error('UNKNOWN_KEY_ID');
 
-        // Simple Ratchet (Just decrypt for now, full ratchet sync is complex)
-        // We assume we have the *current* chain key or can derive forward.
-        // For simplicity in this step, we use the key in the record (assuming strict order or stateless decryption if key is provided)
+    // Simple Ratchet (Just decrypt for now, full ratchet sync is complex)
+    // We assume we have the *current* chain key or can derive forward.
+    // For simplicity in this step, we use the key in the record (assuming strict order or stateless decryption if key is provided)
 
-        // REVISIT: Direct Key Derivation from Envelope?
-        // No, we must use the stored chain key to derive the specific message key.
-        // If envelope.iteration > state.iteration, we fast-forward.
+    // REVISIT: Direct Key Derivation from Envelope?
+    // No, we must use the stored chain key to derive the specific message key.
+    // If envelope.iteration > state.iteration, we fast-forward.
 
-        let chainKey = this.base64ToArrayBuffer(state.chainKey);
-        // Fast-forward loop (max 100 steps)
-        const steps = envelope.iteration - state.iteration;
-        if (steps < 0) throw new Error('OLD_MESSAGE_REPLAY');
-        if (steps > 2000) throw new Error('TOO_MANY_SKIPS');
+    let chainKey = this.base64ToArrayBuffer(state.chainKey);
+    // Fast-forward loop (max 100 steps)
+    const steps = envelope.iteration - state.iteration;
+    if(steps < 0) throw new Error('OLD_MESSAGE_REPLAY');
+    if(steps > 2000) throw new Error('TOO_MANY_SKIPS');
 
-        for (let i = 0; i < steps; i++) {
-            chainKey = await this.deriveNextChainKey(chainKey);
-        }
+for (let i = 0; i < steps; i++) {
+    chainKey = await this.deriveNextChainKey(chainKey);
+}
 
-        const messageKey = await this.deriveMessageKey(chainKey);
+const messageKey = await this.deriveMessageKey(chainKey);
 
-        const iv = messageKey.slice(0, 12);
-        const cipherKey = await window.crypto.subtle.importKey(
-            'raw', messageKey.slice(16, 48),
-            { name: 'AES-GCM' }, false, ['decrypt']
-        );
+const iv = messageKey.slice(0, 12);
+const cipherKey = await window.crypto.subtle.importKey(
+    'raw', messageKey.slice(16, 48),
+    { name: 'AES-GCM' }, false, ['decrypt']
+);
 
-        const plaintext = await window.crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv: new Uint8Array(iv) },
-            cipherKey,
-            this.base64ToArrayBuffer(envelope.ciphertext)
-        );
+const plaintext = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: new Uint8Array(iv) },
+    cipherKey,
+    this.base64ToArrayBuffer(envelope.ciphertext)
+);
 
-        // Update State (Advance Ratchet)
-        if (steps >= 0) {
-            state.chainKey = this.arrayBufferToBase64(await this.deriveNextChainKey(chainKey));
-            state.iteration = envelope.iteration + 1;
-            await this.store.storeSenderKey(senderKeyName, record);
-        }
+// Update State (Advance Ratchet)
+if (steps >= 0) {
+    state.chainKey = this.arrayBufferToBase64(await this.deriveNextChainKey(chainKey));
+    state.iteration = envelope.iteration + 1;
+    await this.store.storeSenderKey(senderKeyName, record);
+}
 
-        return new TextDecoder().decode(plaintext);
+return new TextDecoder().decode(plaintext);
     }
 
     // --- Crypto Helpers ---
-    private async generateSenderKey(): Promise<SenderKeyRecord> {
-        const chainKey = window.crypto.getRandomValues(new Uint8Array(32));
-        return {
-            senderKeyStates: [{
-                keyId: Math.floor(Math.random() * 2147483647),
-                chainKey: this.arrayBufferToBase64(chainKey.buffer),
-                signingKey: { pub: '', priv: '' }, // Placeholder (Signed Bundle used instead)
-                iteration: 0
-            }],
-            bundleVersion: 1,
-            createdAt: Date.now()
-        };
-    }
+    private async generateSenderKey(): Promise < SenderKeyRecord > {
+    const chainKey = window.crypto.getRandomValues(new Uint8Array(32));
+    return {
+        senderKeyStates: [{
+            keyId: Math.floor(Math.random() * 2147483647),
+            chainKey: this.arrayBufferToBase64(chainKey.buffer),
+            signingKey: { pub: '', priv: '' }, // Placeholder (Signed Bundle used instead)
+            iteration: 0
+        }],
+        bundleVersion: 1,
+        createdAt: Date.now()
+    };
+}
 
-    private async deriveMessageKey(chainKey: ArrayBuffer): Promise<ArrayBuffer> {
-        // HMAC-SHA256(chainKey, 0x01)
-        const key = await window.crypto.subtle.importKey('raw', chainKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-        // Returns 32 bytes. We need 16 (IV) + 32 (AES) = 48 bytes? 
-        // Signal uses KDF to split. Here we simplify:
-        // Byte 0x01 -> Message Key part 1?
-        // Let's use standard: HMAC(chainKey, 0x01) for IV (16), HMAC(chainKey, 0x02) for Key (32)
-        const ivPart = await window.crypto.subtle.sign('HMAC', key, new Uint8Array([0x01]));
-        const keyPart = await window.crypto.subtle.sign('HMAC', key, new Uint8Array([0x02]));
+    private async deriveMessageKey(chainKey: ArrayBuffer): Promise < ArrayBuffer > {
+    // HMAC-SHA256(chainKey, 0x01)
+    const key = await window.crypto.subtle.importKey('raw', chainKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    // Returns 32 bytes. We need 16 (IV) + 32 (AES) = 48 bytes? 
+    // Signal uses KDF to split. Here we simplify:
+    // Byte 0x01 -> Message Key part 1?
+    // Let's use standard: HMAC(chainKey, 0x01) for IV (16), HMAC(chainKey, 0x02) for Key (32)
+    const ivPart = await window.crypto.subtle.sign('HMAC', key, new Uint8Array([0x01]));
+    const keyPart = await window.crypto.subtle.sign('HMAC', key, new Uint8Array([0x02]));
 
-        const result = new Uint8Array(48);
-        result.set(new Uint8Array(ivPart).slice(0, 12), 0); // 12 byte IV
-        result.set(new Uint8Array(keyPart), 16);            // 32 byte Key
-        return result.buffer;
-    }
+    const result = new Uint8Array(48);
+    result.set(new Uint8Array(ivPart).slice(0, 12), 0); // 12 byte IV
+    result.set(new Uint8Array(keyPart), 16);            // 32 byte Key
+    return result.buffer;
+}
 
-    private async deriveNextChainKey(chainKey: ArrayBuffer): Promise<ArrayBuffer> {
-        const key = await window.crypto.subtle.importKey('raw', chainKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-        return await window.crypto.subtle.sign('HMAC', key, new Uint8Array([0x02]));
-    }
+    private async deriveNextChainKey(chainKey: ArrayBuffer): Promise < ArrayBuffer > {
+    const key = await window.crypto.subtle.importKey('raw', chainKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    return await window.crypto.subtle.sign('HMAC', key, new Uint8Array([0x02]));
+}
 
     // --- 4. Discovery (Story 2.5 Fix) ---
-    async getPrimaryDeviceId(userId: string): Promise<number> {
-        try {
-            const devices: any[] = await this.http.get<any[]>(`${environment.apiUrl}/devices?user_id=${userId}&action=list`, {
-                withCredentials: true
-            }).toPromise() || [];
+    async getPrimaryDeviceId(userId: string): Promise < number > {
+    try {
+        const devices: any[] = await this.http.get<any[]>(`${environment.apiUrl}/devices?user_id=${userId}&action=list`, {
+            withCredentials: true
+        }).toPromise() || [];
 
-            // Filter for devices with valid libsignal_device_id
-            const validDevices = devices.filter(d => d.libsignal_device_id);
+        // Filter for devices with valid libsignal_device_id
+        const validDevices = devices.filter(d => d.libsignal_device_id);
 
-            if (validDevices.length > 0) {
-                // Logic: Return the most recently active?
-                // For MVP, picking the first valid one is safer than guessing.
-                return Number(validDevices[0].libsignal_device_id);
-            }
+        if(validDevices.length > 0) {
+    // Logic: Return the most recently active?
+    // For MVP, picking the first valid one is safer than guessing.
+    return Number(validDevices[0].libsignal_device_id);
+}
 
-            return 1; // Fallback if no specific Signal ID found
+return 1; // Fallback if no specific Signal ID found
         } catch (e) {
-            console.warn('Failed to fetch devices for user ' + userId, e);
-            return 1; // Basic MVP fallback
-        }
+    console.warn('Failed to fetch devices for user ' + userId, e);
+    return 1; // Basic MVP fallback
+}
     }
 
-    async decryptMessage(ciphertext: any, remoteUserId: string, remoteDeviceId: number): Promise<string> {
-        const address = new libsignal.SignalProtocolAddress(remoteUserId, remoteDeviceId);
-        const sessionCipher = new libsignal.SessionCipher(this.store, address);
+    async decryptMessage(ciphertext: any, remoteUserId: string, remoteDeviceId: number): Promise < string > {
+    const address = new libsignal.SignalProtocolAddress(remoteUserId, remoteDeviceId);
+    const sessionCipher = new libsignal.SessionCipher(this.store, address);
 
-        let buffer: ArrayBuffer;
+    let buffer: ArrayBuffer;
 
-        try {
-            // Decode Base64 body
-            const bodyBuffer = this.base64ToArrayBuffer(ciphertext.body);
+    try {
+        // Decode Base64 body
+        const bodyBuffer = this.base64ToArrayBuffer(ciphertext.body);
 
-            if (ciphertext.type === 3) {
-                // PreKeyWhisperMessage
-                buffer = await sessionCipher.decryptPreKeyWhisperMessage(bodyBuffer);
-            } else if (ciphertext.type === 1) {
-                // WhisperMessage
-                buffer = await sessionCipher.decryptWhisperMessage(bodyBuffer);
-            } else {
-                throw new Error('Unknown Signal Message Type');
-            }
+        if(ciphertext.type === 3) {
+    // PreKeyWhisperMessage
+    buffer = await sessionCipher.decryptPreKeyWhisperMessage(bodyBuffer);
+} else if (ciphertext.type === 1) {
+    // WhisperMessage
+    buffer = await sessionCipher.decryptWhisperMessage(bodyBuffer);
+} else {
+    throw new Error('Unknown Signal Message Type');
+}
 
-            return new TextDecoder().decode(buffer);
+return new TextDecoder().decode(buffer);
 
         } catch (e) {
-            console.error(`Decryption failed from ${remoteUserId}:${remoteDeviceId}`, e);
-            throw e; // Bubble up for "Decryption Error" UI
-        }
+    console.error(`Decryption failed from ${remoteUserId}:${remoteDeviceId}`, e);
+    throw e; // Bubble up for "Decryption Error" UI
+}
     }
 
 
 
 
     // --- 6. Trust UX (Epic 6) ---
-    async getSafetyNumber(remoteUserId: string): Promise<string | null> {
-        const myIdentity = await this.store.getIdentityKeyPair();
-        const theirIdentity = await this.store.loadIdentityKey(remoteUserId);
+    async getSafetyNumber(remoteUserId: string): Promise < string | null > {
+    const myIdentity = await this.store.getIdentityKeyPair();
+    const theirIdentity = await this.store.loadIdentityKey(remoteUserId);
 
-        if (!myIdentity || !theirIdentity) {
-            console.warn('Cannot generate safety number: Missing identity keys');
-            return null;
-        }
+    if(!myIdentity || !theirIdentity) {
+    console.warn('Cannot generate safety number: Missing identity keys');
+    return null;
+}
 
-        // STRICT FIX: Normalize to Uint8Array regardless of source type
-        const myBytes = this.toUint8Array(myIdentity.pubKey);
-        const theirPubRaw = theirIdentity.pubKey || theirIdentity;
-        const theirBytes = this.toUint8Array(theirPubRaw);
+// STRICT FIX: Normalize to Uint8Array regardless of source type
+const myBytes = this.toUint8Array(myIdentity.pubKey);
+const theirPubRaw = theirIdentity.pubKey || theirIdentity;
+const theirBytes = this.toUint8Array(theirPubRaw);
 
-        if (!myBytes || !theirBytes) {
-            console.warn('Cannot generate safety number: Invalid key format');
-            return null;
-        }
+if (!myBytes || !theirBytes) {
+    console.warn('Cannot generate safety number: Invalid key format');
+    return null;
+}
 
-        // STRICT FIX: Deterministic ordering via full lexicographic byte comparison
-        const order = this.compareByteArrays(myBytes, theirBytes);
-        const combined = order <= 0
-            ? new Uint8Array([...myBytes, ...theirBytes])
-            : new Uint8Array([...theirBytes, ...myBytes]);
+// STRICT FIX: Deterministic ordering via full lexicographic byte comparison
+const order = this.compareByteArrays(myBytes, theirBytes);
+const combined = order <= 0
+    ? new Uint8Array([...myBytes, ...theirBytes])
+    : new Uint8Array([...theirBytes, ...myBytes]);
 
-        // SHA-256 Hash of raw bytes
-        const hash = await window.crypto.subtle.digest('SHA-256', combined.buffer as ArrayBuffer);
+// SHA-256 Hash of raw bytes
+const hash = await window.crypto.subtle.digest('SHA-256', combined.buffer as ArrayBuffer);
 
-        // Format as Numeric Groups
-        return this.formatSafetyNumber(hash);
+// Format as Numeric Groups
+return this.formatSafetyNumber(hash);
     }
 
     // STRICT FIX: Normalize any key format to Uint8Array
     private toUint8Array(data: any): Uint8Array | null {
-        if (!data) return null;
-        if (data instanceof Uint8Array) return data;
-        if (data instanceof ArrayBuffer) return new Uint8Array(data);
-        if (data.buffer && data.buffer instanceof ArrayBuffer) {
-            return new Uint8Array(data.buffer);
-        }
-        return null;
+    if (!data) return null;
+    if (data instanceof Uint8Array) return data;
+    if (data instanceof ArrayBuffer) return new Uint8Array(data);
+    if (data.buffer && data.buffer instanceof ArrayBuffer) {
+        return new Uint8Array(data.buffer);
     }
+    return null;
+}
 
     // STRICT FIX: Full lexicographic byte array comparison
     private compareByteArrays(a: Uint8Array, b: Uint8Array): number {
-        const minLen = Math.min(a.length, b.length);
-        for (let i = 0; i < minLen; i++) {
-            if (a[i] < b[i]) return -1;
-            if (a[i] > b[i]) return 1;
-        }
-        // All bytes equal up to minLen, shorter array comes first
-        return a.length - b.length;
+    const minLen = Math.min(a.length, b.length);
+    for (let i = 0; i < minLen; i++) {
+        if (a[i] < b[i]) return -1;
+        if (a[i] > b[i]) return 1;
     }
+    // All bytes equal up to minLen, shorter array comes first
+    return a.length - b.length;
+}
 
     private formatSafetyNumber(buffer: ArrayBuffer): string {
-        const bytes = new Uint8Array(buffer);
-        // Use first 15 bytes to generate 30 digits (approx)
-        // Simple visualization: specific chunks -> integers
-        // Standard Signal: 30 digits in 6 groups of 5.
-        // We will do a simplified version: taking 5 byte chunks, modulo 100000.
+    const bytes = new Uint8Array(buffer);
+    // Use first 15 bytes to generate 30 digits (approx)
+    // Simple visualization: specific chunks -> integers
+    // Standard Signal: 30 digits in 6 groups of 5.
+    // We will do a simplified version: taking 5 byte chunks, modulo 100000.
 
-        let codes = [];
-        for (let i = 0; i < 6; i++) { // 6 groups
-            if ((i * 5) + 5 > bytes.length) break;
-            const chunk = bytes.slice(i * 5, i * 5 + 5);
-            // Convert chunk to integer
-            let val = 0;
-            for (let j = 0; j < 5; j++) {
-                val = (val * 256 + chunk[j]) % 100000;
-            }
-            // Pad with leading zeros to 5 digits
-            codes.push(val.toString().padStart(5, '0'));
+    let codes = [];
+    for (let i = 0; i < 6; i++) { // 6 groups
+        if ((i * 5) + 5 > bytes.length) break;
+        const chunk = bytes.slice(i * 5, i * 5 + 5);
+        // Convert chunk to integer
+        let val = 0;
+        for (let j = 0; j < 5; j++) {
+            val = (val * 256 + chunk[j]) % 100000;
         }
-        return codes.join(' ');
+        // Pad with leading zeros to 5 digits
+        codes.push(val.toString().padStart(5, '0'));
     }
+    return codes.join(' ');
+}
 
     // Helper: Base64 to ArrayBuffer
     private base64ToArrayBuffer(base64: string | undefined | null): ArrayBuffer {
-        return this.base64ToArrayBuffer_Safe(base64 || '');
-    }
+    return this.base64ToArrayBuffer_Safe(base64 || '');
+}
 
     private base64ToArrayBuffer_Safe(base64: string): ArrayBuffer {
-        const binary_string = window.atob(base64);
-        const len = binary_string.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-            bytes[i] = binary_string.charCodeAt(i);
-        }
-        return bytes.buffer;
+    const binary_string = window.atob(base64);
+    const len = binary_string.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binary_string.charCodeAt(i);
     }
+    return bytes.buffer;
+}
 
     // Helper: ArrayBuffer to Base64 (Existing)
     private arrayBufferToBase64(buffer: ArrayBuffer): string {
-        let binary = '';
-        const bytes = new Uint8Array(buffer);
-        const len = bytes.byteLength;
-        for (let i = 0; i < len; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return window.btoa(binary);
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
     }
+    return window.btoa(binary);
+}
 
     // --- HF-5B.1: Signing Helpers ---
-    private async ensureCurve(): Promise<any> {
-        if (this.internalCurve) return this.internalCurve;
-        // libsignal.default is the factory
-        const lib = await (libsignal as any).default();
-        this.internalCurve = lib.Curve;
-        return this.internalCurve;
-    }
+    private async ensureCurve(): Promise < any > {
+    if(this.internalCurve) return this.internalCurve;
+    // libsignal.default is the factory
+    const lib = await (libsignal as any).default();
+    this.internalCurve = lib.Curve;
+    return this.internalCurve;
+}
 
-    private async signSenderKeyBundle(bundle: any): Promise<any> {
-        const identity = await this.store.getIdentityKeyPair();
-        if (!identity) throw new Error('NO_IDENTITY');
+    private async signSenderKeyBundle(bundle: any): Promise < any > {
+    const identity = await this.store.getIdentityKeyPair();
+    if(!identity) throw new Error('NO_IDENTITY');
 
-        // Deterministic serialization for signing: keyId + chainKey + groupId
-        // Simple: UTF-8 of specific fields
-        const data = new TextEncoder().encode(`${bundle.groupId}:${bundle.senderKeyId}:${bundle.chainKey}`);
+    // Deterministic serialization for signing: keyId + chainKey + groupId
+    // Simple: UTF-8 of specific fields
+    const data = new TextEncoder().encode(`${bundle.groupId}:${bundle.senderKeyId}:${bundle.chainKey}`);
 
-        const curve = await this.ensureCurve();
-        const signature = curve.calculateSignature(identity.privKey, data);
+    const curve = await this.ensureCurve();
+    const signature = curve.calculateSignature(identity.privKey, data);
 
-        return {
-            ...bundle,
-            signature: this.arrayBufferToBase64(signature)
-        };
-    }
+    return {
+        ...bundle,
+        signature: this.arrayBufferToBase64(signature)
+    };
+}
 
-    private async verifySenderKeySignature(bundle: any, identityKeyBase64: string): Promise<boolean> {
-        const data = new TextEncoder().encode(`${bundle.groupId}:${bundle.senderKeyId}:${bundle.chainKey}`);
-        const signature = this.base64ToArrayBuffer(bundle.signature);
-        const pubKey = this.base64ToArrayBuffer(identityKeyBase64);
+    private async verifySenderKeySignature(bundle: any, identityKeyBase64: string): Promise < boolean > {
+    const data = new TextEncoder().encode(`${bundle.groupId}:${bundle.senderKeyId}:${bundle.chainKey}`);
+    const signature = this.base64ToArrayBuffer(bundle.signature);
+    const pubKey = this.base64ToArrayBuffer(identityKeyBase64);
 
-        const curve = await this.ensureCurve();
-        return curve.verifySignature(pubKey, data, signature);
-    }
+    const curve = await this.ensureCurve();
+    return curve.verifySignature(pubKey, data, signature);
+}
 }
