@@ -1,7 +1,6 @@
-
 import { Component, Input, OnInit } from '@angular/core';
 import { ModalController } from '@ionic/angular';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 
 @Component({
     selector: 'app-pick-contact-modal',
@@ -18,7 +17,7 @@ export class PickContactModalComponent implements OnInit {
 
     constructor(
         private modalCtrl: ModalController,
-        private contactsService: ContactsService
+        private contactResolver: ContactResolverService
     ) { }
 
     ngOnInit() {
@@ -26,9 +25,12 @@ export class PickContactModalComponent implements OnInit {
     }
 
     async loadContacts() {
-        const all = (await this.contactsService.getAllContacts()) || [];
-        // Filter out already in group
-        this.contacts = all.filter((c: any) => !this.excludeIds.includes(String(c.user_id)));
+        const all = await this.contactResolver.getResolvedContacts();
+        // Filter out already in group and only those on ChatFlect
+        this.contacts = all.filter((c: any) =>
+            !this.excludeIds.includes(String(c.user_id)) &&
+            c.status === 'on_chatflect'
+        );
         this.filteredContacts = [...this.contacts];
     }
 

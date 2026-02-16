@@ -1,6 +1,6 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { ChatService } from 'src/app/services/chat.service';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { PresenceService } from 'src/app/services/presence.service';
 import { ChatSettingsService } from 'src/app/services/chat-settings.service';
 import { combineLatest, Subscription } from 'rxjs';
@@ -26,7 +26,7 @@ export class ArchivedChatsPage implements OnInit, OnDestroy {
 
   constructor(
     private chatService: ChatService,
-    private contactService: ContactsService,
+    private contactResolver: ContactResolverService,
     private presenceService: PresenceService,
     private chatSettings: ChatSettingsService,
     private toastCtrl: ToastController,
@@ -49,54 +49,50 @@ export class ArchivedChatsPage implements OnInit, OnDestroy {
     }
   }
 
-  loadArchivedChats(): Promise<void> {
+  async loadArchivedChats(): Promise<void> {
     if (this.chatSubscription) {
       this.chatSubscription.unsubscribe();
     }
     this.isLoading = true;
-    return new Promise(async (resolve) => {
-      await this.contactService.getAllContacts();
 
-      // First, get initial chats to know what settings to load
+    try {
+      const resolvedContacts = await this.contactResolver.getResolvedContacts();
+
       this.chatService.getMyChats().pipe(take(1)).subscribe(async (initialChats: any[]) => {
         const chatIds = initialChats.map(c => c.id);
         await this.chatSettings.loadMultipleSettings(chatIds);
 
-        // Now subscribe to the reactive stream for updates (archive/unarchive)
         this.chatSubscription = combineLatest([
           this.chatService.getMyChats(),
           this.chatSettings.settings$
-        ]).subscribe(async ([allChats, settingsMap]) => {
-
-          // Filter for ONLY archived chats
+        ]).subscribe(async ([allChats, _settings]: [any[], any]) => {
           this.archivedChats = allChats.filter(c => this.chatSettings.isArchived(c.id));
 
-          // Resolve names and presence
           for (const chat of this.archivedChats) {
             if (chat.isGroup) {
               chat.name = chat.groupName || 'Unnamed Group';
               chat.avatar = 'assets/group_placeholder.png';
             } else {
-              const otherId = chat.participants.find((p: any) => String(p) !== String(this.myId));
+              const otherId = chat.participants?.find((p: any) => String(p) !== String(this.myId));
               if (otherId) {
                 chat.otherUserId = otherId;
                 this.subscribeToPresence(otherId);
 
-                if (this.resolvedUsers.has(otherId)) {
-                  const cached = this.resolvedUsers.get(otherId);
-                  chat.name = cached?.name;
-                  chat.avatar = cached?.photo || chat.avatar;
+                const cached = this.resolvedUsers.get(otherId);
+                if (cached) {
+                  chat.name = cached.name;
+                  chat.avatar = cached.photo;
                 } else {
-                  const contact = this.contactService.localContacts.find((c: any) => String(c.user_id) === String(otherId));
+                  const contact = resolvedContacts.find(c => String(c.user_id) === String(otherId));
                   if (contact) {
-                    chat.name = contact.first_name + ' ' + contact.last_name;
+                    chat.name = contact.display_name;
                     chat.avatar = contact.photo_url;
                     this.resolvedUsers.set(otherId, { name: chat.name, photo: chat.avatar });
                   } else {
                     this.chatService.getUserInfo(otherId).then(info => {
                       chat.name = info.username;
                       if (info.photo) chat.avatar = info.photo;
-                      this.resolvedUsers.set(otherId, { name: info.username, photo: info.photo });
+                      this.resolvedUsers.set(otherId, { name: info.username, photo: info.photo || '' });
                     });
                   }
                 }
@@ -104,7 +100,6 @@ export class ArchivedChatsPage implements OnInit, OnDestroy {
             }
           }
 
-          // Sort by timestamp
           this.archivedChats.sort((a, b) => {
             const aTime = a.lastTimestamp?.seconds || 0;
             const bTime = b.lastTimestamp?.seconds || 0;
@@ -112,10 +107,12 @@ export class ArchivedChatsPage implements OnInit, OnDestroy {
           });
 
           this.isLoading = false;
-          resolve();
         });
       });
-    });
+    } catch (err) {
+      console.error('[ArchivedChats] Load Failed', err);
+      this.isLoading = false;
+    }
   }
 
   private subscribeToPresence(userId: string) {

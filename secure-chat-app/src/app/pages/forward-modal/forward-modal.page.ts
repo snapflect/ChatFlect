@@ -2,7 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { ModalController } from '@ionic/angular';
 import { ChatService } from 'src/app/services/chat.service';
 import { AuthService } from 'src/app/services/auth.service';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { ChangeDetectorRef } from '@angular/core';
 import { take } from 'rxjs/operators';
 
@@ -20,7 +20,7 @@ export class ForwardModalPage implements OnInit {
         private modalCtrl: ModalController,
         private chatService: ChatService,
         private auth: AuthService,
-        private contactService: ContactsService,
+        private contactResolver: ContactResolverService,
         private cdr: ChangeDetectorRef
     ) {
         this.auth.currentUserId.subscribe(id => this.currentUserId = String(id));
@@ -34,6 +34,9 @@ export class ForwardModalPage implements OnInit {
     }
 
     private async resolveChatInfos() {
+        // v2.3: Load all resolved contacts once to avoid multiple DB hits
+        const resolvedContacts = await this.contactResolver.getResolvedContacts();
+
         for (const chat of this.chats) {
             if (chat.isGroup) {
                 chat.name = chat.groupName || 'Unnamed Group';
@@ -44,16 +47,12 @@ export class ForwardModalPage implements OnInit {
             const otherId = chat.participants?.find((p: any) => String(p) !== String(this.currentUserId));
             if (!otherId) continue;
 
-            // 1. Check Local Contacts
-            const contact = this.contactService.localContacts.find(
-                (c: any) => String(c.user_id) === String(otherId)
-            );
+            const contact = resolvedContacts.find(c => String(c.user_id) === String(otherId));
 
             if (contact) {
-                chat.name = `${contact.first_name} ${contact.last_name || ''}`.trim();
+                chat.name = contact.display_name;
                 chat.avatar = contact.photo_url || 'assets/user.png';
             } else {
-                // 2. API Fallback
                 try {
                     const info = await this.chatService.getUserInfo(otherId);
                     chat.name = info.username || 'User';

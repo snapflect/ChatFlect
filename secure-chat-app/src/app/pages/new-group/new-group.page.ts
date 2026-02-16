@@ -1,7 +1,7 @@
 import { Component, OnInit, ChangeDetectorRef } from '@angular/core';
 import { NavController, ToastController } from '@ionic/angular';
 import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { ChatService } from 'src/app/services/chat.service';
 import { LoggingService } from 'src/app/services/logging.service';
 import { ApiService } from 'src/app/services/api.service';
@@ -21,7 +21,7 @@ export class NewGroupPage implements OnInit {
   isUploading = false;
 
   constructor(
-    private contactsService: ContactsService,
+    private contactResolver: ContactResolverService,
     private chatService: ChatService,
     private nav: NavController,
     private toast: ToastController,
@@ -36,7 +36,9 @@ export class NewGroupPage implements OnInit {
   }
 
   async loadContacts() {
-    this.contacts = (await this.contactsService.getAllContacts()) || [];
+    this.contacts = await this.contactResolver.getResolvedContacts();
+    // Filter only those already on ChatFlect for group creation
+    this.contacts = this.contacts.filter(c => c.status === 'on_chatflect');
   }
 
   toggleSelection(userId: string) {

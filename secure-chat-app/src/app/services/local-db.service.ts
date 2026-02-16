@@ -196,6 +196,16 @@ export class LocalDbService {
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
+            -- 9. Local Contacts (Phase 3 Product Unlock)
+            CREATE TABLE IF NOT EXISTS local_contacts (
+                hash TEXT PRIMARY KEY, -- SHA-256(E164)
+                user_id TEXT, -- Resolved if available
+                display_name TEXT, -- Local name from device
+                phone_last4 TEXT, -- For UI display only
+                status TEXT DEFAULT 'invite', -- 'on_chatflect', 'invite'
+                photo_url TEXT,
+                last_synced_at INTEGER
+            );
         `;
         await this.db.execute(schema);
     }

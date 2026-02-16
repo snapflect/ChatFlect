@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { ModalController } from '@ionic/angular';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 
 @Component({
   selector: 'app-contact-picker-modal',
@@ -15,7 +15,7 @@ export class ContactPickerModalPage implements OnInit {
 
   constructor(
     private modalCtrl: ModalController,
-    private contactsService: ContactsService
+    private contactResolver: ContactResolverService
   ) { }
 
   ngOnInit() {
@@ -23,22 +23,15 @@ export class ContactPickerModalPage implements OnInit {
   }
 
   async loadContacts() {
-    // Try cache first
-    const cached = localStorage.getItem('contacts_cache');
-    if (cached) {
-      this.contacts = JSON.parse(cached);
-      this.updateGroupedContacts();
-    }
-
-    // Refresh
     try {
-      const fresh = await this.contactsService.getAllContacts();
-      if (fresh) {
-        // Filter out those with no name/phone?
-        this.contacts = fresh;
-        localStorage.setItem('contacts_cache', JSON.stringify(fresh));
+      this.contacts = await this.contactResolver.getResolvedContacts();
+      this.updateGroupedContacts();
+
+      // Trigger background refresh (throttled)
+      this.contactResolver.syncContacts().then(async () => {
+        this.contacts = await this.contactResolver.getResolvedContacts();
         this.updateGroupedContacts();
-      }
+      });
     } catch (e) {
       console.error("Contacts Load Failed", e);
     }

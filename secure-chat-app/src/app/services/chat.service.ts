@@ -791,28 +791,30 @@ export class ChatService {
         return this.getMyChats();
     }
 
-    async getOrCreateChat(otherUserId: string) {
-        // ... (existing logic)
+    async getOrCreateChat(otherUserId: string): Promise<string> {
         const currentUserId = localStorage.getItem('user_id');
         if (!currentUserId) throw new Error('Not logged in');
-        const uid1 = String(currentUserId);
-        const uid2 = String(otherUserId);
-        const sortedIds = [uid1, uid2].sort();
-        const deterministicId = `${sortedIds[0]}_${sortedIds[1]}`;
-        const chatDocRef = this.fsDoc('chats', deterministicId);
-        const chatDoc = await this.fsGetDoc(chatDocRef);
 
-        if (chatDoc.exists()) {
-            return deterministicId;
-        } else {
-            // Create
-            await this.fsSetDoc(chatDocRef, {
-                participants: [uid1, uid2],
-                createdAt: Date.now(),
-                lastMessage: '',
-                lastTimestamp: Date.now()
-            });
-            return deterministicId;
+        try {
+            // Enterprise HF-3.3: MySQL-First Conversation Discovery
+            const response: any = await this.http.post(`${environment.apiUrl}/v4/conversations/get_or_create.php`, {
+                target_user_id: otherUserId
+            }).toPromise();
+
+            if (response && response.success && response.conversation_id) {
+                this.logger.log(`[ChatService] Conversation ${response.conversation_id} resolved via backend.`);
+                return response.conversation_id;
+            } else {
+                throw new Error(response?.message || 'Failed to resolve conversation');
+            }
+        } catch (err) {
+            this.logger.error('[ChatService] getOrCreateChat Failed', err);
+
+            // Fallback for dev/offline or if backend isn't ready: deterministic ID
+            const uid1 = String(currentUserId);
+            const uid2 = String(otherUserId);
+            const sortedIds = [uid1, uid2].sort();
+            return `${sortedIds[0]}_${sortedIds[1]}`;
         }
     }
 

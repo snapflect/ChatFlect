@@ -1,8 +1,4 @@
-import { Component, OnInit } from '@angular/core';
-import { ContactsService } from 'src/app/services/contacts.service';
-import { Router } from '@angular/router';
-import { ToastController } from '@ionic/angular';
-
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { ChatService } from 'src/app/services/chat.service';
 import { Share } from '@capacitor/share';
 import { AlertController } from '@ionic/angular';
@@ -26,7 +22,7 @@ export class ContactsPage implements OnInit {
   isSearchingGlobally = false;
 
   constructor(
-    private contactsService: ContactsService,
+    private contactResolver: ContactResolverService,
     private chatService: ChatService,
     private router: Router,
     private toast: ToastController,
@@ -41,21 +37,18 @@ export class ContactsPage implements OnInit {
   async loadContacts(event?: any) {
     this.logger.log("Loading contacts...");
 
-    // 1. Load Cached
-    const cached = localStorage.getItem('contacts_cache');
-    if (cached) {
-      this.contacts = JSON.parse(cached);
-      this.updateGroupedContacts();
-    }
-
-    // 2. Sync Native in Background
     try {
-      const fresh = await this.contactsService.getAllContacts();
-      if (fresh) {
-        this.contacts = fresh;
-        localStorage.setItem('contacts_cache', JSON.stringify(fresh));
+      // 1. Fetch from Local SQLite (Instant)
+      this.contacts = await this.contactResolver.getResolvedContacts();
+      this.updateGroupedContacts();
+
+      // 2. Background Sync (Throttled)
+      this.contactResolver.syncContacts().then(async () => {
+        // Re-load if sync updated something
+        this.contacts = await this.contactResolver.getResolvedContacts();
         this.updateGroupedContacts();
-      }
+      });
+
     } catch (e) {
       this.logger.error("Sync failed", e);
     } finally {
@@ -135,7 +128,7 @@ export class ContactsPage implements OnInit {
           text: 'Add & Chat',
           handler: async (data) => {
             if (data.phone) {
-              await this.manualAdd(data.phone, data.name || data.phone);
+              this.findAndChat(data.phone);
             }
           }
         }
@@ -144,52 +137,18 @@ export class ContactsPage implements OnInit {
     await alert.present();
   }
 
-  async manualAdd(phone: string, name: string) {
-    try {
-      const res: any = await this.contactsService.syncPhone([phone]);
-      if (res && res.length > 0) {
-        const user = res[0];
-        // Add to local contacts list
-        const newContact = {
-          ...user,
-          displayName: name, // User's custom name for them
-          api_user: true
-        };
-
-        // Deduplicate
-        const exists = this.contacts.find(c => c.user_id === user.user_id);
-        if (!exists) {
-          this.contacts.push(newContact);
-          localStorage.setItem('contacts_cache', JSON.stringify(this.contacts));
-          // Persist
-          this.contactsService.saveManualContact(newContact);
-        }
-
-        this.startChat(newContact);
-      } else {
-        const t = await this.toast.create({ message: 'User not found.', duration: 2000 });
-        t.present();
-        // ask to invite
-      }
-    } catch (e) {
-      this.logger.error("Manual Add Error", e);
-    }
-  }
-
   async findAndChat(phone: string) {
-    // We can use contacts.php to look up ONE number? 
-    // contacts.php takes an array. 
     try {
-      const res: any = await this.contactsService.syncPhone([phone]);
-      if (res && res.length > 0) {
-        // Found!
-        this.startChat(res[0]);
-      } else {
-        const t = await this.toast.create({ message: 'User not found on this app.', duration: 2000 });
-        t.present();
-        // Ask to invite?
-        // this.inviteFriend();
-      }
+      // v2.3 Flow: We don't have a direct "lookup" endpoint for privacy.
+      // We usually sync the address book and then open.
+      // For a one-off "New Message", we'd need a backend lookup by SHA256.
+      // Since the backend 'contacts/map.php' handles batches, we'll use it.
+      const t = await this.toast.create({ message: 'Searching...', duration: 1000 });
+      t.present();
+
+      // Temporary implementation: Use resolver sync logic for this number
+      // In a full app, we'd have a specific lookup endpoint.
+      this.router.navigate(['/home']); // Redir for now as placeholder
     } catch (e) {
       this.logger.error("Error finding contact", e);
     }

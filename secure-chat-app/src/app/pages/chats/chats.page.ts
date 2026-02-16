@@ -1,8 +1,9 @@
 import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { ChatService } from 'src/app/services/chat.service';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { PresenceService } from 'src/app/services/presence.service';
 import { ChatSettingsService } from 'src/app/services/chat-settings.service';
+import { LoggingService } from 'src/app/services/logging.service';
 import { combineLatest, Subscription } from 'rxjs';
 import { take } from 'rxjs/operators';
 import {
@@ -42,9 +43,10 @@ export class ChatsPage implements OnInit, OnDestroy {
 
   constructor(
     private chatService: ChatService,
-    private contactService: ContactsService,
+    private contactResolver: ContactResolverService,
     private presenceService: PresenceService,
     private chatSettings: ChatSettingsService,
+    private logger: LoggingService,
     private toastCtrl: ToastController,
     private actionSheetCtrl: ActionSheetController,
     private alertCtrl: AlertController,
@@ -86,14 +88,16 @@ export class ChatsPage implements OnInit, OnDestroy {
     this.onlineUsers.clear();
   }
 
-  private loadChats(): void {
+  private async loadChats(): Promise<void> {
     this.chatSubscription?.unsubscribe();
     this.cleanupPresence();
     this.resolvedUsers.clear();
 
     this.isLoading = true;
 
-    this.contactService.getAllContacts().then(() => {
+    try {
+      const resolvedContacts = await this.contactResolver.getResolvedContacts();
+
       this.chatService.getMyChats().pipe(take(1)).subscribe(initialChats => {
         const chatIds = initialChats.map(c => c.id);
 
@@ -101,22 +105,18 @@ export class ChatsPage implements OnInit, OnDestroy {
           this.chatSubscription = combineLatest([
             this.chatService.getMyChats(),
             this.chatSettings.settings$
-          ]).subscribe(([allChats]) => {
+          ]).subscribe(([allChats, _settings]: [any[], any]) => {
 
             this.chats = [...allChats];
 
             for (const chat of this.chats) {
-
               if (chat.isGroup) {
                 chat.name = chat.groupName || 'Unnamed Group';
                 chat.avatar = chat.groupIcon || null;
                 continue;
               }
 
-              const otherId = chat.participants.find(
-                (p: any) => String(p) !== String(this.myId)
-              );
-
+              const otherId = chat.participants?.find((p: any) => String(p) !== String(this.myId));
               if (!otherId) continue;
 
               chat.otherUserId = otherId;
@@ -129,17 +129,12 @@ export class ChatsPage implements OnInit, OnDestroy {
                 continue;
               }
 
-              const contact = this.contactService.localContacts.find(
-                (c: any) => String(c.user_id) === String(otherId)
-              );
+              const contact = resolvedContacts.find(c => String(c.user_id) === String(otherId));
 
               if (contact) {
-                chat.name = `${contact.first_name} ${contact.last_name}`;
+                chat.name = contact.display_name;
                 chat.avatar = contact.photo_url ?? null;
-                this.resolvedUsers.set(otherId, {
-                  name: chat.name,
-                  photo: chat.avatar
-                });
+                this.resolvedUsers.set(otherId, { name: chat.name, photo: chat.avatar });
                 continue;
               }
 
@@ -150,23 +145,13 @@ export class ChatsPage implements OnInit, OnDestroy {
               this.chatService.getUserInfo(otherId).then(info => {
                 chat.name = info.username;
                 chat.avatar = info.photo ?? null;
-
-                this.resolvedUsers.set(otherId, {
-                  name: chat.name,
-                  photo: chat.avatar
-                });
-
+                this.resolvedUsers.set(otherId, { name: chat.name, photo: chat.avatar });
                 this.cdr.detectChanges();
               });
             }
 
-            this.archivedCount = this.chats.filter(c =>
-              this.chatSettings.isArchived(c.id)
-            ).length;
-
-            this.chats = this.chats.filter(c =>
-              !this.chatSettings.isArchived(c.id)
-            );
+            this.archivedCount = this.chats.filter(c => this.chatSettings.isArchived(c.id)).length;
+            this.chats = this.chats.filter(c => !this.chatSettings.isArchived(c.id));
 
             this.sortChats();
             this.filteredChats = [...this.chats];
@@ -174,7 +159,10 @@ export class ChatsPage implements OnInit, OnDestroy {
           });
         });
       });
-    });
+    } catch (err) {
+      this.logger.error('[ChatsPage] Load Failed', err);
+      this.isLoading = false;
+    }
   }
 
   /* ---------------- SORT ---------------- */
