@@ -21,3 +21,10 @@ CREATE TABLE IF NOT EXISTS security_events (
     INDEX idx_sec_user (user_id),
     INDEX idx_sec_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 4. Add trust_status column to user_devices for auto lockdown (HF-5D.8)
+ALTER TABLE user_devices ADD COLUMN trust_status VARCHAR(20) DEFAULT 'trusted' AFTER device_uuid;
+-- Values: 'trusted', 'suspicious', 'blocked'
+
+-- 5. Index for quick trust checks during send
+CREATE INDEX idx_device_trust ON user_devices (device_uuid, trust_status);

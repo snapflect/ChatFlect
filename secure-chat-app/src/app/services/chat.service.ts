@@ -283,6 +283,28 @@ export class ChatService {
     }
 
     /**
+     * HF-5D.8: Auto Session Lockdown
+     * Reports a spoofed device to the backend. The backend marks the device
+     * as 'suspicious' in user_devices, blocking further sends until re-verified.
+     */
+    private reportSpoofedDevice(senderId: string, outerUuid: string, innerUuid: string, context: string): void {
+        try {
+            this.api.post('v4/security/report_spoof.php', {
+                spoofed_sender_id: senderId,
+                outer_device_uuid: outerUuid,
+                inner_device_uuid: innerUuid,
+                context: context,
+                reporter_device_uuid: localStorage.getItem('device_uuid')
+            }).subscribe({
+                next: () => this.logger.log(`[HF-5D.8] Spoof report sent for ${senderId}`),
+                error: (err: any) => this.logger.warn('[HF-5D.8] Spoof report failed', err)
+            });
+        } catch (e) {
+            this.logger.warn('[HF-5D.8] Spoof report error', e);
+        }
+    }
+
+    /**
      * sendInternal (v2.3 Core Pipeline)
      * Handles local-first persistence, encryption, and queueing.
      */
@@ -741,6 +763,8 @@ export class ChatService {
                                     if (inner._duid && envelope.senderDeviceUuid && inner._duid !== envelope.senderDeviceUuid) {
                                         this.logger.error(`[Security][HF-5D.1] SPOOF DETECTED (Group)! Inner: ${inner._duid}, Outer: ${envelope.senderDeviceUuid}`);
                                         decrypted = "⚠️ Security Alert: Identity verification failed (Group Spoofed)";
+                                        // HF-5D.8: Auto Session Lockdown
+                                        this.reportSpoofedDevice(senderId, envelope.senderDeviceUuid, inner._duid, 'group');
                                     } else {
                                         decrypted = inner;
                                     }
@@ -750,10 +774,11 @@ export class ChatService {
                                     const inner = JSON.parse(body);
 
                                     // HF-5D.1: Double-Check Binding (Spoof Protection)
-                                    // We verify that the authenticated identity (inner) matches the routing identity (outer)
                                     if (inner._duid && envelope.senderDeviceUuid && inner._duid !== envelope.senderDeviceUuid) {
                                         this.logger.error(`[Security][HF-5D.1] SPOOF DETECTED! Encrypted by ${inner._duid} but envelope claims ${envelope.senderDeviceUuid}`);
                                         decrypted = "⚠️ Security Alert: Identity verification failed (Device Spoofed)";
+                                        // HF-5D.8: Auto Session Lockdown
+                                        this.reportSpoofedDevice(senderId, envelope.senderDeviceUuid, inner._duid, '1:1');
                                     } else {
                                         decrypted = inner;
                                     }

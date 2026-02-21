@@ -35,14 +35,25 @@ try {
     // HF-5D.3: Backend Device Ownership Enforcement
     $senderDeviceUuid = $input['sender_device_uuid'] ?? null;
     if ($senderDeviceUuid) {
-        $stmtDevice = $pdo->prepare("SELECT id FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+        $stmtDevice = $pdo->prepare("SELECT id, trust_status FROM user_devices WHERE user_id = ? AND device_uuid = ?");
         $stmtDevice->execute([$user['user_id'], $senderDeviceUuid]);
-        if (!$stmtDevice->fetch()) {
+        $deviceRow = $stmtDevice->fetch(PDO::FETCH_ASSOC);
+        if (!$deviceRow) {
             // HF-5D.7: Security Incident Logging
             $pdo->prepare("INSERT IGNORE INTO security_events (event_type, user_id, device_uuid, details, created_at) VALUES (?, ?, ?, ?, NOW())")
                 ->execute(['DEVICE_SPOOF', $user['user_id'], $senderDeviceUuid, 'Sender device UUID not owned by user']);
             http_response_code(403);
             echo json_encode(['error' => 'Security Violation: Device UUID not recognized or owned by user']);
+            exit;
+        }
+
+        // HF-5D.8: Auto Session Lockdown - Block suspicious/blocked devices
+        $trustStatus = $deviceRow['trust_status'] ?? 'trusted';
+        if ($trustStatus !== 'trusted') {
+            $pdo->prepare("INSERT IGNORE INTO security_events (event_type, user_id, device_uuid, details, created_at) VALUES (?, ?, ?, ?, NOW())")
+                ->execute(['SEND_BLOCKED', $user['user_id'], $senderDeviceUuid, "Device locked: trust_status={$trustStatus}"]);
+            http_response_code(403);
+            echo json_encode(['error' => 'Device is locked due to security concern. Please re-verify your device.', 'lockdown' => true]);
             exit;
         }
     } else {
