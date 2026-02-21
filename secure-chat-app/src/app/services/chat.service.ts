@@ -217,6 +217,25 @@ export class ChatService {
             const envelope = JSON.parse(msg.encrypted_payload);
             let chatId = msg.sender_user_id || 'unknown_chat';
             let senderId = msg.sender_user_id || 'unknown_sender';
+            const senderDeviceUuid = envelope.senderDeviceUuid || 'unknown_device';
+
+            // HF-5D.6: Local Anti-Replay Cache
+            // Even if Signal session resets, prevent duplicate content rendering
+            if (envelope.protocol === 'v3' && senderDeviceUuid !== 'unknown_device') {
+                const seen = await this.localDb.query(
+                    'SELECT 1 FROM local_seen_message_ids WHERE sender_device_uuid = ? AND message_uuid = ?',
+                    [senderDeviceUuid, msg.message_uuid]
+                );
+                if (seen.length > 0) {
+                    this.logger.warn(`[Security][HF-5D.6] Replay blocked: ${msg.message_uuid} from device ${senderDeviceUuid}`);
+                    return;
+                }
+                // Record this message as seen
+                await this.localDb.run(
+                    'INSERT OR IGNORE INTO local_seen_message_ids (sender_device_uuid, message_uuid, received_at) VALUES (?, ?, ?)',
+                    [senderDeviceUuid, msg.message_uuid, Date.now()]
+                );
+            }
 
             // HF-5A: Protocol Awareness
             if (envelope.protocol === 'v3') {
@@ -230,7 +249,6 @@ export class ChatService {
                 }
             } else {
                 // HF-5C.3: Strict Anti-Downgrade
-                // If we have a V3 session, we reject legacy/hybrid messages to prevent rollback attacks.
                 try {
                     const hasV3 = await this.signal.hasSession(senderId, 1);
                     if (hasV3) {

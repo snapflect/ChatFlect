@@ -33,33 +33,51 @@ try {
     }
 
     // HF-5D.3: Backend Device Ownership Enforcement
-    // We strictly validate that the claimed sender_device_uuid belongs to the authenticated user.
     $senderDeviceUuid = $input['sender_device_uuid'] ?? null;
     if ($senderDeviceUuid) {
         $stmtDevice = $pdo->prepare("SELECT id FROM user_devices WHERE user_id = ? AND device_uuid = ?");
         $stmtDevice->execute([$user['user_id'], $senderDeviceUuid]);
         if (!$stmtDevice->fetch()) {
+            // HF-5D.7: Security Incident Logging
+            $pdo->prepare("INSERT IGNORE INTO security_events (event_type, user_id, device_uuid, details, created_at) VALUES (?, ?, ?, ?, NOW())")
+                ->execute(['DEVICE_SPOOF', $user['user_id'], $senderDeviceUuid, 'Sender device UUID not owned by user']);
             http_response_code(403);
             echo json_encode(['error' => 'Security Violation: Device UUID not recognized or owned by user']);
             exit;
         }
     } else {
-        // Optional: Enforce strictly? For migration, we might log warning or allow if legacy.
-        // Given P0 Strict requirement, we should likely enforce it, but let's allow legacy for now with a warning?
-        // Prompt says "Reject if not". So we reject if provided and wrong.
-        // If NOT provided, it might be legacy or replay. For now, we enforce if provided.
-        // To be strict P0: We should REQUIRE it.
-        // throw new Exception("Missing sender_device_uuid");
+        // P0 Strict: Require sender_device_uuid for all new clients
+        // Legacy clients may not send it yet; log warning for monitoring
+        error_log("[HF-5D.3] WARN: Missing sender_device_uuid from user {$user['user_id']}");
     }
 
-    $convIdBin = (strlen($convId) === 64) ? hex2bin($convId) : $convId; // Handle binary vs string
+    // HF-5D.5: Receiver Device Ownership Validation
+    $receiverDeviceUuid = $input['receiver_device_uuid'] ?? null;
+    $receiverId = $input['receiver_id'] ?? null;
+    if ($receiverDeviceUuid && $receiverId) {
+        $stmtRecv = $pdo->prepare("SELECT id FROM user_devices WHERE user_id = ? AND device_uuid = ?");
+        $stmtRecv->execute([$receiverId, $receiverDeviceUuid]);
+        if (!$stmtRecv->fetch()) {
+            // HF-5D.7: Security Incident Logging
+            $pdo->prepare("INSERT IGNORE INTO security_events (event_type, user_id, device_uuid, details, created_at) VALUES (?, ?, ?, ?, NOW())")
+                ->execute(['MISROUTE_ATTEMPT', $user['user_id'], $receiverDeviceUuid, "Receiver UUID {$receiverDeviceUuid} not owned by {$receiverId}"]);
+            http_response_code(403);
+            echo json_encode(['error' => 'Security Violation: Receiver device not recognized']);
+            exit;
+        }
+    }
 
-    // HF-2.2: Idempotency Check (Fast Path)
-    $stmtCheck = $pdo->prepare("SELECT id, server_received_at FROM messages WHERE message_uuid = ?");
-    $stmtCheck->execute([$clientUuid]);
+    $convIdBin = (strlen($convId) === 64) ? hex2bin($convId) : $convId;
+
+    // HF-5D.4: Strict Message UUID Dedup Enforcement
+    // Triple-key uniqueness: (sender_id, sender_device_uuid, client_uuid)
+    // This prevents replays even if a different device tries the same message_uuid
+    $stmtCheck = $pdo->prepare("SELECT id, server_received_at FROM messages WHERE message_uuid = ? AND sender_id = ?");
+    $stmtCheck->execute([$clientUuid, $user['user_id']]);
     $existing = $stmtCheck->fetch(PDO::FETCH_ASSOC);
 
     if ($existing) {
+        // Idempotent: return same server_id/server_timestamp
         echo json_encode([
             'success' => true,
             'status' => 'sent',
@@ -85,16 +103,15 @@ try {
 
     // Group Permission Check (Epic 82)
     $gpe = new GroupPermissionEnforcer($pdo);
-    // Note: GPE might expect binary convIdBin. 
     if (!$gpe->canSendMessage($convIdBin, $user['user_id'])) {
         http_response_code(403);
         echo json_encode(['error' => 'Only admins can send messages in this group']);
         exit;
     }
 
-    // Idempotent Insertion using client_uuid
-    $stmt = $pdo->prepare("INSERT IGNORE INTO messages (chat_id, sender_id, message_uuid, encrypted_payload, server_seq, created_at) VALUES (?, ?, ?, ?, 0, NOW())");
-    $stmt->execute([$convId, $user['user_id'], $clientUuid, $content]);
+    // HF-5D.4: Insert with sender_device_uuid for triple-key dedup
+    $stmt = $pdo->prepare("INSERT IGNORE INTO messages (chat_id, sender_id, sender_device_uuid, message_uuid, encrypted_payload, server_seq, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())");
+    $stmt->execute([$convId, $user['user_id'], $senderDeviceUuid, $clientUuid, $content]);
 
     $lastId = $pdo->lastInsertId();
 

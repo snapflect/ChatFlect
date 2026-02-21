@@ -218,6 +218,15 @@ export class LocalDbService {
                 id INTEGER PRIMARY KEY CHECK (id = 1), -- Singleton
                 key_pair TEXT 
             );
+
+            -- 12. Anti-Replay Cache (HF-5D.6)
+            -- Prevents duplicate content rendering even after Signal session resets
+            CREATE TABLE IF NOT EXISTS local_seen_message_ids (
+                sender_device_uuid TEXT NOT NULL,
+                message_uuid TEXT NOT NULL,
+                received_at INTEGER NOT NULL,
+                PRIMARY KEY(sender_device_uuid, message_uuid)
+            );
         `;
         await this.db.execute(schema);
     }
