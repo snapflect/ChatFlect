@@ -237,12 +237,19 @@ export class AuthService {
             }).toPromise();
 
             if (res && res.status === 'success') {
-                // Tokens set in Cookie by backend
+                if (res.token) localStorage.setItem('auth_token', res.token);
                 return res.token;
             }
         } catch (e: any) {
-            // v8.1: Only treat as blocked if backend explicitly says so
             const errorBody = e?.error;
+            // HF-7.1 / HF-7.3: Handle Session Revocation & Fraud Detection
+            if (e?.status === 403 && (errorBody?.error === 'FRAUD_DETECTED' || errorBody?.error === 'SESSION_REVOKED')) {
+                this.logger.error("[Auth] Security Revocation Triggered", errorBody);
+                this.logout();
+                alert("Security Alert: Your session has been terminated. Please log in again.");
+                return null;
+            }
+
             if (e?.status === 403 && errorBody?.status === 'blocked') {
                 if (!this.userBlockedAlertShown) {
                     this.userBlockedAlertShown = true;
@@ -251,7 +258,7 @@ export class AuthService {
                 }
             } else if (e?.status === 403) {
                 // Device error or session issue — don't force logout
-                this.logger.warn('[Auth] 403 from refresh (device/session issue, not blocked)', errorBody);
+                this.logger.warn('[Auth] 403 from refresh (device/session issue)', errorBody);
             }
             this.logger.error("Token Refresh Failed", e);
         }
