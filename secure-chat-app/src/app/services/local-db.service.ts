@@ -1,7 +1,9 @@
 import { Injectable } from '@angular/core';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
 import { SecureStoragePlugin } from 'capacitor-secure-storage-plugin';
+import { NativeBiometric } from 'capacitor-native-biometric';
 import { LoggingService } from './logging.service';
+import { Platform } from '@ionic/angular';
 
 /**
  * LocalDbService (v2.2 Architecture)
@@ -18,14 +20,27 @@ export class LocalDbService {
     private initPromise: Promise<void> | null = null;
 
     private readonly DB_NAME = 'chatflect_v2_main';
+    private readonly MAX_VAULT_ATTEMPTS = 5;
 
-    constructor(private logger: LoggingService) { }
+    constructor(
+        private logger: LoggingService,
+        private platform: Platform
+    ) { }
 
     async initialize(): Promise<void> {
         if (this.initPromise) return this.initPromise;
 
         this.initPromise = (async () => {
             try {
+                // HF-6.1: Biometric Enclave Vault Gate
+                if (this.platform.is('hybrid')) {
+                    const isBiometricVerified = await this.verifyBiometrics();
+                    if (!isBiometricVerified) {
+                        this.logger.error("[LocalDb] Biometric verification failed or canceled.");
+                        throw new Error("BIOMETRIC_FAILED");
+                    }
+                }
+
                 const passphrase = await this.getOrCreatePassphrase();
 
                 this.db = await this.sqlite.createConnection(
@@ -43,8 +58,12 @@ export class LocalDbService {
                 await this.createTables();
                 this.isInitialized = true;
                 this.logger.log(`[LocalDb] Database ${this.DB_NAME} initialized with encryption.`);
-            } catch (err) {
-                this.logger.error("[LocalDb] Initialization Fatal Error", err);
+            } catch (err: any) {
+                if (err.message === 'VAULT_LOCKED') {
+                    this.logger.error("[LocalDb] Vault is locked due to security policy.");
+                } else {
+                    this.logger.error("[LocalDb] Initialization Fatal Error", err);
+                }
                 throw err;
             }
         })();
@@ -112,6 +131,84 @@ export class LocalDbService {
         );
 
         return btoa(String.fromCharCode(...new Uint8Array(derivedKey)));
+    }
+
+    private async verifyBiometrics(): Promise<boolean> {
+        try {
+            // Check if vault is already nuked
+            if (localStorage.getItem('vault_nuked') === 'true') {
+                throw new Error('VAULT_LOCKED');
+            }
+
+            const result = await NativeBiometric.isAvailable();
+            if (!result.isAvailable) {
+                this.logger.log("[LocalDb] Biometrics not available, skipping gate (Fallback to Device Lock).");
+                return true;
+            }
+
+            const verified = await NativeBiometric.verifyIdentity({
+                reason: "Unlock your secure messaging vault",
+                title: "Vault Access",
+                subtitle: "ChatFlect Security",
+                description: "Verify your identity to access encrypted messages.",
+                useFallback: true // Allow PIN if biometrics fail
+            }).then(() => true).catch(() => false);
+
+            if (verified) {
+                localStorage.setItem('vault_fail_count', '0');
+                return true;
+            } else {
+                await this.handleFailedAttempt();
+                return false;
+            }
+        } catch (e: any) {
+            if (e.message === 'VAULT_LOCKED') throw e;
+            this.logger.warn("[LocalDb] Biometric Error", e);
+            return false;
+        }
+    }
+
+    private async handleFailedAttempt() {
+        const currentCount = parseInt(localStorage.getItem('vault_fail_count') || '0') + 1;
+        localStorage.setItem('vault_fail_count', currentCount.toString());
+
+        this.logger.warn(`[Security][HF-6.2] Failed vault access attempt ${currentCount}/${this.MAX_VAULT_ATTEMPTS}`);
+
+        if (currentCount >= this.MAX_VAULT_ATTEMPTS) {
+            await this.triggerNuke();
+        }
+    }
+
+    private async triggerNuke() {
+        this.logger.error("[Critical][Security] NUKE TRIGGERED: Wiping all local data due to multiple failed access attempts.");
+
+        // 1. Mark as permanently locked to prevent further attempts until fresh login
+        localStorage.setItem('vault_nuked', 'true');
+
+        // 2. Wipe Hardware Seeds
+        await SecureStoragePlugin.remove({ key: 'sqlite_master_seed' }).catch(() => { });
+        await SecureStoragePlugin.remove({ key: 'sqlite_device_salt' }).catch(() => { });
+        await SecureStoragePlugin.remove({ key: 'sqlite_v2_passphrase' }).catch(() => { });
+
+        // 3. Clear all LocalStorage (except the nuke flag for current session)
+        const keysToKeep = ['vault_nuked'];
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && !keysToKeep.includes(key)) {
+                localStorage.removeItem(key);
+            }
+        }
+
+        // 4. Delete Database Physically
+        try {
+            // HF-6.2: Correct Capacitor SQLite v6 signature
+            await (this.sqlite as any).deleteDatabase({ database: this.DB_NAME, readonly: false });
+        } catch (e) {
+            this.logger.warn("[LocalDb] Failed to delete database file during nuke", e);
+        }
+
+        // 5. Force Reload to Login
+        window.location.href = '/login';
     }
 
     private async createTables() {
