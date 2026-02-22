@@ -420,6 +420,86 @@ export class ChatService {
     }
 
     /**
+     * HF-5A/B: distributeSecurePayload
+     * Used for forwarding or cases where ciphertext is already generated.
+     */
+    async distributeSecurePayload(chatId: string, senderId: string, type: string, ciphertext: string, iv: string, key: CryptoKey | string, metadata: any = {}) {
+        try {
+            const isGroup = chatId.startsWith('GROUP_');
+            let envelope: any;
+
+            const myDeviceUuid = localStorage.getItem('device_uuid') || '';
+            const myDeviceId = this.auth.getDeviceId() || 1;
+
+            let keyBase64 = '';
+            if (typeof key === 'string') {
+                keyBase64 = key;
+            } else {
+                keyBase64 = await this.crypto.exportAesKey(key);
+            }
+
+            if (!isGroup) {
+                // Fetch primary device context for recipient
+                const deviceId = await this.signal.getPrimaryDeviceId(chatId);
+
+                // For 1:1, we still wrap in a Signal Envelope for target device
+                // BUT if we are forwarding media, the media is encrypted with 'key'. 
+                // We just need to Signal-encrypt the 'metadata' including the key.
+                const innerPayload = JSON.stringify({
+                    type: type,
+                    ciphertext: ciphertext, // This is the payload ciphertext (e.g. for text)
+                    iv: iv,
+                    k: keyBase64,
+                    ...metadata,
+                    _duid: myDeviceUuid,
+                    _mid: crypto.randomUUID()
+                });
+
+                envelope = await this.signal.encryptMessage(innerPayload, chatId, deviceId);
+            } else {
+                // Group Distribution
+                const innerPayload = JSON.stringify({
+                    type: type,
+                    ciphertext: ciphertext,
+                    iv: iv,
+                    k: keyBase64,
+                    ...metadata,
+                    _duid: myDeviceUuid,
+                    _mid: crypto.randomUUID()
+                });
+
+                envelope = await this.signal.encryptGroupMessage(innerPayload, chatId);
+            }
+
+            // Persistence & Queueing
+            const messageId = envelope.messageId || crypto.randomUUID();
+            await this.localDb.run(`
+                INSERT INTO local_messages (id, chat_id, sender_id, type, payload, timestamp, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `, [
+                messageId,
+                chatId,
+                senderId,
+                type,
+                JSON.stringify(envelope),
+                Date.now(),
+                'pending'
+            ]);
+
+            // Add to Reliability Queue
+            await this.retryScheduler.addToQueue(messageId);
+            this.retryScheduler.processQueue();
+
+            this.zone.run(() => this.newMessage$.next({ chatId, senderId, timestamp: Date.now() }));
+
+            return messageId;
+        } catch (e) {
+            this.logger.error("[ChatService] distributeSecurePayload failed", e);
+            throw e;
+        }
+    }
+
+    /**
      * flushOutbox moved to SyncService (v14)
      */
     async retryOfflineAction(chatId: string, action: string, payload: any) {

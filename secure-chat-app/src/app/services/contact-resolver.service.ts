@@ -149,6 +149,21 @@ export class ContactResolverService {
         }
     }
 
+    /**
+     * HF-3.3: Global Search for users not in local contacts
+     */
+    async searchGlobal(query: string): Promise<any[]> {
+        try {
+            const res: any = await this.http.get(`${environment.apiUrl}/contacts/search.php?q=${encodeURIComponent(query)}`, {
+                withCredentials: true
+            }).toPromise();
+            return (res && res.success) ? res.results : [];
+        } catch (e) {
+            this.logger.error('[ContactResolver] Global Search Failed', e);
+            return [];
+        }
+    }
+
     async getResolvedContacts(): Promise<any[]> {
         return this.localDb.query(`
             SELECT * FROM local_contacts 

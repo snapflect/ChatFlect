@@ -25,7 +25,7 @@ export class ChunkedUploadService {
      * Main entry point for file uploads.
      * Chunks if file > THRESHOLD.
      */
-    async uploadFile(file: Blob, tempId: string, encrypt = true): Promise<any> {
+    async uploadFile(file: Blob, tempId: string, encrypt = true, filename?: string): Promise<any> {
         if (file.size < this.THRESHOLD) {
             // Fallback to existing single-shot upload logic (but integrated here)
             return this.uploadSingleShot(file, tempId, encrypt);
@@ -48,8 +48,9 @@ export class ChunkedUploadService {
         // Calculate hash of final BLOB (encrypted if encrypt=true)
         const fileHash = await this.crypto.calculateHash(blob);
 
+        const actualName = filename || (file as any).name || 'file.bin';
         // 1. Init
-        await this.initUpload(uploadId, blob.size, chunkCount, file.name, fileHash);
+        await this.initUpload(uploadId, blob.size, chunkCount, actualName, fileHash);
 
         // 2. Upload Chunks
         for (let i = 0; i < chunkCount; i++) {
@@ -88,17 +89,17 @@ export class ChunkedUploadService {
         return firstValueFrom(this.http.post(`${this.API_URL}?action=init`, body));
     }
 
-    private async uploadChunk(uploadId: string, index: number, chunk: Blob, tempId: string, totalSize: number) {
+    private async uploadChunk(uploadId: string, index: number, chunk: Blob, tempId: string, totalSize: number): Promise<void> {
         const formData = new FormData();
         formData.append('upload_id', uploadId);
         formData.append('chunk_index', index.toString());
         formData.append('file', chunk, 'chunk.part');
 
-        // Use retry logic here if needed
         let attempts = 0;
         while (attempts < 3) {
             try {
-                return await firstValueFrom(this.http.post(`${this.API_URL}?action=chunk`, formData));
+                await firstValueFrom(this.http.post(`${this.API_URL}?action=chunk`, formData));
+                return;
             } catch (e) {
                 attempts++;
                 if (attempts >= 3) throw e;

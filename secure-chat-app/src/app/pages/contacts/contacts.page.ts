@@ -1,7 +1,9 @@
+import { Component, OnInit } from '@angular/core';
+import { Router } from '@angular/router';
+import { ToastController, AlertController } from '@ionic/angular';
 import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { ChatService } from 'src/app/services/chat.service';
 import { Share } from '@capacitor/share';
-import { AlertController } from '@ionic/angular';
 import { LoggingService } from 'src/app/services/logging.service';
 
 @Component({
@@ -101,7 +103,7 @@ export class ContactsPage implements OnInit {
   async globalSearch() {
     this.isSearchingGlobally = true;
     try {
-      const results: any = await this.contactsService.searchGlobal(this.searchQuery);
+      const results: any = await this.contactResolver.searchGlobal(this.searchQuery);
       // Filter out people already in my contacts
       this.globalResults = results.filter((r: any) =>
         !this.contacts.some(c => c.user_id === r.user_id) &&
