@@ -25,44 +25,64 @@ if (!$refreshToken || !$userId) {
 }
 
 // 1. Validate Refresh Token in DB
-$stmt = $conn->prepare("SELECT id_token_jti FROM user_sessions WHERE user_id = ? AND device_uuid = ? AND refresh_token = ? AND expires_at > NOW()");
-$stmt->bind_param("sss", $userId, $deviceUuid, $refreshToken);
+// v2.3 Hardening: Check if the token matches CURRENT or if it was REUSED
+$stmt = $conn->prepare("SELECT id_token_jti, rotation_family, is_revoked, refresh_token FROM user_sessions WHERE user_id = ? AND device_uuid = ? AND (refresh_token = ? OR last_refresh_token_hash = ?) AND expires_at > NOW()");
+$rt_hash = hash('sha256', $refreshToken);
+$stmt->bind_param("ssss", $userId, $deviceUuid, $refreshToken, $rt_hash);
 $stmt->execute();
 $res = $stmt->get_result();
 
 if ($res->num_rows === 0) {
-    // Clear cookies on failure
-    setcookie('auth_token', '', time() - 3600, '/api');
-    setcookie('refresh_token', '', time() - 3600, '/api');
-
+    // SECURITY ALERT: Refresh token not found at all
     auditLog(AUDIT_AUTH_FAILED, $userId, ['reason' => 'invalid_refresh_token', 'device' => $deviceUuid]);
     http_response_code(401);
-    echo json_encode(["error" => "Invalid or expired refresh token. Please log in again."]);
+    echo json_encode(["error" => "Session expired. Please log in again."]);
+    exit;
+}
+
+$session = $res->fetch_assoc();
+
+// REUSE DETECTION LOGIC (HF-7.1)
+if ($session['is_revoked'] == 1) {
+    http_response_code(403);
+    echo json_encode(["error" => "SESSION_REVOKED", "details" => "This session family has been compromised."]);
+    exit;
+}
+
+if ($session['refresh_token'] !== $refreshToken) {
+    // REUSE DETECTED!
+    // If the provided token matches last_refresh_token_hash but NOT current refresh_token, someone replayed an old token.
+    $rotationFamily = $session['rotation_family'];
+    $conn->query("UPDATE user_sessions SET is_revoked = 1, revoked_at = NOW() WHERE rotation_family = '$rotationFamily'");
+
+    auditLog('TOKEN_REUSE_DETECTED', $userId, ['device_uuid' => $deviceUuid, 'family' => $rotationFamily]);
+
+    http_response_code(403);
+    echo json_encode(["error" => "FRAUD_DETECTED", "details" => "Security leak detected. All sessions for this device revoked."]);
     exit;
 }
 
 // 2. Clear old session cache
-$session = $res->fetch_assoc();
 CacheService::delete("session:" . $session['id_token_jti']);
 
 // 3. Issue New ID Token (JWT)
-// Since we don't have a full JWT library yet, we'll use our existing U-based session IDs 
-// or simulate a JWT structure that auth_middleware can parse.
 $newJti = 'U' . strtoupper(bin2hex(random_bytes(12)));
-$newIdToken = $newJti; // For this phase, the token IS the JTI
+$newIdToken = $newJti;
 
-// 4. Update Session in DB with ROTATION (v8.1)
+// 4. Update Session in DB with ROTATION (HF-7.1)
 $newExpires = date('Y-m-d H:i:s', strtotime('+24 hours'));
-$newRefreshToken = bin2hex(random_bytes(32)); // New refresh token rotation
+$newRefreshToken = bin2hex(random_bytes(32));
+$newRtHash = hash('sha256', $refreshToken); // Current token becomes the "old" one
+$rotationFamily = $session['rotation_family'] ?? bin2hex(random_bytes(16));
 
-$upd = $conn->prepare("UPDATE user_sessions SET id_token_jti = ?, refresh_token = ?, expires_at = ? WHERE user_id = ? AND device_uuid = ?");
-$upd->bind_param("sssss", $newJti, $newRefreshToken, $newExpires, $userId, $deviceUuid);
+$upd = $conn->prepare("UPDATE user_sessions SET id_token_jti = ?, refresh_token = ?, last_refresh_token_hash = ?, rotation_family = ?, expires_at = ? WHERE user_id = ? AND device_uuid = ?");
+$upd->bind_param("sssssss", $newJti, $newRefreshToken, $newRtHash, $rotationFamily, $newExpires, $userId, $deviceUuid);
 $upd->execute();
 
-// 5. Cache the new session for instant lookup
+// 5. Cache the new session
 CacheService::cacheSession($newJti, $userId, ['device_uuid' => $deviceUuid]);
 
-auditLog('REFRESH_TOKEN_ROTATED', $userId, ['device_uuid' => $deviceUuid]);
+auditLog('REFRESH_TOKEN_ROTATED', $userId, ['device_uuid' => $deviceUuid, 'family' => $rotationFamily]);
 
 // 6. Set HTTP-Only Cookies
 $cookieExpires = strtotime($newExpires);
@@ -88,8 +108,9 @@ setcookie('refresh_token', $newRefreshToken, [
 echo json_encode([
     "status" => "success",
     "token" => $newIdToken,
-    "refresh_token" => $newRefreshToken,  // Return new refresh token to client
+    "refresh_token" => $newRefreshToken,
     "user_id" => $userId,
-    "expires_at" => $newExpires
+    "expires_at" => $newExpires,
+    "rotation_family" => $rotationFamily
 ]);
 ?>

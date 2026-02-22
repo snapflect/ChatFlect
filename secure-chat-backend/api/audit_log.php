@@ -10,8 +10,9 @@
  * @param string $action - The action being logged (login, logout, key_change, etc.)
  * @param string|null $userId - The user ID performing the action
  * @param array|string|null $details - Additional details about the event
+ * @param string $severity - INFO, WARN, or CRITICAL
  */
-function auditLog($action, $userId = null, $details = null)
+function auditLog($action, $userId = null, $details = null, $severity = 'INFO')
 {
     global $conn;
 
@@ -26,28 +27,32 @@ function auditLog($action, $userId = null, $details = null)
 
     try {
         $stmt = $conn->prepare(
-            "INSERT INTO audit_logs (user_id, action, details, ip_address, user_agent) 
-             VALUES (?, ?, ?, ?, ?)"
+            "INSERT INTO audit_logs (user_id, action, severity, details, ip_address, user_agent) 
+             VALUES (?, ?, ?, ?, ?, ?)"
         );
-        $stmt->bind_param("sssss", $userId, $action, $details, $ipAddress, $userAgent);
-        $stmt->execute();
+        $stmt->bind_param("ssssss", $userId, $action, $severity, $details, $ipAddress, $userAgent);
         $stmt->execute();
     } catch (Exception $e) {
         // Don't let audit logging failures break the main flow
         error_log("Audit log failed: " . $e->getMessage());
     }
 
-    // SIEM Integration (Epic 89): Write structured JSON to file
+    // SIEM Integration (Epic 89): Write structured JSON to file with Integrity Hash
     try {
         $logEntry = [
             'timestamp' => date('c'),
             'environment' => 'production',
             'event_id' => $action,
+            'severity' => $severity,
             'user_id' => $userId,
             'ip_address' => $ipAddress,
             'user_agent' => $userAgent,
-            'details' => json_decode($details, true) // decode if it was encoded for DB
+            'details' => json_decode($details, true)
         ];
+
+        // HF-8.4: Add integrity hash to prevent modification of log files
+        $secret = SecretsManager::get('LOG_INTEGRITY_SECRET') ?? 'fallback_integrity_key';
+        $logEntry['signature'] = hash_hmac('sha256', json_encode($logEntry), $secret);
 
         $logFile = __DIR__ . '/../logs/compliance.json.log';
         file_put_contents($logFile, json_encode($logEntry) . "\n", FILE_APPEND | LOCK_EX);

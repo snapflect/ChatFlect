@@ -193,13 +193,15 @@ function authenticateRequest()
     }
 
     // 3.5 Fallback: DB SESSION CHECK (Medium Path)
-    // If cache is empty (e.g. after TRUNCATE), check the user_sessions table
     global $conn;
-    $stmt = $conn->prepare("SELECT user_id, device_uuid FROM user_sessions WHERE id_token_jti = ? AND expires_at > NOW()");
+    $stmt = $conn->prepare("SELECT user_id, device_uuid, is_revoked FROM user_sessions WHERE id_token_jti = ? AND expires_at > NOW()");
     $stmt->bind_param("s", $token);
     $stmt->execute();
     $res = $stmt->get_result();
     if ($row = $res->fetch_assoc()) {
+        if ($row['is_revoked'] == 1) {
+            return ['user_id' => $row['user_id'], 'is_revoked' => true];
+        }
         $userId = strtoupper(trim($row['user_id']));
         $deviceUuid = $row['device_uuid'];
 
@@ -288,6 +290,14 @@ function requireAuth($requestUserId = null)
 
     $authUserId = $authContext['user_id'];
     $deviceUuid = $authContext['device_uuid'] ?? null;
+
+    // HF-7.3: Strict Session Family Revocation Logic
+    if (isset($authContext['is_revoked']) && $authContext['is_revoked'] === true) {
+        auditLog(AUDIT_AUTH_FAILED, $authUserId, ['reason' => 'session_revoked']);
+        http_response_code(403);
+        echo json_encode(["error" => "SESSION_EXPIRED", "details" => "Security policy forced logout."]);
+        exit;
+    }
 
     // v12: Enforce Rate Limit (Prioritized User > Device > IP)
     enforceRateLimit($authUserId);
