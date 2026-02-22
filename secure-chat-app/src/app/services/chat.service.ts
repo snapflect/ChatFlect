@@ -2,7 +2,7 @@ import { Injectable, NgZone } from '@angular/core';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion, arrayRemove, collectionGroup, getDocs, deleteDoc, limit, startAfter, limitToLast } from 'firebase/firestore';
 import { environment } from 'src/environments/environment';
-import { Observable, BehaviorSubject, Subject } from 'rxjs';
+import { Observable, BehaviorSubject, Subject, firstValueFrom } from 'rxjs';
 import { CryptoService } from './crypto.service';
 import { ApiService } from './api.service';
 import { ToastController } from '@ionic/angular';
@@ -18,6 +18,7 @@ import { RetrySchedulerService } from './retry-scheduler.service';
 import { MessageAckService } from './message-ack.service';
 import { SignalStoreService } from './signal-store.service';
 import { SignalService } from './signal.service';
+import { ChunkedUploadService } from './chunked-upload.service';
 
 @Injectable({
     providedIn: 'root'
@@ -52,6 +53,7 @@ export class ChatService {
         private signalStore: SignalStoreService,
         private signal: SignalService,
         private presence: PresenceService,
+        private chunkedUpload: ChunkedUploadService,
         private progressService: TransferProgressService
     ) {
         this.initFirestore();
@@ -488,18 +490,10 @@ export class ChatService {
     // Overload for viewOnce
     async sendImageMessage(chatId: string, imageBlob: Blob, senderId: string, caption: string = '', viewOnce: boolean = false) {
         try {
-            // 1. Encrypt Image
-            const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(imageBlob);
-            const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
-
-            // 2. Upload Encrypted with progress
-            const formData = new FormData();
-            formData.append('file', encryptedBlob, 'secure_img.bin');
-
             const tempId = window.crypto.randomUUID();
             this.progressService.updateProgress(tempId, 0, 'uploading');
 
-            // Optimistic Add
+            // 1. Optimistic Add (with local object URL)
             this.addPending(chatId, {
                 id: tempId,
                 senderId: senderId,
@@ -511,52 +505,41 @@ export class ChatService {
                     caption,
                     viewOnce,
                     _isOffline: true,
-                    size: imageBlob.size, // Added for signature match
+                    size: imageBlob.size,
                     tempId: tempId,
                     signature: `image_${imageBlob.size}_${caption || 'nc'}`
                 }
             });
 
-            this.api.post('upload.php?mode=secure', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
-                if (event.type === HttpEventType.UploadProgress) {
-                    const percent = Math.round(100 * event.loaded / event.total);
-                    this.progressService.updateProgress(tempId, percent, 'uploading');
-                } else if (event.type === HttpEventType.Response) {
-                    const uploadRes = event.body;
-                    if (!uploadRes?.url) {
-                        this.progressService.updateProgress(tempId, 0, 'failed');
-                        return;
-                    }
+            // 2. Chunked Upload with Auto-Encryption (HF-5E)
+            const uploadRes = await this.chunkedUpload.uploadFile(imageBlob, tempId, true);
 
-                    // 3. Metadata & Key Injection (HF-5C)
-                    const keyBase64 = await this.crypto.exportAesKey(sessionKey);
-                    const fileHash = await this.crypto.calculateHash(encryptedBlob);
-
-                    const securePayload = {
-                        url: uploadRes.url,
-                        caption: caption,
-                        k: keyBase64,
-                        i: ivBase64,
-                        h: fileHash, // HF-5C.1: Integrity Check
-                        name: uploadRes.name || (imageBlob as any).name || 'image.jpg',
-                        size: uploadRes.size || imageBlob.size || 0,
-                        mime: 'image/jpeg',
-                        viewOnce: viewOnce,
-                        tempId: tempId,
-                        signature: `image_${imageBlob.size}_${caption || 'nc'}`
-                    };
-
-                    // Pass securePayload as the PLAIN payload (to be encrypted)
-                    // We pass metadata as 4th arg for legacy fallback header compatibility (if needed), 
-                    // but the critical K/I are now in the encrypted body.
-                    await this.sendInternal(chatId, 'image', securePayload, securePayload);
-                    this.progressService.updateProgress(tempId, 100, 'completed');
-                    this.removePending(chatId, tempId);
-                    setTimeout(() => this.progressService.clearProgress(tempId), 2000);
-                }
-            }, err => {
+            if (!uploadRes?.url) {
                 this.progressService.updateProgress(tempId, 0, 'failed');
-            });
+                return;
+            }
+
+            // 3. Metadata Injection (HF-5C)
+            const keyBase64 = await this.crypto.exportAesKey(uploadRes.key);
+
+            const securePayload = {
+                url: uploadRes.url,
+                caption: caption,
+                k: keyBase64,
+                i: uploadRes.i || uploadRes.iv, // Use iv from result
+                h: uploadRes.hash, // HF-5C.1: Integrity Check
+                name: uploadRes.filename || (imageBlob as any).name || 'image.jpg',
+                size: imageBlob.size,
+                mime: 'image/jpeg',
+                viewOnce: viewOnce,
+                tempId: tempId,
+                signature: `image_${imageBlob.size}_${caption || 'nc'}`
+            };
+
+            await this.sendInternal(chatId, 'image', securePayload, securePayload);
+            this.progressService.updateProgress(tempId, 100, 'completed');
+            this.removePending(chatId, tempId);
+            setTimeout(() => this.progressService.clearProgress(tempId), 2000);
 
         } catch (e) {
             this.logger.error("Send Image Failed", e);
@@ -564,19 +547,11 @@ export class ChatService {
     }
 
     async sendVideoMessageClean(chatId: string, videoBlob: Blob, senderId: string, duration: number, thumbnailBlob: Blob | null, caption: string = '', viewOnce: boolean = false) {
+        const tempId = window.crypto.randomUUID();
         try {
-            // 1. Encrypt Video
-            const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(videoBlob);
-            const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
-
-            // 2. Upload Video with progress
-            const formData = new FormData();
-            formData.append('file', encryptedBlob, 'secure_vid.bin');
-
-            const tempId = window.crypto.randomUUID();
             this.progressService.updateProgress(tempId, 0, 'uploading');
 
-            // Optimistic Add
+            // 1. Optimistic Add (with local object URL)
             this.addPending(chatId, {
                 id: tempId,
                 senderId: senderId,
@@ -590,62 +565,57 @@ export class ChatService {
                     caption,
                     viewOnce,
                     _isOffline: true,
-                    size: videoBlob.size, // Added for signature match
+                    size: videoBlob.size,
                     tempId: tempId,
                     signature: `video_${videoBlob.size}_${caption || 'nc'}`
                 }
             });
 
+            // 2. Chunked Upload with Auto-Encryption (HF-5E)
+            const uploadRes = await this.chunkedUpload.uploadFile(videoBlob, tempId, true);
 
+            if (!uploadRes?.url) {
+                this.progressService.updateProgress(tempId, 0, 'failed');
+                return;
+            }
 
-            this.api.post('upload.php?mode=secure', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
-                if (event.type === HttpEventType.UploadProgress) {
-                    const percent = Math.round(100 * event.loaded / event.total);
-                    this.progressService.updateProgress(tempId, percent, 'uploading');
-                } else if (event.type === HttpEventType.Response) {
-                    const uploadRes = event.body;
-                    if (!uploadRes?.url) {
-                        this.progressService.updateProgress(tempId, 0, 'failed');
-                        return;
-                    }
+            // 3. Thumbnail 
+            let thumbUrl = '';
+            if (thumbnailBlob) {
+                const formThumb = new FormData();
+                formThumb.append('file', thumbnailBlob, 'thumb.jpg');
+                // Thumbnails are plaintext/public references
+                const thumbRes: any = await firstValueFrom(this.api.post('upload.php', formThumb));
+                if (thumbRes?.url) thumbUrl = thumbRes.url;
+            }
 
-                    // 3. Thumbnail 
-                    let thumbUrl = '';
-                    if (thumbnailBlob) {
-                        const formThumb = new FormData();
-                        formThumb.append('file', thumbnailBlob, 'thumb.jpg');
-                        // Thumbnails are plaintext/public references, so we don't use secure mode (which requires encrypted header)
-                        const thumbRes: any = await this.api.post('upload.php', formThumb).toPromise();
-                        if (thumbRes?.url) thumbUrl = thumbRes.url;
-                    }
+            // 4. Metadata Injection (HF-5C)
+            const keyBase64 = await this.crypto.exportAesKey(uploadRes.key);
 
-                    const keyBase64 = await this.crypto.exportAesKey(sessionKey);
-                    const fileHash = await this.crypto.calculateHash(encryptedBlob);
+            const securePayload: any = {
+                url: uploadRes.url,
+                caption: caption,
+                k: keyBase64,
+                i: uploadRes.iv, // Use iv from result
+                h: uploadRes.hash, // HF-5C.1: Integrity Check
+                name: uploadRes.filename || (videoBlob as any).name || 'video.mp4',
+                size: videoBlob.size,
+                mime: 'video/mp4',
+                d: duration,
+                thumb: thumbUrl,
+                viewOnce: viewOnce,
+                _tempId: tempId,
+                signature: `video_${videoBlob.size}_${caption || 'nc'}`
+            };
 
-                    const securePayload: any = {
-                        url: uploadRes.url,
-                        caption: caption,
-                        k: keyBase64,
-                        i: ivBase64,
-                        h: fileHash, // HF-5C.1: Integrity Check
-                        name: uploadRes.name || (videoBlob as any).name || 'video.mp4',
-                        size: uploadRes.size || videoBlob.size || 0,
-                        mime: 'video/mp4',
-                        d: duration,
-                        thumb: thumbUrl,
-                        viewOnce: viewOnce,
-                        _tempId: tempId,
-                        signature: `video_${videoBlob.size}_${caption || 'nc'}`
-                    };
+            await this.sendInternal(chatId, 'video', securePayload, securePayload);
+            this.progressService.updateProgress(tempId, 100, 'completed');
+            this.removePending(chatId, tempId);
+            setTimeout(() => this.progressService.clearProgress(tempId), 2000);
 
-                    await this.sendInternal(chatId, 'video', securePayload, securePayload);
-                    this.progressService.updateProgress(tempId, 100, 'completed');
-                    this.removePending(chatId, tempId);
-                    setTimeout(() => this.progressService.clearProgress(tempId), 2000);
-                }
-            }, err => this.progressService.updateProgress(tempId, 0, 'failed'));
         } catch (e) {
             this.logger.error("Video Send Failed", e);
+            this.progressService.updateProgress(tempId, 0, 'failed');
         }
     }
 
@@ -656,16 +626,10 @@ export class ChatService {
 
     async sendDocumentMessage(chatId: string, file: File, senderId: string) {
         try {
-            const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(file);
-            const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
-
-            const formData = new FormData();
-            formData.append('file', encryptedBlob, 'doc.bin');
-
             const tempId = window.crypto.randomUUID();
             this.progressService.updateProgress(tempId, 0, 'uploading');
 
-            // Optimistic Add
+            // 1. Optimistic Add
             this.addPending(chatId, {
                 id: tempId,
                 senderId: senderId,
@@ -682,38 +646,33 @@ export class ChatService {
                 }
             });
 
-            this.api.post('upload.php?mode=secure', formData, true, { 'X-Encrypted': '1' }).subscribe(async (event: any) => {
-                if (event.type === HttpEventType.UploadProgress) {
-                    const percent = Math.round(100 * event.loaded / event.total);
-                    this.progressService.updateProgress(tempId, percent, 'uploading');
-                } else if (event.type === HttpEventType.Response) {
-                    const uploadRes = event.body;
-                    if (!uploadRes?.url) {
-                        this.progressService.updateProgress(tempId, 0, 'failed');
-                        return;
-                    }
+            // 2. Chunked Upload with Auto-Encryption (HF-5E)
+            const uploadRes = await this.chunkedUpload.uploadFile(file, tempId, true);
 
-                    const keyBase64 = await this.crypto.exportAesKey(sessionKey);
-                    const fileHash = await this.crypto.calculateHash(encryptedBlob);
+            if (!uploadRes?.url) {
+                this.progressService.updateProgress(tempId, 0, 'failed');
+                return;
+            }
 
-                    const securePayload = {
-                        url: uploadRes.url,
-                        k: keyBase64,
-                        i: ivBase64,
-                        h: fileHash, // HF-5C.1: Integrity Check
-                        mime: file.type || 'application/octet-stream',
-                        name: file.name,
-                        size: file.size,
-                        tempId: tempId,
-                        signature: `doc_${file.name}_${file.size}`
-                    };
+            // 3. Metadata Injection (HF-5C)
+            const keyBase64 = await this.crypto.exportAesKey(uploadRes.key);
 
-                    await this.sendInternal(chatId, 'document', securePayload, securePayload);
-                    this.progressService.updateProgress(tempId, 100, 'completed');
-                    this.removePending(chatId, tempId);
-                    setTimeout(() => this.progressService.clearProgress(tempId), 2000);
-                }
-            }, err => this.progressService.updateProgress(tempId, 0, 'failed'));
+            const securePayload = {
+                url: uploadRes.url,
+                k: keyBase64,
+                i: uploadRes.iv,
+                h: uploadRes.hash, // HF-5C.1: Integrity Check
+                mime: file.type || 'application/octet-stream',
+                name: file.name,
+                size: file.size,
+                tempId: tempId,
+                signature: `doc_${file.name}_${file.size}`
+            };
+
+            await this.sendInternal(chatId, 'document', securePayload, securePayload);
+            this.progressService.updateProgress(tempId, 100, 'completed');
+            this.removePending(chatId, tempId);
+            setTimeout(() => this.progressService.clearProgress(tempId), 2000);
         } catch (e) {
             this.logger.error("Doc Send Failed", e);
         }
@@ -837,29 +796,33 @@ export class ChatService {
     }
     async sendAudioMessage(chatId: string, audioBlob: Blob, senderId: string, duration: number) {
         try {
-            const { encryptedBlob, key: sessionKey, iv } = await this.crypto.encryptBlob(audioBlob);
-            const ivBase64 = this.crypto.arrayBufferToBase64(iv.buffer as ArrayBuffer);
+            const tempId = window.crypto.randomUUID();
+            this.progressService.updateProgress(tempId, 0, 'uploading');
 
-            const formData = new FormData();
-            formData.append('file', encryptedBlob, 'voice.bin');
+            // 1. Chunked Upload with Auto-Encryption (HF-5E)
+            const uploadRes = await this.chunkedUpload.uploadFile(audioBlob, tempId, true);
 
-            const uploadRes: any = await this.api.post('upload.php?mode=secure', formData, false, { 'X-Encrypted': '1' }).toPromise();
-            if (!uploadRes || !uploadRes.url) throw new Error("Audio Upload Failed");
+            if (!uploadRes || !uploadRes.url) {
+                this.progressService.updateProgress(tempId, 0, 'failed');
+                throw new Error("Audio Upload Failed");
+            }
 
-            const keyBase64 = await this.crypto.exportAesKey(sessionKey);
-            const fileHash = await this.crypto.calculateHash(encryptedBlob);
+            // 2. Metadata Injection (HF-5C)
+            const keyBase64 = await this.crypto.exportAesKey(uploadRes.key);
 
             const securePayload = {
                 type: 'audio',
                 url: uploadRes.url,
                 k: keyBase64,
-                i: ivBase64,
-                h: fileHash, // HF-5C.1: Integrity Check
+                i: uploadRes.iv,
+                h: uploadRes.hash, // HF-5C.1: Integrity Check
                 d: duration,
-                mime: audioBlob.type || 'audio/mp4' // Default to mp4/aac if missing
+                mime: audioBlob.type || 'audio/mp4'
             };
 
             await this.sendInternal(chatId, 'audio', securePayload, securePayload);
+            this.progressService.updateProgress(tempId, 100, 'completed');
+            setTimeout(() => this.progressService.clearProgress(tempId), 2000);
 
         } catch (e) {
             this.logger.error("Audio Send Failed", e);

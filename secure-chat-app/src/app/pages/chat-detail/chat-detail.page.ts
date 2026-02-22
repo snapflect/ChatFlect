@@ -2084,7 +2084,12 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     await modal.present();
     await modal.onDidDismiss();
 
-    // Mark as viewed locally
+    // HF-5F: Wipe local media immediately after viewing
+    if (msg.text?.url) {
+      this.secureMedia.deleteLocalMedia(msg.text.url).catch(() => { });
+    }
+
+    // Mark as viewed locally (v15: This status should also be synced to server)
     msg.viewed = true;
 
     // Force Change Detection

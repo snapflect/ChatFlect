@@ -39,6 +39,7 @@ export class SecureMediaService implements OnDestroy {
     private initService() {
         // Prune and Reconcile SQLite cache on init (v8)
         this.storage.pruneMediaCache(7).catch(() => { });
+        this.storage.enforceMediaCacheLimit(200).catch(() => { }); // HF-5F: Automated LRU
         setTimeout(() => this.storage.reconcileCache().catch(() => { }), 5000);
 
         // Periodically check for expired keys
@@ -194,7 +195,8 @@ export class SecureMediaService implements OnDestroy {
                                 // Finalize
                                 const finalFilename = `media_${Date.now()}_${Math.floor(Math.random() * 1000)}.bin`;
                                 await Filesystem.rename({ from: partPath, to: finalFilename, directory: Directory.Cache });
-                                await this.storage.saveMediaCache(url, finalFilename, chunkBlob.type); // chunk type might be wrong if partial? Usually OK.
+                                // HF-5F: Pass size for efficient LRU
+                                await this.storage.saveMediaCache(url, finalFilename, chunkBlob.type, chunkBlob.size);
 
                                 // Read FULL file for Decrypt
                                 const fullFile = await Filesystem.readFile({ path: finalFilename, directory: Directory.Cache });
@@ -477,6 +479,31 @@ export class SecureMediaService implements OnDestroy {
             });
         } else {
             this.usageCounts.set(url, count);
+        }
+    }
+
+    /**
+     * HF-5F: Explicitly delete local media (for View Once)
+     */
+    public async deleteLocalMedia(url: string): Promise<void> {
+        try {
+            const entry = await this.storage.getMediaCache(url);
+            if (entry && entry.blob_path) {
+                await Filesystem.deleteFile({
+                    path: entry.blob_path,
+                    directory: Directory.Cache
+                });
+                await this.storage.deleteMediaRetry(url);
+                // Also remove from DB
+                await (this.storage as any).safeRun('DELETE FROM media_cache WHERE url = ?', [url]);
+            }
+            // Clear from memory
+            this.releaseMedia(url);
+            this.cache.forEach((_, key) => {
+                if (key.includes(`::${url}::`)) this.zeroizeAndRemove(key);
+            });
+        } catch (e) {
+            this.logger.error("[SecureMedia] deleteLocalMedia failed", e);
         }
     }
 

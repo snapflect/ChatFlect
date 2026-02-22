@@ -17,6 +17,7 @@ export class StorageService {
      */
     async isReady(): Promise<boolean> {
         await this.localDb.initialize();
+        await this.createTables(); // v5F: Ensure media tables exist
         return true;
     }
 
@@ -71,6 +72,7 @@ export class StorageService {
         url TEXT PRIMARY KEY,
         blob_path TEXT,
         mime TEXT,
+        file_size INTEGER DEFAULT 0, -- v5F: For efficient eviction
         updated_at INTEGER,
         last_verified_at INTEGER,
         verification_status TEXT DEFAULT 'verified',
@@ -185,15 +187,17 @@ export class StorageService {
     async getMediaCache(url: string) {
         const values = await this.safeQuery('SELECT * FROM media_cache WHERE url = ?', [url]);
         if (values.length > 0) {
+            // Update last_used asyc-ly (don't block read)
+            this.safeRun('UPDATE media_cache SET last_used = ? WHERE url = ?', [Date.now(), url]).catch(() => { });
             return values[0];
         }
         return null;
     }
 
-    async saveMediaCache(url: string, blobPath: string, mime: string) {
+    async saveMediaCache(url: string, blob_path: string, mime: string, size: number = 0) {
         await this.safeRun(
-            'INSERT OR REPLACE INTO media_cache (url, blob_path, mime, updated_at, last_verified_at, verification_status, last_used) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [url, blobPath, mime, Date.now(), Date.now(), 'verified', Date.now()]
+            'INSERT OR REPLACE INTO media_cache (url, blob_path, mime, file_size, updated_at, last_verified_at, verification_status, last_used) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [url, blob_path, mime, size, Date.now(), Date.now(), 'verified', Date.now()]
         );
     }
 
@@ -207,80 +211,48 @@ export class StorageService {
         const opId = ++this.currentOperationId;
 
         try {
-            console.log(`[StorageService][v15] Enforcing Cache Limit: ${limitMB}MB`);
-
-            // 1. Calculate Total Size
-            // Note: Does not check actual file sizes, estimates or relies on Page Size would be better. 
-            // For v15, we'll assume average 1MB or rely on count, but let's try to query FS stats if possible?
-            // Expensive. Better strategy: Count-based or just purge oldest if *count* is high?
-            // "Size-based logs" requested. Let's use SQLite to approximate or Filesystem loop.
-            // Fast approach: Check total items. If > 500, purge.
-            // Better approach (requested): "Calculate total size".
-            // We can sum file sizes? No SQL support for file size.
-            // We will iterate ALL media? Too slow.
-            // Hybrid: Pure LRU count for performance?
-            // Plan said: "Calculate total size".
-
-            // Let's rely on a rough count limit for performance (e.g. 500 items ~ 500MB+ for videos)
-            // Or use byte size integration.
-            // "Size-based limits matter more".
-            // Okay, let's Iterate to sum sizes (limited to 50 samples to estimate avg?)
-            // Or just check page_count again.
-            // Let's implement an LRU Prune based on COUNT (e.g. 200 items) + Age.
-
-            // User Requirement: "Size-based eviction".
-            // Implementation:
-            const { Filesystem, Directory } = await import('@capacitor/filesystem');
-
-            const res = await this.localDb.query('SELECT url, blob_path, last_used FROM media_cache ORDER BY last_used ASC');
-            if (!res.values) throw new Error('No values');
-
-            let totalSize = 0;
-            const items = [];
-
-            // This Scan is heavy. Optimization: Store size in DB on save?
-            // For now, scan.
-            for (const row of res) {
-                try {
-                    const stat = await Filesystem.stat({ path: row.blob_path, directory: Directory.Cache });
-                    items.push({ ...row, size: stat.size });
-                    totalSize += stat.size;
-                } catch (e) {
-                    // File missing? Delete DB row later.
-                    items.push({ ...row, size: 0, missing: true });
-                }
-            }
+            console.log(`[StorageService][v5F] Enforcing Cache Limit: ${limitMB}MB`);
 
             const limitBytes = limitMB * 1024 * 1024;
-            console.log(`[StorageService][v15] Current Usage: ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
+
+            // 1. Calculate Total Size using DB (Definitive Phase 5F optimization)
+            const stats = await this.safeQuery('SELECT SUM(file_size) as total FROM media_cache');
+            const totalSize = stats[0]?.total || 0;
+
+            console.log(`[StorageService][v5F] Current Usage (DB): ${(totalSize / 1024 / 1024).toFixed(2)} MB`);
 
             if (totalSize > limitBytes) {
-                let currentSize = totalSize;
-                const toDelete = [];
+                const { Filesystem, Directory } = await import('@capacitor/filesystem');
 
-                // Items are ordered ASC (Oldest first)
-                for (const item of items) {
-                    if (currentSize <= limitBytes) break;
-                    toDelete.push(item);
-                    currentSize -= item.size;
-                }
+                // 2. Fetch items to delete (Oldest first)
+                const toDelete = await this.safeQuery('SELECT url, blob_path, file_size FROM media_cache ORDER BY last_used ASC');
 
-                console.log(`[StorageService][v15] Evicting ${toDelete.length} items to reclaim ${(totalSize - currentSize) / 1024 / 1024} MB`);
+                let currentTotal = totalSize;
+                let deletedCount = 0;
 
                 await this.safeExecute('BEGIN TRANSACTION');
                 for (const item of toDelete) {
+                    if (currentTotal <= limitBytes) break;
+
                     try {
-                        if (!item.missing) {
-                            await Filesystem.deleteFile({ path: item.blob_path, directory: Directory.Cache });
-                        }
-                        await this.safeRun('DELETE FROM media_cache WHERE url = ?', [item.url]);
-                    } catch (e) { }
+                        await Filesystem.deleteFile({ path: item.blob_path, directory: Directory.Cache });
+                    } catch (e) {
+                        // Even if file missing, we remove DB row
+                    }
+
+                    await this.safeRun('DELETE FROM media_cache WHERE url = ?', [item.url]);
+                    await this.safeRun('DELETE FROM media_retries WHERE url = ?', [item.url]);
+
+                    currentTotal -= item.file_size;
+                    deletedCount++;
                 }
                 await this.safeExecute('COMMIT');
+
+                console.log(`[StorageService][v5F] Evicted ${deletedCount} items. New usage: ${(currentTotal / 1024 / 1024).toFixed(2)} MB`);
             }
 
         } catch (e) {
-            console.error('[StorageService][v15] Eviction Error', e);
+            console.error('[StorageService][v5F] Eviction Error', e);
             await this.safeExecute('ROLLBACK').catch(() => { });
         } finally {
             if (this.currentOperationId === opId) this.isProcessing = false;
