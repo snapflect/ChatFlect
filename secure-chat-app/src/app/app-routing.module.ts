@@ -115,6 +115,10 @@ const routes: Routes = [
     path: 'admin-dashboard',
     loadChildren: () => import('./pages/admin-dashboard/admin-dashboard.module').then( m => m.AdminDashboardPageModule)
   },
+  {
+    path: 'security-history',
+    loadChildren: () => import('./pages/security-history/security-history.module').then( m => m.SecurityHistoryPageModule)
+  },
 
 ];
 

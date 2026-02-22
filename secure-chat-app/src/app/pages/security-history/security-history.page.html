@@ -1,0 +1,68 @@
+<ion-header [translucent]="true">
+  <ion-toolbar>
+    <ion-buttons slot="start">
+      <ion-back-button defaultHref="/settings/account"></ion-back-button>
+    </ion-buttons>
+    <ion-title>Security History</ion-title>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <ion-header collapse="condense">
+    <ion-toolbar>
+      <ion-title size="large">Security History</ion-title>
+    </ion-toolbar>
+  </ion-header>
+
+  <ion-refresher slot="fixed" (ionRefresh)="doRefresh($event)">
+    <ion-refresher-content></ion-refresher-content>
+  </ion-refresher>
+
+  <div class="ion-padding" *ngIf="!isLoading && events.length === 0">
+    <ion-card>
+      <ion-card-content class="ion-text-center">
+        <ion-icon name="shield-checkmark-outline" size="large" color="primary"></ion-icon>
+        <h3>No recent security alerts</h3>
+        <p>Your account security events will appear here.</p>
+      </ion-card-content>
+    </ion-card>
+  </div>
+
+  <ion-list *ngIf="events.length > 0">
+    <ion-item *ngFor="let event of events">
+      <ion-label>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h2 [style.color]="'var(--ion-color-' + getSeverityColor(event.severity) + ')'">
+            {{ formatEvent(event.event) }}
+          </h2>
+          <ion-note slot="end">{{ event.timestamp | date:'short' }}</ion-note>
+        </div>
+        <p><b>IP:</b> {{ event.ip }}</p>
+        <p *ngIf="event.details?.device_uuid"><b>Device:</b> {{ event.details.device_uuid | slice:0:8 }}...</p>
+        <p *ngIf="event.details?.reason"><b>Reason:</b> {{ event.details.reason }}</p>
+      </ion-label>
+      <ion-badge [color]="getSeverityColor(event.severity)" slot="end">
+        {{ event.severity }}
+      </ion-badge>
+    </ion-item>
+  </ion-list>
+
+  <div class="ion-padding footer-note">
+    <p>We log security-relevant actions to help you monitor your account's integrity. These logs are retained for 90
+      days.</p>
+  </div>
+</ion-content>
+
+<style>
+  .footer-note {
+    font-size: 0.8em;
+    color: var(--ion-color-medium);
+    text-align: center;
+  }
+
+  h2 {
+    font-weight: bold;
+    font-size: 0.9em;
+    margin: 0;
+  }
+</style>
