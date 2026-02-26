@@ -32,7 +32,14 @@ import { APP_INITIALIZER } from '@angular/core';
 import { LocalDbService } from './services/local-db.service';
 
 export function initLocalDatabase(localDb: LocalDbService) {
-  return () => localDb.initialize();
+  return () => {
+    // HF-8.20: Trigger initialization in background to prevent "black screen" 
+    // if native biometric or SQLite bridge hangs during bootstrap.
+    localDb.initialize().catch(err => {
+      console.error('[AppInit] LocalDb background init failed:', err);
+    });
+    return Promise.resolve(); // Proceed with app startup immediately
+  };
 }
 
 @NgModule({

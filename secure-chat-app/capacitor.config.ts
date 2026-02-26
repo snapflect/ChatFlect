@@ -41,6 +41,14 @@ const config: CapacitorConfig = {
     },
     CapacitorHttp: {
       enabled: true
+    },
+    CapacitorSQLite: {
+      androidIsEncryption: true,
+      androidBiometric: {
+        biometricAuth: false,
+        biometricTitle: "Vault Access",
+        biometricSubtitle: "ChatFlect Security"
+      }
     }
   }
 };

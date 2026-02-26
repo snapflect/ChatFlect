@@ -54,7 +54,14 @@ function auditLog($action, $userId = null, $details = null, $severity = 'INFO')
         $secret = SecretsManager::get('LOG_INTEGRITY_SECRET') ?? 'fallback_integrity_key';
         $logEntry['signature'] = hash_hmac('sha256', json_encode($logEntry), $secret);
 
-        $logFile = __DIR__ . '/../logs/compliance.json.log';
+        // HF-8.17: Ensure directory exists
+        $logDir = __DIR__ . '/logs/';
+        if (!file_exists($logDir)) {
+            mkdir($logDir, 0755, true);
+            file_put_contents($logDir . '.htaccess', 'Deny from all');
+        }
+
+        $logFile = $logDir . 'compliance.json.log';
         file_put_contents($logFile, json_encode($logEntry) . "\n", FILE_APPEND | LOCK_EX);
     } catch (Exception $e) {
         error_log("SIEM log failed: " . $e->getMessage());

@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Injector } from '@angular/core';
 import { ApiService } from './api.service';
 import { BehaviorSubject, throwError } from 'rxjs';
 import { filter, take } from 'rxjs/operators';
@@ -38,16 +38,43 @@ export class AuthService {
 
     // ... (rest of props)
 
+    // Lazy-loaded to break circular DI (HF-8.11)
+    private _push: PushService | null = null;
+    private get pushService(): PushService {
+        if (!this._push) this._push = this.injector.get(PushService);
+        return this._push!;
+    }
+
+    private _call: CallService | null = null;
+    private get callService(): CallService {
+        if (!this._call) this._call = this.injector.get(CallService);
+        return this._call!;
+    }
+
+    private _media: SecureMediaService | null = null;
+    private get mediaService(): SecureMediaService {
+        if (!this._media) this._media = this.injector.get(SecureMediaService);
+        return this._media!;
+    }
+
+    private _signal: SignalService | null = null;
+    private get signal(): SignalService {
+        if (!this._signal) this._signal = this.injector.get(SignalService);
+        return this._signal!;
+    }
+
+    private _signalStore: SignalStoreService | null = null;
+    private get signalStore(): SignalStoreService {
+        if (!this._signalStore) this._signalStore = this.injector.get(SignalStoreService);
+        return this._signalStore!;
+    }
+
     constructor(
         private api: ApiService,
         private crypto: CryptoService,
-        private pushService: PushService,
         private logger: LoggingService,
-        private callService: CallService,
-        private mediaService: SecureMediaService,
         private secureStorage: SecureStorageService,
-        private signal: SignalService,
-        private signalStore: SignalStoreService
+        private injector: Injector
     ) {
         // App initialized in firebase.config.ts
         // this.db assigned above
@@ -88,18 +115,23 @@ export class AuthService {
             this.userIdSource.next(norm);
             this.userBlockedAlertShown = false; // Reset on new user login
             this.initBlockedListener(norm);
-            // v16.1 Fix: Ensure Firebase is authenticated on app restart
-            this.signInToFirebase(norm);
+
+            // HF-8.10: Gate DI resolution by breaking the constructor block
+            setTimeout(() => {
+                this.signInToFirebase(norm);
+            }, 0);
         }
 
         // v16.5: Gate Push Token Sync (Race Condition Fix)
-        // Ensure we only try to write the token to Firestore when we are CONFIRMED ready and authenticated.
-        this.firebaseReady$
-            .pipe(filter(Boolean), take(1))
-            .subscribe({
-                next: () => this.pushService.syncToken(),
-                complete: () => this.logger.log('[Auth] Push token synced')
-            });
+        // HF-8.10: Also deferred to ensure AuthService instance is stable in Injector
+        setTimeout(() => {
+            this.firebaseReady$
+                .pipe(filter(Boolean), take(1))
+                .subscribe({
+                    next: () => this.pushService.syncToken(),
+                    complete: () => this.logger.log('[Auth] Push token synced')
+                });
+        }, 0);
 
     }
 

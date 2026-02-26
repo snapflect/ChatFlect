@@ -32,37 +32,94 @@ export class LocalDbService {
 
         this.initPromise = (async () => {
             try {
-                // HF-6.1: Biometric Enclave Vault Gate
-                if (this.platform.is('hybrid')) {
-                    const isBiometricVerified = await this.verifyBiometrics();
-                    if (!isBiometricVerified) {
-                        this.logger.error("[LocalDb] Biometric verification failed or canceled.");
-                        throw new Error("BIOMETRIC_FAILED");
-                    }
-                }
+                this.logger.log(`[LocalDb] [Checkpoint 1] Starting initialization...`);
 
                 const passphrase = await this.getOrCreatePassphrase();
+                this.logger.log("[LocalDb] [Checkpoint 2] Passphrase derived.");
 
-                this.db = await this.sqlite.createConnection(
-                    this.DB_NAME,
-                    true, // encrypted
-                    'secret', // secret type
-                    1, // version
-                    false // readOnly
-                );
+                if (this.platform.is('hybrid')) {
+                    this.logger.log("[LocalDb] [Checkpoint 3] Hybrid mode. Waiting for UI thread...");
+                    await new Promise(r => setTimeout(r, 1000));
 
-                // v2.3 Fix: Apply encryption secret before operations/open logic consistency
-                await (this.db as any).setEncryptionSecret(passphrase);
-                await this.db.open();
+                    const isBiometricVerified = await this.verifyBiometrics();
+                    if (!isBiometricVerified) {
+                        this.logger.error("[LocalDb] [Checkpoint 3.F] Biometric verification failed or cancelled.");
+                        throw new Error("BIOMETRIC_FAILED");
+                    }
+                    this.logger.log("[LocalDb] [Checkpoint 4] Biometrics verified. Cooling down bridge bridge...");
+                    await new Promise(r => setTimeout(r, 1500));
+                }
 
-                await this.createTables();
-                this.isInitialized = true;
-                this.logger.log(`[LocalDb] Database ${this.DB_NAME} initialized with encryption.`);
+                let retryCount = 0;
+                const maxRetries = 2;
+
+                while (retryCount <= maxRetries) {
+                    try {
+                        this.logger.log(`[LocalDb] [Checkpoint 5] Connection attempt ${retryCount + 1}/${maxRetries + 1}...`);
+
+                        // 2. Handle Management (Retrieve or Create)
+                        try {
+                            const isConn = await this.sqlite.isConnection(this.DB_NAME, false);
+                            if (isConn.result) {
+                                this.logger.log("[LocalDb] [Checkpoint 5.1] Retrieving existing connection...");
+                                this.db = await this.sqlite.retrieveConnection(this.DB_NAME, false);
+                            } else {
+                                this.logger.log("[LocalDb] [Checkpoint 5.2] Creating fresh connection...");
+                                this.db = await this.sqlite.createConnection(this.DB_NAME, true, 'encryption', 1, false);
+                            }
+                        } catch (handleErr) {
+                            this.logger.warn("[LocalDb] [Checkpoint 5.H] Handle setup issue, forcing consistency reset...", handleErr);
+                            await this.sqlite.checkConnectionsConsistency();
+                            this.db = await this.sqlite.createConnection(this.DB_NAME, true, 'encryption', 1, false);
+                        }
+
+                        // 3. Open with Recovery Pattern
+                        try {
+                            this.logger.log("[LocalDb] [Checkpoint 6] Opening database...");
+                            await (this.db as any).open({ encryptionKey: passphrase });
+                        } catch (openErr: any) {
+                            const msg = openErr.message || "";
+                            if (msg.includes("already been set") || msg.includes("already open")) {
+                                this.logger.log("[LocalDb] [Checkpoint 6.S] Database already open, continuing.");
+                            } else if (msg.includes("No available connection") && retryCount < maxRetries) {
+                                this.logger.warn("[LocalDb] [Checkpoint 6.R] No connection available, nuking handle and retrying.");
+                                await this.sqlite.closeConnection(this.DB_NAME, false).catch(() => { });
+                                retryCount++;
+                                continue;
+                            } else {
+                                throw openErr;
+                            }
+                        }
+
+                        this.logger.log("[LocalDb] [Checkpoint 7] Ensuring schema...");
+                        await this.createTables();
+                        this.isInitialized = true;
+                        this.logger.log(`[LocalDb] [Checkpoint 8] SUCCESS: Initialized.`);
+                        return; // Done
+
+                    } catch (err: any) {
+                        this.logger.warn(`[LocalDb] [Checkpoint 5.E] Attempt failed: ${err.message}`, err);
+                        if (retryCount < maxRetries) {
+                            retryCount++;
+                            await new Promise(r => setTimeout(r, 500));
+                        } else {
+                            throw err;
+                        }
+                    }
+                }
             } catch (err: any) {
+                // Precise error serialization for debugging
+                const errorDetail = err instanceof Error ? {
+                    message: err.message,
+                    name: err.name,
+                    stack: err.stack,
+                    ...(err as any)
+                } : err;
+
                 if (err.message === 'VAULT_LOCKED') {
-                    this.logger.error("[LocalDb] Vault is locked due to security policy.");
+                    this.logger.error("[LocalDb] Vault is locked.");
                 } else {
-                    this.logger.error("[LocalDb] Initialization Fatal Error", err);
+                    this.logger.error(`[LocalDb] Initialization Fatal Error: ${JSON.stringify(errorDetail)}`, err);
                 }
                 throw err;
             }
@@ -146,13 +203,25 @@ export class LocalDbService {
                 return true;
             }
 
-            const verified = await NativeBiometric.verifyIdentity({
+            // HF-8.20: Biometric Timeout to prevent permanent app hang
+            const biometricPromise = NativeBiometric.verifyIdentity({
                 reason: "Unlock your secure messaging vault",
                 title: "Vault Access",
                 subtitle: "ChatFlect Security",
                 description: "Verify your identity to access encrypted messages.",
                 useFallback: true // Allow PIN if biometrics fail
-            }).then(() => true).catch(() => false);
+            });
+
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error("BIOMETRIC_TIMEOUT")), 20000);
+            });
+
+            const verified = await Promise.race([biometricPromise, timeoutPromise])
+                .then(() => true)
+                .catch((err: any) => {
+                    this.logger.warn("[LocalDb] Biometric verification failed or timed out:", err);
+                    return false;
+                });
 
             if (verified) {
                 localStorage.setItem('vault_fail_count', '0');
@@ -201,8 +270,8 @@ export class LocalDbService {
 
         // 4. Delete Database Physically
         try {
-            // HF-6.2: Correct Capacitor SQLite v6 signature
-            await (this.sqlite as any).deleteDatabase({ database: this.DB_NAME, readonly: false });
+            // HF-6.2 / HF-8.5: Accurate Capacitor SQLite v6 signature for physical file removal
+            await CapacitorSQLite.deleteDatabase({ database: this.DB_NAME, readonly: false });
         } catch (e) {
             this.logger.warn("[LocalDb] Failed to delete database file during nuke", e);
         }

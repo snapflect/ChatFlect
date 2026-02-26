@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Injector } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { SignalStoreService } from './signal-store.service';
 import * as libsignal from '@privacyresearch/libsignal-protocol-typescript';
@@ -32,14 +32,20 @@ export class SignalService {
     private readonly IV_LENGTH = 12;
     private internalCurve: any = null; // HF-5B.1
 
+    private _auth: AuthService | null = null;
+    private get authService(): AuthService {
+        if (!this._auth) this._auth = this.injector.get(AuthService);
+        return this._auth!;
+    }
+
     constructor(
         private http: HttpClient,
         private store: SignalStoreService,
-        private authService: AuthService,
         private localDb: LocalDbService,
         private logger: LoggingService,
         private groupService: GroupService,
-        private groupSignalService: GroupSignalService
+        private groupSignalService: GroupSignalService,
+        private injector: Injector
     ) {
     }
 

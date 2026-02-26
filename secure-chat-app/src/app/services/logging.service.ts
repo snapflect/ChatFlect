@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Injector } from '@angular/core';
 import { ApiService } from './api.service';
 
 @Injectable({
@@ -9,7 +9,15 @@ export class LoggingService {
     private readonly SENSITIVE_KEYS = ['ciphertext', 'key', 'seed', 'salt', 'passphrase', 'private_key', 'payload', 'k', 'i', 'h', 's', 'signature', 'mac'];
     private readonly ID_PATTERN = /^(user|chat|msg|device)_[a-z0-9-_]+$/i;
 
-    constructor(private api: ApiService) { }
+    private _api: ApiService | null = null;
+    private get api(): ApiService {
+        if (!this._api) {
+            this._api = this.injector.get(ApiService);
+        }
+        return this._api;
+    }
+
+    constructor(private injector: Injector) { }
 
     log(message: string, ...details: any[]) {
         // HF-5C.4B: Safe Serialization

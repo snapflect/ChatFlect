@@ -24,9 +24,9 @@ if ($data) {
     $logEntry = "[$timestamp] [$ip] [$level] $message $context" . PHP_EOL;
 
     // Daily Log File
-    $logDir = 'logs/';
+    $logDir = __DIR__ . '/logs/';
     if (!file_exists($logDir)) {
-        mkdir($logDir, 0777, true);
+        mkdir($logDir, 0755, true);
         // Secure directory
         file_put_contents($logDir . '.htaccess', 'Deny from all');
     }
