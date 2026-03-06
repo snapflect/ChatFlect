@@ -1,8 +1,10 @@
-import { Injectable, NgZone } from '@angular/core';
+import { Injectable, NgZone, Injector } from '@angular/core';
+
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, getDoc, doc, setDoc, updateDoc, where, increment, arrayUnion, arrayRemove, collectionGroup, getDocs, deleteDoc, limit, startAfter, limitToLast } from 'firebase/firestore';
 import { environment } from 'src/environments/environment';
 import { Observable, BehaviorSubject, Subject, firstValueFrom } from 'rxjs';
+import { filter, take } from 'rxjs/operators';
 import { CryptoService } from './crypto.service';
 import { ApiService } from './api.service';
 import { ToastController } from '@ionic/angular';
@@ -13,12 +15,14 @@ import { PresenceService } from './presence.service';
 import { TransferProgressService } from './transfer-progress.service';
 import { HttpEventType, HttpClient } from '@angular/common/http';
 import { Network } from '@capacitor/network';
-import { LocalDbService } from './local-db.service';
+import { LocalDbService, VaultState } from './local-db.service';
 import { RetrySchedulerService } from './retry-scheduler.service';
 import { MessageAckService } from './message-ack.service';
 import { SignalStoreService } from './signal-store.service';
 import { SignalService } from './signal.service';
 import { ChunkedUploadService } from './chunked-upload.service';
+import { SyncService } from './sync.service';
+
 
 @Injectable({
     providedIn: 'root'
@@ -38,6 +42,11 @@ export class ChatService {
 
     private isSyncing = false;
 
+    // Reliability Services (Lazy Loaded)
+    private syncService!: any;
+    private retryScheduler!: any;
+    private ackService!: any;
+
     constructor(
         private crypto: CryptoService,
         private api: ApiService,
@@ -48,24 +57,36 @@ export class ChatService {
         private zone: NgZone,
         private storage: StorageService,
         private localDb: LocalDbService,
-        private retryScheduler: RetrySchedulerService,
-        private ackService: MessageAckService,
         private signalStore: SignalStoreService,
         private signal: SignalService,
         private presence: PresenceService,
         private chunkedUpload: ChunkedUploadService,
-        private progressService: TransferProgressService
+        private progressService: TransferProgressService,
+        private injector: Injector
     ) {
         this.initFirestore();
         this.initHistorySyncLogic();
         this.presence.initPresenceTracking();
 
-        // Start Reliability Engines
-        this.retryScheduler.start();
-        this.ackService.start();
+        // HF-14.5: Deterministic Reliability Initialization
+        // We wait specifically for the Vault to be READY before 
+        // starting background reliability loops to prevent race conditions.
+        this.localDb.vaultState.pipe(
+            filter(state => state === VaultState.READY),
+            take(1)
+        ).subscribe(() => {
+            this.logger.log('[ChatService] Vault READY. Initializing reliability engines...');
+            this.syncService = this.injector.get(SyncService);
+            this.retryScheduler = this.injector.get(RetrySchedulerService);
+            this.ackService = this.injector.get(MessageAckService);
 
-        // One-time sync on start
-        this.syncInbox();
+            this.retryScheduler.start();
+            this.ackService.start();
+            this.syncService.start();
+
+            // First Sync after security layers are ready
+            this.syncInbox();
+        });
     }
 
     protected initFirestore() {
@@ -73,9 +94,33 @@ export class ChatService {
         this.db = getFirestore(app);
     }
 
-    // --- Protected Helper Methods for Mocking ---
+    // --- Protected Helper Methods for Mocking & Resilience ---
+
+    /**
+     * HF-8.27 Safe Firestore Execution with Retry
+     * Resolves "failed to get document because the client is offline" errors.
+     */
+    protected async safeFs<T>(operation: () => Promise<T>, maxRetries = 3): Promise<T> {
+        let lastError: any;
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                return await operation();
+            } catch (err: any) {
+                lastError = err;
+                const isOffline = err.message?.includes('offline') || err.code === 'unavailable';
+                if (isOffline && i < maxRetries - 1) {
+                    const delay = Math.pow(2, i) * 1000;
+                    this.logger.warn(`[ChatService] Firestore offline, retrying in ${delay}ms...`, { attempt: i + 1 });
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                throw err;
+            }
+        }
+        throw lastError;
+    }
+
     protected fsCollection(...pathSegments: string[]) {
-        // collection(db, path, ...segments)
         return collection(this.db, pathSegments[0], ...pathSegments.slice(1));
     }
     protected fsDoc(path: string, ...segments: string[]) {
@@ -88,22 +133,22 @@ export class ChatService {
         return onSnapshot(ref, observer, onError);
     }
     protected async fsGetDoc(ref: any) {
-        return await getDoc(ref);
+        return await this.safeFs(() => getDoc(ref));
     }
     protected async fsSetDoc(ref: any, data: any, options?: any) {
-        return await setDoc(ref, data, options);
+        return await this.safeFs(() => setDoc(ref, data, options));
     }
     protected async fsUpdateDoc(ref: any, data: any) {
-        return await updateDoc(ref, data);
+        return await this.safeFs(() => updateDoc(ref, data));
     }
     protected async fsDeleteDoc(ref: any) {
-        return await deleteDoc(ref);
+        return await this.safeFs(() => deleteDoc(ref));
     }
     protected async fsAddDoc(ref: any, data: any) {
-        return await addDoc(ref, data);
+        return await this.safeFs(() => addDoc(ref, data));
     }
     protected async fsGetDocs(ref: any) {
-        return await getDocs(ref);
+        return await this.safeFs(() => getDocs(ref));
     }
     protected fsCollectionGroup(collectionId: string) {
         return collectionGroup(this.db, collectionId);
@@ -113,9 +158,10 @@ export class ChatService {
 
     getChatDetails(chatId: string) {
         return new Observable(observer => {
-            this.fsOnSnapshot(this.fsDoc('chats', chatId), (doc: any) => {
+            const unsub = this.fsOnSnapshot(this.fsDoc('chats', chatId), (doc: any) => {
                 observer.next(doc.exists() ? { id: doc.id, ...doc.data() } : null);
             });
+            return () => unsub();
         });
     }
 
@@ -149,6 +195,7 @@ export class ChatService {
             };
 
             loadMedia();
+            return () => { /* Cleanup if any listeners attached */ };
         });
     }
 
@@ -191,19 +238,46 @@ export class ChatService {
      */
     async syncInbox(): Promise<void> {
         if (this.isSyncing) return;
+
+        // HF-14.6: Robust Network Guard
+        if (!navigator.onLine) return;
+
+        // HF-8.36: Optimization - Skip sync if no local messages exist yet
+        try {
+            const existingMessages = await this.localDb.query('SELECT 1 FROM local_messages LIMIT 1');
+            if (existingMessages.length === 0) {
+                this.logger.log('[ChatService] Skipping inbox sync (No local history yet)');
+                return;
+            }
+        } catch (e) {
+            return;
+        }
+
         this.isSyncing = true;
 
+        // HF-Race Fix: Wait for Vault Unlock AND Auth Readiness
+        await this.localDb.readyPromise;
+        await this.auth.authReadyPromise;
+
         try {
-            const response: any = await this.http.get(`${environment.apiUrl}/v4/messages/pull.php`).toPromise();
+            // HF-Security-Check: withCredentials ensures PHPSESSID cookie is transmitted
+            const response: any = await this.http.get(`${environment.apiUrl}/v4/messages/pull.php`, { withCredentials: true }).toPromise();
 
             if (response && response.success && Array.isArray(response.messages)) {
                 for (const msg of response.messages) {
                     await this.persistIncomingMessage(msg);
                 }
-                this.logger.log(`[ChatService] Inbox synced. ${response.messages.length} new messages.`);
+                if (response.messages.length > 0) {
+                    this.logger.log(`[ChatService] Inbox synced. ${response.messages.length} new messages.`);
+                }
             }
-        } catch (err) {
-            this.logger.error('[ChatService] Inbox Sync Failed', err);
+        } catch (err: any) {
+            // HF-8.37: Treat empty/cancelled/locked as INFO level via log()
+            if (err.status === 404 || err.status === 204 || err.status === 0) {
+                this.logger.log('[ChatService] Inbox empty or poll deferred (Normal state)');
+            } else {
+                this.logger.error('[ChatService] Inbox Sync Failed', err);
+            }
         } finally {
             this.isSyncing = false;
         }
@@ -1234,6 +1308,7 @@ export class ChatService {
             };
 
             loadStarred();
+            return () => { /* Cleanup listener */ };
         });
     }
 

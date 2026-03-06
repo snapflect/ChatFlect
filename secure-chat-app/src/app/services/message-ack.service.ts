@@ -5,6 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
 import { App } from '@capacitor/app';
 import { Network } from '@capacitor/network';
+import { AuthService } from './auth.service';
 
 /**
  * MessageAckService (v2.3 Reliability Engine)
@@ -24,7 +25,8 @@ export class MessageAckService {
     constructor(
         private localDb: LocalDbService,
         private logger: LoggingService,
-        private http: HttpClient
+        private http: HttpClient,
+        private authService: AuthService
     ) {
         this.initLifecycle();
     }
@@ -51,6 +53,10 @@ export class MessageAckService {
     private async poll() {
         if (!this.isPolling) return;
 
+        // HF-Race Fix: Gate background loops at the absolute root of execution
+        await this.localDb.readyPromise;
+        await this.authService.authReadyPromise;
+
         try {
             const hasWork = await this.syncReceipts();
 
@@ -66,8 +72,12 @@ export class MessageAckService {
                 this.MAX_POLL_INTERVAL
             );
 
-        } catch (err) {
+        } catch (err: any) {
             this.logger.error('[MessageAck] Receipt Sync Error', err);
+            if (err.message === 'VAULT_LOCKED') {
+                this.logger.warn('[MessageAck] Vault locked during poll. Suspending...');
+                this.localDb.lockVault();
+            }
         }
 
         setTimeout(() => this.poll(), this.currentPollInterval);
@@ -86,23 +96,37 @@ export class MessageAckService {
      * @returns boolean true if receipts were found
      */
     async syncReceipts(): Promise<boolean> {
+        if (!navigator.onLine) return false;
         const net = await Network.getStatus();
         if (!net.connected) return false;
 
+        // HF-Race Fix: Gate network pulls behind Vault readiness AND Auth readiness
+        await this.localDb.readyPromise;
+        await this.authService.authReadyPromise;
+
         try {
-            const response: any = await this.http.get(`${environment.apiUrl}/receipts/pull.php`).toPromise();
+            const response: any = await this.http.get(`${environment.apiUrl}/v4/messages/pull.php`, { withCredentials: true }).toPromise();
 
-            if (response && response.status === 'success' && Array.isArray(response.receipts)) {
-                if (response.receipts.length === 0) return false;
+            if (response && response.success === true && Array.isArray(response.messages)) {
+                if (response.messages.length === 0) return false;
 
-                for (const receipt of response.receipts) {
-                    await this.processReceipt(receipt);
+                for (const msg of response.messages) {
+                    // HF-8.26: Receipts are integrated into messages in v4
+                    const payload = JSON.parse(msg.encrypted_payload);
+                    if (payload.type === 'receipt') {
+                        await this.processReceipt(payload);
+                    }
                 }
                 return true;
             }
             return false;
-        } catch (err) {
-            this.logger.warn('[MessageAck] Failed to pull receipts', err);
+        } catch (err: any) {
+            // HF-8.37: Treat empty/cancelled/locked as DEBUG, not WARN
+            if (err.status === 404 || err.status === 204 || err.status === 0) {
+                this.logger.log('[MessageAck] No receipts pending or poll deferred');
+            } else {
+                this.logger.warn('[MessageAck] Failed to pull receipts', err);
+            }
             return false;
         }
     }
@@ -152,7 +176,7 @@ export class MessageAckService {
             }]
         };
 
-        this.http.post(`${environment.apiUrl}/v4/messages/ack.php`, pkg).toPromise().catch(err => {
+        this.http.post(`${environment.apiUrl}/v4/messages/ack.php`, pkg, { withCredentials: true }).toPromise().catch(err => {
             this.logger.warn('[MessageAck] Read Receipt Failed', err);
         });
     }
