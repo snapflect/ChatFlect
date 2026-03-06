@@ -5,7 +5,7 @@ require 'db.php';
 
 // Headers handled by db.php
 require_once 'rate_limiter.php';
-enforceRateLimit();
+enforceRateLimit(null, RATE_LIMIT_CONTACTS);
 
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {

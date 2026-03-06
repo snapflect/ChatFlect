@@ -66,7 +66,7 @@ exit;
 $pdo->beginTransaction();
 try {
     // A. Wipe Devices
-    $stmtDev = $pdo->prepare("DELETE FROM devices WHERE user_id = ?");
+    $stmtDev = $pdo->prepare("DELETE FROM user_devices WHERE user_id = ?");
     $stmtDev->execute([$userId]);
 
     // B. Wipe Prekeys (Mock table for now, would be prekeys)

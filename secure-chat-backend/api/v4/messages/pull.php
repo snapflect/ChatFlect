@@ -2,8 +2,8 @@
 // api/v4/messages/pull.php
 // Epic 48: Device-Specific Message Pull
 
-require_once __DIR__ . '/../../../includes/db_connect.php';
-require_once __DIR__ . '/../../../api/auth_middleware.php';
+require_once __DIR__ . '/../../db_connect.php';
+require_once __DIR__ . '/../../auth_middleware.php';
 require_once __DIR__ . '/../../../includes/rate_limiter.php';
 
 header('Content-Type: application/json');
@@ -15,11 +15,19 @@ try {
 
     // Enforce Invariant: Revoked devices cannot pull
     // requireAuth() should handle this, but explicit check acts as defense-in-depth
-    $stmt = $pdo->prepare("SELECT trust_state FROM devices WHERE device_id = ?");
-    $stmt->execute([$deviceId]);
-    $state = $stmt->fetchColumn();
+    $stmt = $conn->prepare("SELECT status FROM user_devices WHERE device_uuid = ?");
+    $stmt->bind_param("s", $deviceId);
+    $stmt->execute();
+    $resStatus = $stmt->get_result();
 
-    if ($state !== 'TRUSTED') {
+    if ($resStatus->num_rows === 0) {
+        http_response_code(403);
+        echo json_encode(['error' => 'DEVICE_NOT_FOUND']);
+        exit;
+    }
+
+    $statusRow = $resStatus->fetch_assoc();
+    if ($statusRow['status'] !== 'active') {
         http_response_code(403);
         echo json_encode(['error' => 'DEVICE_NOT_TRUSTED']);
         exit;
@@ -29,7 +37,7 @@ try {
 
     // Hardening: Explicitly bind query to auth token's device_id
     // Epic 84: Join messages to expose forwarding_score
-    $stmt = $pdo->prepare("
+    $sql = "
         SELECT 
             di.inbox_id, 
             di.message_uuid, 
@@ -38,17 +46,22 @@ try {
             di.created_at,
             m.forwarding_score
         FROM device_inbox di
-        LEFT JOIN messages m ON UNHEX(di.message_uuid) = m.message_id
-        WHERE di.recipient_device_id = :authDeviceId 
+        LEFT JOIN messages m ON UNHEX(REPLACE(di.message_uuid, '-', '')) = m.message_id
+        WHERE di.recipient_device_id = ?
           AND di.status = 'PENDING'
         ORDER BY di.inbox_id ASC
-        LIMIT :limit
-    ");
+        LIMIT ?
+    ";
 
-    $stmt->bindValue(':authDeviceId', $deviceId);
-    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-    $stmt->execute();
-    $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt2 = $conn->prepare($sql);
+    $stmt2->bind_param("si", $deviceId, $limit);
+    $stmt2->execute();
+
+    $resMsgs = $stmt2->get_result();
+    $messages = [];
+    while ($row = $resMsgs->fetch_assoc()) {
+        $messages[] = $row;
+    }
 
     echo json_encode([
         'success' => true,

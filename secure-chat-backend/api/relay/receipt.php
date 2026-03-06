@@ -18,7 +18,7 @@ try {
     }
 
     // 2. Validate Device (Revocation Check)
-    $stmt = $pdo->prepare("SELECT status FROM devices WHERE device_uuid = ? AND user_id = ?");
+    $stmt = $pdo->prepare("SELECT status FROM user_devices WHERE device_uuid = ? AND user_id = ?");
     $stmt->execute([$device_uuid, $user_id]);
     $device = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -82,5 +82,5 @@ try {
 
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'Server error']);
+    echo json_encode(['error' => 'Server error', 'details' => $e->getMessage()]);
 }

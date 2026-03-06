@@ -6,21 +6,43 @@
 php_flag display_errors Off
 
 # ----------------
-# GLOBAL CORS & PREFLIGHT (CRITICAL for Mobile/Capacitor)
+# GLOBAL CORS & PREFLIGHT (CRITICAL for Mobile/Capacitor Cookie Auth)
+# Epic 84-HF: Dynamic origin required — wildcard (*) silently drops cookies
+# when the client sends withCredentials:true (W3C Credential spec §3.2.5)
 # ----------------
+
+# Step 1: Match the incoming Origin against the allow-list
+<IfModule mod_setenvif.c>
+    SetEnvIf Origin "^http://localhost$"              CORS_ORIGIN=$0
+    SetEnvIf Origin "^http://localhost:8100$"          CORS_ORIGIN=$0
+    SetEnvIf Origin "^http://localhost:4200$"          CORS_ORIGIN=$0
+    SetEnvIf Origin "^capacitor://localhost$"          CORS_ORIGIN=$0
+    SetEnvIf Origin "^https://localhost$"              CORS_ORIGIN=$0
+    SetEnvIf Origin "^https://chat\.snapflect\.com$"  CORS_ORIGIN=$0
+</IfModule>
+
+# Step 2: Set CORS headers — echo specific origin, never wildcard
 <IfModule mod_headers.c>
-    # Using 'always' ensures headers remain even on error responses (401, 404, 500)
-    Header always set Access-Control-Allow-Origin "*"
+    # Remove any PHP per-file CORS headers to prevent duplicates
+    Header always unset Access-Control-Allow-Origin
+    Header always unset Access-Control-Allow-Credentials
+
+    # Dynamic origin + credentials (required for cookie auth to work)
+    Header always set Access-Control-Allow-Origin "%{CORS_ORIGIN}e" env=CORS_ORIGIN
+    Header always set Access-Control-Allow-Credentials "true" env=CORS_ORIGIN
     Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
     Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-User-ID, If-None-Match, Cache-Control, Range"
     Header always set Access-Control-Expose-Headers "Content-Length, Content-Range, ETag"
+
+    # Caching proxies must vary on Origin to avoid cross-origin poisoning
+    Header always append Vary Origin
 </IfModule>
 
 # Handle preflight OPTIONS requests immediately
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteCond %{REQUEST_METHOD} OPTIONS
-    RewriteRule ^(.*)$ $1 [R=200,L]
+    RewriteRule ^ - [R=200,L]
 
     # ----------------
     # AUTHORIZATION HEADER FIX

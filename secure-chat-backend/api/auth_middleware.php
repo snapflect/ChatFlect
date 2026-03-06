@@ -10,6 +10,19 @@ if (basename($_SERVER['SCRIPT_NAME']) !== 'serve.php') {
     header('Content-Type: application/json; charset=utf-8');
 }
 
+// Epic 48 & Epic 84 Fix: Hydrate the PHP session explicitly for workers
+session_set_cookie_params([
+    'lifetime' => 0,
+    'path' => '/',
+    'domain' => 'chat.snapflect.com',
+    'secure' => true,
+    'httponly' => true,
+    'samesite' => 'None'
+]);
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 // Epic 34: Apply API version and deprecation headers
 applyVersionHeaders();
 

@@ -20,15 +20,15 @@ try {
 
     $isSelf = ($requesterUserId === $targetUserId);
 
-    $query = "SELECT device_id, platform, device_name, public_identity_key, trust_state, last_seen_at 
-              FROM devices 
-              WHERE user_id = ? AND revoked_at IS NULL";
+    $query = "SELECT device_uuid, platform, device_name, public_identity_key, status, last_seen_at 
+              FROM user_devices 
+              WHERE user_id = ? AND status != 'revoked'";
 
     if (!$isSelf) {
-        $query .= " AND trust_state = 'TRUSTED'";
+        $query .= " AND status = 'active'";
     } else {
         // Self can see pending
-        $query .= " AND trust_state IN ('TRUSTED', 'PENDING')";
+        $query .= " AND status IN ('active', 'pending')";
     }
 
     $stmt = $pdo->prepare($query);

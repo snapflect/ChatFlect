@@ -13,9 +13,9 @@ try {
     $deviceId = $authData['device_uuid'] ?? '';
 
     // Hardening: Revoked devices cannot sync
-    $stmt = $pdo->prepare("SELECT trust_state FROM devices WHERE device_id = ?");
+    $stmt = $pdo->prepare("SELECT status FROM user_devices WHERE device_uuid = ?");
     $stmt->execute([$deviceId]);
-    if ($stmt->fetchColumn() !== 'TRUSTED') {
+    if ($stmt->fetchColumn() !== 'active') {
         http_response_code(403);
         exit;
     }
@@ -48,5 +48,5 @@ try {
 
 } catch (Exception $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'SERVER_ERROR']);
+    echo json_encode(['error' => 'SERVER_ERROR', 'details' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
 }

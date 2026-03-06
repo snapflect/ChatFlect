@@ -1,9 +1,14 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Injector } from '@angular/core';
+
 import { Network } from '@capacitor/network';
 import { StorageService } from './storage.service';
 import { ChatService } from './chat.service';
 import { ConflictResolverService } from './conflict-resolver.service';
 import { LoggingService } from './logging.service';
+import { LocalDbService } from './local-db.service';
+import { AuthService } from './auth.service';
+import { Subject } from 'rxjs';
+import { debounceTime } from 'rxjs/operators';
 
 @Injectable({
     providedIn: 'root'
@@ -12,27 +17,60 @@ export class SyncService {
 
     private isSyncing = false;
     private syncInterval: any;
+    private triggerSync$ = new Subject<void>();
+
+    private _auth: any = null;
 
     constructor(
         private storage: StorageService,
-        private chatService: ChatService,
         private conflictResolver: ConflictResolverService,
-        private logger: LoggingService
+        private logger: LoggingService,
+        private localDb: LocalDbService,
+        private injector: Injector
     ) {
+        // HF-14.2: Debounce network rapid-fire spam
+        this.triggerSync$.pipe(debounceTime(3000)).subscribe(() => {
+            this.processOutbox();
+        });
+    }
+
+    private get authService(): any {
+        if (!this._auth) {
+            // Using require to ensure the file is loaded only once and type is preserved
+            const { AuthService } = require('./auth.service');
+            this._auth = this.injector.get(AuthService);
+        }
+        return this._auth;
+    }
+
+    /**
+     * HF-14.3: Standard Lifecycle Start
+     * Ensures background processes only begin once security layers are unlocked.
+     */
+    async start() {
+        this.logger.log('[SyncService] Waiting for security layers...');
+
+        // Block until vault is ready and auth is initialized
+        await this.localDb.readyPromise;
+        await this.authService.authReadyPromise;
+
+        this.logger.log('[SyncService] Security layers READY. Initializing Sync lifecycle.');
+
         this.initNetworkListener();
+
+        // Initial Check
+        const status = await Network.getStatus();
+        if (status.connected) {
+            this.triggerSync$.next();
+        }
     }
 
     private initNetworkListener() {
         Network.addListener('networkStatusChange', status => {
             if (status.connected) {
-                this.logger.log('[SyncService][v14] Network restored. Triggering sync...');
-                this.processOutbox();
+                this.logger.log('[SyncService][v14] Network restored. Debouncing sync...');
+                this.triggerSync$.next();
             }
-        });
-
-        // Initial Check
-        Network.getStatus().then(status => {
-            if (status.connected) this.processOutbox();
         });
     }
 
@@ -44,6 +82,10 @@ export class SyncService {
         if (this.isSyncing) return;
         this.isSyncing = true;
 
+        // HF-Race Fix: Wait for Vault Unlock AND Auth Readiness
+        await this.localDb.readyPromise;
+        await this.authService.authReadyPromise;
+
         try {
             const queue = await this.storage.getOutbox();
             if (queue.length === 0) return;
@@ -52,8 +94,10 @@ export class SyncService {
 
             for (const item of queue) {
                 try {
-                    // 1. Attempt Action
-                    await this.chatService.retryOfflineAction(item.chat_id, item.action, item.payload);
+                    // 1. Attempt Action (HF-8.36: Lazy Load ChatService)
+                    const chatService = this.injector.get(ChatService);
+                    await chatService.retryOfflineAction(item.chat_id, item.action, item.payload);
+
 
                     // 2. Success -> Remove
                     await this.storage.removeFromOutbox(item.id);

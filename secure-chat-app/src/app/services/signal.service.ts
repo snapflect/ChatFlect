@@ -130,7 +130,7 @@ export class SignalService {
         };
 
         try {
-            await this.http.post(`${environment.apiUrl}/devices?action=register`, bundle, {
+            await this.http.post(`${environment.apiUrl}/v3/keys.php`, bundle, {
                 withCredentials: true
             }).toPromise();
 
@@ -153,7 +153,7 @@ export class SignalService {
 
         // 2. Fetch Bundle from Backend
         try {
-            const bundle: any = await this.http.get(`${environment.apiUrl}/keys?userId=${remoteUserId}&deviceId=${remoteDeviceId}`, {
+            const bundle: any = await this.http.get(`${environment.apiUrl}/keys.php?userId=${remoteUserId}&deviceId=${remoteDeviceId}`, {
                 withCredentials: true
             }).toPromise();
 
@@ -574,7 +574,7 @@ export class SignalService {
     // --- 4. Discovery (Story 2.5 Fix) ---
     async getPrimaryDeviceId(userId: string): Promise<number> {
         try {
-            const devices: any[] = await this.http.get<any[]>(`${environment.apiUrl}/devices?user_id=${userId}&action=list`, {
+            const devices: any[] = await this.http.get<any[]>(`${environment.apiUrl}/devices.php?user_id=${userId}&action=list`, {
                 withCredentials: true
             }).toPromise() || [];
 

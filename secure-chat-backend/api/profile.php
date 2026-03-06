@@ -400,6 +400,11 @@ elseif ($method === 'GET') {
     $stmt->bind_param("s", $userId);
     $stmt->execute();
     $profile = $stmt->get_result()->fetch_assoc();
+    if (!$profile) {
+        http_response_code(404);
+        echo json_encode(["error" => "User profile not found"]);
+        exit;
+    }
 
     /* ---------- STANDARD PROXY FIX ---------- */
     // If it's a local upload, route it through serve.php

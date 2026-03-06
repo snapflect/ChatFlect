@@ -48,8 +48,12 @@ if ($deviceResult->num_rows === 0 || $deviceResult->fetch_assoc()['status'] !== 
 }
 $stmtDevice->close();
 
-// 2. Parse Input
-$input = json_decode(file_get_contents('php://input'), true);
+// 2. Parse Input — Hardened for null/empty/malformed body (Epic 84-HF)
+$rawInput = file_get_contents('php://input');
+$input = json_decode($rawInput, true);
+if (!is_array($input)) {
+    $input = [];
+}
 
 $chatId = $input['chatId'] ?? null;
 $messageUuid = $input['message_uuid'] ?? null;

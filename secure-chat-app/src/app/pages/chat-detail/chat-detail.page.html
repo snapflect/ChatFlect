@@ -30,7 +30,7 @@
       <div class="chat-subtitle" *ngIf="isGroup">
         <span *ngIf="typingUsers && typingUsers.length > 0" class="typing-text">{{ typingUsers.join(', ') }}
           typing...</span>
-        <span *ngIf="(!typingUsers || typingUsers.length === 0)">{{ participants?.length || 0 }} participants</span>
+        <span *ngIf="(!typingUsers || typingUsers.length === 0)">{{ participants.length || 0 }} participants</span>
       </div>
     </ion-title>
 

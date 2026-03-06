@@ -20,15 +20,13 @@ export class LoggingService {
     constructor(private injector: Injector) { }
 
     log(message: string, ...details: any[]) {
-        // HF-5C.4B: Safe Serialization
-        // We mask PII *before* any console output to prevent leaking via object inspection
-        const safeDetails = details.map(d => this.maskPII(JSON.parse(JSON.stringify(d, this.getCircularReplacer()))));
+        const safeDetails = details.map(d => this.safeSerializeAndParse(d));
         console.log(`%c[APP Info]`, 'color: blue; font-weight: bold', message, ...safeDetails);
         this.sendToBackend('INFO', message, safeDetails);
     }
 
     warn(message: string, ...details: any[]) {
-        const safeDetails = details.map(d => this.maskPII(JSON.parse(JSON.stringify(d, this.getCircularReplacer()))));
+        const safeDetails = details.map(d => this.safeSerializeAndParse(d));
         console.warn(`%c[APP Warn]`, 'color: orange; font-weight: bold', message, ...safeDetails);
         this.sendToBackend('WARN', message, safeDetails);
     }
@@ -43,7 +41,9 @@ export class LoggingService {
                 stack: error.stack
             };
         }
-        const safeError = this.maskPII(JSON.parse(JSON.stringify(rawError, this.getCircularReplacer())));
+
+        let safeError = this.safeSerializeAndParse(rawError);
+
         console.error(`%c[APP Error]`, 'color: red; font-weight: bold', message, safeError);
 
         // Format error object safely
@@ -115,16 +115,30 @@ export class LoggingService {
         }
     }
 
-    private getCircularReplacer() {
-        const seen = new WeakSet();
-        return (key: string, value: any) => {
-            if (typeof value === 'object' && value !== null) {
-                if (seen.has(value)) {
-                    return '[Circular]';
+    private safeSerializeAndParse(obj: any): any {
+        try {
+            if (obj === 'undefined') return undefined; // Handle string 'undefined'
+            if (typeof obj === 'string') {
+                try {
+                    return this.maskPII(JSON.parse(obj));
+                } catch (e) {
+                    return this.maskPII(obj); // Return raw if parse fails, but still mask
                 }
-                seen.add(value);
             }
-            return value;
-        };
+
+            const cache = new WeakSet();
+            const serialized = JSON.stringify(obj, (key, value) => {
+                if (typeof value === 'object' && value !== null) {
+                    if (cache.has(value)) {
+                        return '[Circular]';
+                    }
+                    cache.add(value);
+                }
+                return value;
+            });
+            return this.maskPII(JSON.parse(serialized));
+        } catch (e) {
+            return `[Serialization Failed: ${String(obj)}]`;
+        }
     }
 }

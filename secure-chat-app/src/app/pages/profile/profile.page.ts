@@ -46,20 +46,30 @@ export class ProfilePage implements OnInit {
       const res: any = await this.profileService.getProfile();
       if (res) {
         this.profile = { ...this.profile, ...res };
-        this.logger.log(`[ProfilePage] Initial photo_url: ${this.profile.photo_url}`);
+        this.logger.log(`[ProfilePage] Initial profile loaded for ${res.user_id}. Phone: ${res.phone_number}`);
+
+        if (!res.phone_number || !res.first_name) {
+          this.showToast("Profile incomplete. Please update details.");
+        }
+      } else {
+        this.logger.warn("[ProfilePage] No profile returned from service.");
+        this.showToast("Wait... profile not found. Try logging out and in.");
       }
 
       // Important: Background sync might finish later. Re-check after 3s.
       setTimeout(async () => {
         const updatedRes: any = await this.profileService.getProfile();
-        if (updatedRes && updatedRes.photo_url !== this.profile.photo_url) {
-          this.logger.log(`[ProfilePage] Late sync detected new photo_url: ${updatedRes.photo_url}`);
+        if (updatedRes && (updatedRes.photo_url !== this.profile.photo_url || updatedRes.phone_number !== this.profile.phone_number)) {
+          this.logger.log(`[ProfilePage] Late sync detected updates for ${updatedRes.user_id}`);
           this.profile = { ...this.profile, ...updatedRes };
         }
       }, 3000);
 
-    } catch (e) {
+    } catch (e: any) {
       this.logger.error("Profile Load Error", e);
+      if (e.status === 404) {
+        this.showToast("Session mismatch. Please Log Out and Log In again.");
+      }
     }
   }
 

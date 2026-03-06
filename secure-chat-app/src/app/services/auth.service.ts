@@ -17,6 +17,8 @@ import { SecureMediaService } from './secure-media.service';
 import { SecureStorageService } from './secure-storage.service';
 import { SignalService } from './signal.service';
 import { SignalStoreService } from './signal-store.service';
+import { SecureStoragePlugin } from 'capacitor-secure-storage-plugin';
+import { LocalDbService } from './local-db.service';
 
 import { db, auth } from './firebase.config';
 
@@ -33,6 +35,20 @@ export class AuthService {
     blockedUsers$ = this.blockedUsersSubject.asObservable();
     private blockedUnsub?: Unsubscribe;
     private firebaseSigningIn = false;
+
+    // 🔥 Auth State Barrier (HF-Race Fix)
+    public authReadyPromise = new Promise<void>((resolve) => {
+        this.authReadyResolver = resolve;
+    });
+    private authReadyResolver!: () => void;
+    private authResolved = false;
+
+    private resolveAuthPromise() {
+        if (!this.authResolved && this.authReadyResolver) {
+            this.authResolved = true;
+            this.authReadyResolver();
+        }
+    }
 
     private userBlockedAlertShown = false;
 
@@ -74,7 +90,8 @@ export class AuthService {
         private crypto: CryptoService,
         private logger: LoggingService,
         private secureStorage: SecureStorageService,
-        private injector: Injector
+        private injector: Injector,
+        private localDb: LocalDbService
     ) {
         // App initialized in firebase.config.ts
         // this.db assigned above
@@ -138,8 +155,12 @@ export class AuthService {
     private initBlockedListener(userId: string) {
         // 1. Initial Load from Local Storage (Instant)
         const cached = localStorage.getItem('blocked_users');
-        if (cached) {
-            this.blockedUsersSubject.next(JSON.parse(cached));
+        if (cached && cached !== 'undefined') {
+            try {
+                this.blockedUsersSubject.next(JSON.parse(cached));
+            } catch (e) {
+                this.logger.error('[Auth] Failed to parse blocked_users', e);
+            }
         }
 
         // 2. Real-time sync
@@ -237,6 +258,9 @@ export class AuthService {
 
         // HF-5A: Proactive Signal Registration
         try {
+            // HF-Race Fix: Wait for Vault Unlock
+            await this.localDb.readyPromise;
+
             const hasIdentity = await this.signalStore.getIdentityKeyPair();
             if (!hasIdentity) {
                 this.logger.log('[Auth] No Signal Identity found. Registering keys...');
@@ -300,13 +324,26 @@ export class AuthService {
     private firebaseReadySubject = new BehaviorSubject<boolean>(false);
     public firebaseReady$ = this.firebaseReadySubject.asObservable();
 
-    async signInToFirebase(userId: string) {
-        // ... (unchanged)
+    async signInToFirebase(userId: string): Promise<void> {
         const authInstance = auth;
 
         // 1. Race Condition Guard
         if (authInstance.currentUser) {
             this.logger.log('[Auth] Firebase ALREADY authenticated', { uid: authInstance.currentUser.uid });
+
+            try {
+                // 🔥 HF-Enterprise Fix: Ensure Backend PHP Session is alive even if Firebase is cached
+                await this.api.get('ping.php').toPromise();
+                this.logger.log('[Auth] Backend session confirmed (warm boot)');
+            } catch (e) {
+                this.logger.warn('[Auth] Warm boot backend session invalid, forcing re-auth');
+                await signOut(authInstance);
+                return this.signInToFirebase(userId);
+            }
+
+            // 🔥 HF-Race Fix: Unblock background services if session already exists AND backend matches
+            this.resolveAuthPromise();
+
             if (!this.firebaseReadySubject.value) {
                 // Wait for listener or the defensive timeout
             }
@@ -339,6 +376,18 @@ export class AuthService {
                 await signInWithCustomToken(authInstance, customToken);
 
                 this.logger.log("[Auth] signInWithCustomToken SUCCESS. User:", (authInstance.currentUser as any)?.uid);
+
+                // 🔥 HF-Race Fix: Third Condition - Backend Session Confirmed
+                try {
+                    await this.api.get('ping.php').toPromise();
+                    this.logger.log("[Auth] Backend session confirmed via ping.");
+                } catch (pe) {
+                    this.logger.warn("[Auth] Backend session ping failed/slow, resolving anyway to avoid hang", pe);
+                }
+
+                // 🔥 HF-Race Fix: Unblock background services!
+                this.resolveAuthPromise();
+
             } else {
                 this.logger.error("[Auth] Token Exchange FAILED. Response:", res);
             }
@@ -346,22 +395,25 @@ export class AuthService {
             // Handle 403: distinguish blocked vs device issues
             if (e?.status === 403) {
                 const errorBody = e?.error;
-                if (errorBody?.error === 'Device not registered' || errorBody?.error === 'Device is not active or has been revoked') {
-                    this.logger.warn('[Auth] Device not registered/active. Retrying registration...');
+                if (errorBody?.error === 'Device not registered' ||
+                    errorBody?.error === 'Device is not active or has been revoked' ||
+                    errorBody?.error === 'Device Binding Required. Please re-authenticate.') {
+
+                    this.logger.warn('[Auth] Device binding missing/broken. Attempting recovery...', errorBody);
                     try {
                         await this.registerDevice(userId);
-                        // Retry Firebase auth after re-registering device
+                        // Force a fresh token exchange which will include the correct device_uuid
                         const retryRes: any = await this.api.post('firebase_auth.php', { user_id: userId, device_uuid: deviceUuid }).toPromise();
                         if (retryRes?.status === 'success') {
                             const customToken = retryRes.firebase_token || retryRes.token;
                             if (customToken) {
                                 await signInWithCustomToken(authInstance, customToken);
-                                this.logger.log('[Auth] Firebase auth RETRY SUCCESS');
+                                this.logger.log('[Auth] Device binding recovery SUCCESS');
                                 return;
                             }
                         }
                     } catch (retryErr) {
-                        this.logger.error('[Auth] Device re-registration retry failed', retryErr);
+                        this.logger.error('[Auth] Device binding recovery FAILED', retryErr);
                     }
                 } else if (errorBody?.status === 'blocked') {
                     if (!this.userBlockedAlertShown) {
@@ -540,6 +592,12 @@ export class AuthService {
         // 🔥 Robust Subject Reset
         this.firebaseReadySubject.next(false);
         this.firebaseSigningIn = false;
+
+        // Reset the Auth Barrier so background tasks pause again
+        this.authResolved = false;
+        this.authReadyPromise = new Promise<void>((resolve) => {
+            this.authReadyResolver = resolve;
+        });
     }
 
     isAuthenticated(): boolean {

@@ -12,7 +12,7 @@ try {
     // Only return Public Key + Trust State + Last Seen
     // Do not return private data.
 
-    $stmt = $pdo->prepare("SELECT device_id, public_key, trust_state, created_at, last_seen_at FROM devices WHERE user_id = ?");
+    $stmt = $pdo->prepare("SELECT device_uuid, public_key, status, created_at, last_seen_at FROM user_devices WHERE user_id = ?");
     $stmt->execute([$contactId]);
     $devices = $stmt->fetchAll(PDO::FETCH_ASSOC);
 

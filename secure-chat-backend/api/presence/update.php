@@ -39,7 +39,7 @@ try {
 
     // 3. Strict Device Check (Revocation)
     // Auth middleware usually checks valid device, but we double check status='active'
-    $stmt = $pdo->prepare("SELECT status FROM devices WHERE device_uuid = ? AND user_id = ?");
+    $stmt = $pdo->prepare("SELECT status FROM user_devices WHERE device_uuid = ? AND user_id = ?");
     $stmt->execute([$device_uuid, $user_id]);
     $device = $stmt->fetch(PDO::FETCH_ASSOC);
 

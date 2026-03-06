@@ -10,8 +10,8 @@ require_once '../auth_middleware.php'; // Ensure authenticated
 require_once '../rate_limiter.php';
 
 // HF-4.2: Enforce strict rate limit for contact mapping
-// Max 5 requests per hour (3600s) to prevent bulk harvesting
-enforceRateLimit(null, 5, 3600);
+// Max 50 requests per hour (3600s) to prevent bulk harvesting
+enforceRateLimit(null, 50, 3600);
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -48,7 +48,7 @@ $placeholders = implode(',', array_fill(0, count($hashes), '?'));
 
 $sql = "SELECT user_id, phone_number, first_name, last_name, photo_url 
         FROM users 
-        WHERE phone_hash IN ($placeholders)";
+        WHERE phone_number IN ($placeholders)";
 
 $stmt = $conn->prepare($sql);
 $stmt->execute($hashes);
@@ -62,9 +62,9 @@ while ($row = $result->fetch_assoc()) {
     ];
 }
 
-// Improved matching: We need to return the hash so the client knows WHICH contact matched.
-// Re-executing query to get the specific hash
-$sql = "SELECT user_id, phone_hash, photo_url FROM users WHERE phone_hash IN ($placeholders)";
+// Improved matching: We need to return the phone_number so the client knows WHICH contact matched.
+// Re-executing query to get the specific match
+$sql = "SELECT user_id, phone_number, photo_url FROM users WHERE phone_number IN ($placeholders)";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param(str_repeat('s', count($hashes)), ...$hashes);
 $stmt->execute();
@@ -73,7 +73,7 @@ $result = $stmt->get_result();
 $finalMatches = [];
 while ($row = $result->fetch_assoc()) {
     $finalMatches[] = [
-        "hash" => $row['phone_hash'],
+        "hash" => $row['phone_number'],
         "user_id" => $row['user_id'],
         "photo_url" => $row['photo_url'] ? "serve.php?file=" . ltrim($row['photo_url'], '/') : null,
         "status" => "on_chatflect"

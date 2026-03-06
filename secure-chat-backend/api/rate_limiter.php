@@ -8,6 +8,7 @@ require_once 'db.php';
 
 // Configuration
 define('RATE_LIMIT_REQUESTS', 100);  // Max requests
+define('RATE_LIMIT_CONTACTS', 300);  // High limit for contact search/sync
 define('RATE_LIMIT_WINDOW', 60);     // Per X seconds
 define('RATE_LIMIT_ENABLED', true);  // v12: Enabled by default
 

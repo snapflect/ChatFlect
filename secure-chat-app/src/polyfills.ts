@@ -41,7 +41,7 @@
  *  (window as any).__Zone_enable_cross_context_check = true;
  *
  */
- 
+
 import './zone-flags';
 
 /***************************************************************************************************
@@ -53,3 +53,12 @@ import 'zone.js';  // Included with Angular CLI.
 /***************************************************************************************************
  * APPLICATION IMPORTS
  */
+
+// HF-8.24: Webpack 5 Polyfills for Crypto Libraries
+(window as any).global = window;
+(window as any).process = {
+    env: { DEBUG: undefined },
+    version: '',
+    nextTick: (fn: any) => setTimeout(fn, 0)
+};
+(window as any).Buffer = (window as any).Buffer || require('buffer').Buffer;

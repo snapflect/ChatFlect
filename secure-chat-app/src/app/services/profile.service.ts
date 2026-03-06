@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 import { LoggingService } from './logging.service';
 import { SecureMediaService } from './secure-media.service';
 import { StorageService } from './storage.service';
+import { LocalDbService } from './local-db.service';
 import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
 
 @Injectable({
@@ -16,10 +17,14 @@ export class ProfileService {
         private auth: AuthService,
         private logger: LoggingService,
         private secureMedia: SecureMediaService,
-        private storage: StorageService
+        private storage: StorageService,
+        private localDb: LocalDbService
     ) { }
 
     async getProfile() {
+        // HF-Race Fix: Wait for Vault Unlock before touching storage
+        await this.localDb.readyPromise;
+
         // We use the ID from localStorage as it's more reliable than the observable in some flows
         const id = localStorage.getItem('user_id');
         if (!id) return null;
@@ -45,42 +50,39 @@ export class ProfileService {
             const apiRes: any = await this.api.get(`profile.php?user_id=${id}`).toPromise();
 
             // Check if API returned valid data. 
-            if (!apiRes || !apiRes.first_name) {
-                this.logger.log("[Profile] API profile incomplete, checking Firestore fallback...");
+            if (!apiRes || !apiRes.first_name || !apiRes.phone_number) {
+                this.logger.warn(`[Profile] API profile incomplete for ${id}, checking Firestore fallback...`, apiRes);
                 const db = this.firestoreGetInstance();
                 const docSnap = await this.firestoreGetDoc(this.firestoreDoc(db, 'users', id));
                 if (docSnap.exists()) {
                     const firestoreData = docSnap.data() as any;
                     this.logger.log("[Profile] Found in Firestore:", firestoreData);
-                    this.logger.log("[Profile] API photo_url:", apiRes.photo_url);
-                    this.logger.log("[Profile] Firestore photo_url:", firestoreData.photo_url);
 
-                    // Merge logic: Favor non-empty photo_url from either source
+                    // Merge logic: Favor API for core fields unless empty, but merge Firestore if API is missing parts
                     const merged = { ...apiRes, ...firestoreData, user_id: id };
 
-                    if (apiRes.photo_url && (!firestoreData.photo_url || firestoreData.photo_url === '')) {
-                        merged.photo_url = apiRes.photo_url;
-                    } else if (!apiRes.photo_url && firestoreData.photo_url) {
-                        merged.photo_url = firestoreData.photo_url;
-                    } else if (apiRes.photo_url && firestoreData.photo_url && apiRes.photo_url !== firestoreData.photo_url) {
-                        // Favor Google URL if it's there
-                        if (apiRes.photo_url.includes('googleusercontent.com')) {
-                            merged.photo_url = apiRes.photo_url;
-                        }
+                    // SECURITY: Ensure phone number is preserved if API has it (The Truth)
+                    if (apiRes && apiRes.phone_number) {
+                        merged.phone_number = apiRes.phone_number;
                     }
 
+                    if (apiRes && apiRes.photo_url && (!firestoreData.photo_url || firestoreData.photo_url === '')) {
+                        merged.photo_url = apiRes.photo_url;
+                    } else if (apiRes && !apiRes.photo_url && firestoreData.photo_url) {
+                        merged.photo_url = firestoreData.photo_url;
+                    }
+
+                    this.logger.log("[Profile] Final Merged Profile:", merged);
                     await this.storage.setMeta('profile_data', merged);
                     return merged;
                 }
             }
 
             if (apiRes) {
-                this.logger.log(`[ProfileService] Sync result photo_url: ${apiRes.photo_url}`);
+                this.logger.log(`[ProfileService] Sync success for ${id}. photo_url: ${apiRes.photo_url}`);
                 apiRes.user_id = id;
                 await this.storage.setMeta('profile_data', apiRes);
             }
-
-            this.logger.log("[Profile] Final Profile synced");
             return apiRes;
         } catch (e) {
             this.logger.error("[Profile] Sync Error", e);

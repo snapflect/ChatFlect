@@ -13,15 +13,20 @@ try {
     $deviceId = $authData['device_uuid'] ?? '';
 
     // Revocation Check
-    $stmt = $pdo->prepare("SELECT trust_state FROM devices WHERE device_id = ?");
+    $stmt = $pdo->prepare("SELECT status FROM user_devices WHERE device_uuid = ?");
     $stmt->execute([$deviceId]);
-    if ($stmt->fetchColumn() !== 'TRUSTED') {
+    if ($stmt->fetchColumn() !== 'active') {
         http_response_code(403);
         exit;
     }
 
-    $input = json_decode(file_get_contents('php://input'), true);
-    $acks = $input['acks'] ?? []; // Array of {inbox_id, status}
+    // Epic 84-HF: Hardened input parsing — null/empty/malformed body safe
+    $rawInput = file_get_contents('php://input');
+    $input = json_decode($rawInput, true);
+    if (!is_array($input)) {
+        $input = [];
+    }
+    $acks = is_array($input['acks'] ?? null) ? $input['acks'] : [];
 
     if (empty($acks)) {
         echo json_encode(['success' => true, 'count' => 0]);
@@ -52,7 +57,7 @@ try {
         INSERT INTO conversation_device_markers (conversation_id, user_id, device_id, last_read_message_id, updated_at)
         SELECT m.conversation_id, d.user_id, ?, ?, NOW()
         FROM messages m
-        JOIN devices d ON d.device_id = ?
+        JOIN user_devices d ON d.device_uuid = ?
         WHERE m.message_uuid = ?
         ON DUPLICATE KEY UPDATE last_read_message_id = VALUES(last_read_message_id), updated_at = NOW()
     ");

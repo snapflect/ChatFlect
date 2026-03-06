@@ -4,12 +4,22 @@ import { SecureStoragePlugin } from 'capacitor-secure-storage-plugin';
 import { NativeBiometric } from 'capacitor-native-biometric';
 import { LoggingService } from './logging.service';
 import { Platform } from '@ionic/angular';
+import { BehaviorSubject, firstValueFrom } from 'rxjs';
+import { filter, take } from 'rxjs/operators';
+
 
 /**
  * LocalDbService (v2.2 Architecture)
  * Centralized lifecycle management for SQLite (WhatsApp-Style).
  * High-performance, encrypted, and offline-first backbone.
  */
+
+export enum VaultState {
+    LOCKED = 'LOCKED',
+    UNLOCKING = 'UNLOCKING',
+    READY = 'READY'
+}
+
 @Injectable({
     providedIn: 'root'
 })
@@ -18,6 +28,23 @@ export class LocalDbService {
     private db!: SQLiteDBConnection;
     private isInitialized: boolean = false;
     private initPromise: Promise<void> | null = null;
+
+    // HF-Race Fix: Event-driven Vault State
+    public vaultState = new BehaviorSubject<VaultState>(VaultState.LOCKED);
+    private isUnlocking: boolean = false; // Persistent guard for initialize()
+
+    /**
+     * HF-8.37: Barrier promise that never orphans waiters.
+     * Always reflects the current state of the BehaviorSubject.
+     */
+    public get readyPromise(): Promise<void> {
+        return firstValueFrom(
+            this.vaultState.pipe(
+                filter(state => state === VaultState.READY),
+                take(1)
+            )
+        ).then(() => { });
+    }
 
     private readonly DB_NAME = 'chatflect_v2_main';
     private readonly MAX_VAULT_ATTEMPTS = 5;
@@ -29,25 +56,32 @@ export class LocalDbService {
 
     async initialize(): Promise<void> {
         if (this.initPromise) return this.initPromise;
+        if (this.isUnlocking) return this.readyPromise; // Wait for active unlock
 
         this.initPromise = (async () => {
             try {
-                this.logger.log(`[LocalDb] [Checkpoint 1] Starting initialization...`);
+                this.isUnlocking = true;
+                this.vaultState.next(VaultState.UNLOCKING);
+                this.logger.log(`[LocalDb] [Checkpoint 1] Starting initialization (Vault State: UNLOCKING)...`);
 
                 const passphrase = await this.getOrCreatePassphrase();
                 this.logger.log("[LocalDb] [Checkpoint 2] Passphrase derived.");
 
                 if (this.platform.is('hybrid')) {
-                    this.logger.log("[LocalDb] [Checkpoint 3] Hybrid mode. Waiting for UI thread...");
-                    await new Promise(r => setTimeout(r, 1000));
+                    this.logger.log("[LocalDb] [Checkpoint 3] Hybrid mode. Waiting for platform ready...");
+                    await this.platform.ready();
+
+                    // HF-8.31: Reduced delay to minimize race condition window
+                    this.logger.log("[LocalDb] [Checkpoint 3.1] Platform ready. Stabilizing UI...");
+                    await new Promise(r => setTimeout(r, 500));
 
                     const isBiometricVerified = await this.verifyBiometrics();
                     if (!isBiometricVerified) {
-                        this.logger.error("[LocalDb] [Checkpoint 3.F] Biometric verification failed or cancelled.");
-                        throw new Error("BIOMETRIC_FAILED");
+                        this.logger.warn("[LocalDb] [Checkpoint 3.F] Biometric gate not cleared (Check: BAL Block/User Cancel). VAULT_LOCKED.");
+                        this.lockVault();
+                        return;
                     }
-                    this.logger.log("[LocalDb] [Checkpoint 4] Biometrics verified. Cooling down bridge bridge...");
-                    await new Promise(r => setTimeout(r, 1500));
+                    this.logger.log("[LocalDb] [Checkpoint 4] Biometrics verified. Proceeding...");
                 }
 
                 let retryCount = 0;
@@ -65,17 +99,19 @@ export class LocalDbService {
                                 this.db = await this.sqlite.retrieveConnection(this.DB_NAME, false);
                             } else {
                                 this.logger.log("[LocalDb] [Checkpoint 5.2] Creating fresh connection...");
-                                this.db = await this.sqlite.createConnection(this.DB_NAME, true, 'encryption', 1, false);
+                                // HF-8.32: Use encrypted: false when providing encryptionKey manually in open()
+                                this.db = await this.sqlite.createConnection(this.DB_NAME, false, 'no-encryption', 1, false);
                             }
                         } catch (handleErr) {
                             this.logger.warn("[LocalDb] [Checkpoint 5.H] Handle setup issue, forcing consistency reset...", handleErr);
                             await this.sqlite.checkConnectionsConsistency();
-                            this.db = await this.sqlite.createConnection(this.DB_NAME, true, 'encryption', 1, false);
+                            this.db = await this.sqlite.createConnection(this.DB_NAME, false, 'no-encryption', 1, false);
                         }
 
                         // 3. Open with Recovery Pattern
                         try {
                             this.logger.log("[LocalDb] [Checkpoint 6] Opening database...");
+                            if (!passphrase || passphrase.length < 10) throw new Error("INVALID_PASSPHRASE_MIN_LENGTH");
                             await (this.db as any).open({ encryptionKey: passphrase });
                         } catch (openErr: any) {
                             const msg = openErr.message || "";
@@ -91,10 +127,14 @@ export class LocalDbService {
                             }
                         }
 
-                        this.logger.log("[LocalDb] [Checkpoint 7] Ensuring schema...");
                         await this.createTables();
                         this.isInitialized = true;
-                        this.logger.log(`[LocalDb] [Checkpoint 8] SUCCESS: Initialized.`);
+
+                        // HF-Race Fix: Vault is fully operational
+                        this.vaultState.next(VaultState.READY);
+
+                        this.logger.log(`[LocalDb] [Checkpoint 8] SUCCESS: Initialized and Unlocked.`);
+
                         return; // Done
 
                     } catch (err: any) {
@@ -121,23 +161,45 @@ export class LocalDbService {
                 } else {
                     this.logger.error(`[LocalDb] Initialization Fatal Error: ${JSON.stringify(errorDetail)}`, err);
                 }
+                this.lockVault();
                 throw err;
+            } finally {
+                this.isUnlocking = false;
             }
         })();
 
         return this.initPromise;
     }
 
+    /**
+     * HF-Race Fix: Call this to lock the vault down (e.g., when app backgrounds for too long)
+     * Re-creates the readyPromise barrier.
+     */
+    public lockVault() {
+        if (this.vaultState.value !== VaultState.LOCKED) {
+            this.logger.warn("[LocalDb] Re-locking Vault. Suspending background services.");
+            this.vaultState.next(VaultState.LOCKED);
+            this.isInitialized = false;
+            this.initPromise = null;
+        }
+    }
+
+
     async getReady(): Promise<SQLiteDBConnection> {
-        if (!this.isInitialized) await this.initialize();
+        if (!this.isInitialized) {
+            await this.initialize();
+        }
+        if (!this.db) {
+            throw new Error("VAULT_LOCKED");
+        }
         return this.db;
     }
 
     private async getOrCreatePassphrase(): Promise<string> {
         try {
-            // 1. Check for Legacy Passphrase (Backward Compatibility for initial v2.3 Alpha)
+            // 1. Check for Legacy Passphrase
             const legacy = await SecureStoragePlugin.get({ key: 'sqlite_v2_passphrase' }).catch(() => ({ value: null }));
-            if (legacy.value) {
+            if (legacy?.value) {
                 this.logger.log("[LocalDb] Using legacy vault passphrase.");
                 return legacy.value;
             }
@@ -147,7 +209,7 @@ export class LocalDbService {
             let deviceSalt = (await SecureStoragePlugin.get({ key: 'sqlite_device_salt' }).catch(() => ({ value: null }))).value;
 
             if (!masterSeed || !deviceSalt) {
-                this.logger.log("[LocalDb] Generating new hardware-bound vault secrets...");
+                this.logger.warn("[LocalDb] Hardware secrets missing. Generating new hardware-bound vault secrets...");
                 masterSeed = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
                 deviceSalt = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
 
@@ -155,10 +217,14 @@ export class LocalDbService {
                 await SecureStoragePlugin.set({ key: 'sqlite_device_salt', value: deviceSalt });
             }
 
-            return await this.derivePassphrase(masterSeed, deviceSalt);
+            const derived = await this.derivePassphrase(masterSeed, deviceSalt);
+            if (!derived || derived.length < 8) {
+                throw new Error("PASSPHRASE_DERIVATION_FAILED: Derived key is invalid.");
+            }
+
+            return derived;
         } catch (err) {
             this.logger.error("[LocalDb] Vault Access Failure - Hardware Lockout?", err);
-            // HF-2.1D: Critical Error State
             throw new Error("SECURE_VAULT_UNREACHABLE: Handset security module rejected request.");
         }
     }
@@ -203,25 +269,38 @@ export class LocalDbService {
                 return true;
             }
 
-            // HF-8.20: Biometric Timeout to prevent permanent app hang
-            const biometricPromise = NativeBiometric.verifyIdentity({
-                reason: "Unlock your secure messaging vault",
-                title: "Vault Access",
-                subtitle: "ChatFlect Security",
-                description: "Verify your identity to access encrypted messages.",
-                useFallback: true // Allow PIN if biometrics fail
-            });
+            // HF-8.20: Biometric Timeout + Retry to prevent permanent app hang
+            let attempts = 0;
+            const maxAttempts = 2;
+            let verified = false;
 
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error("BIOMETRIC_TIMEOUT")), 20000);
-            });
+            while (attempts < maxAttempts && !verified) {
+                attempts++;
+                this.logger.log(`[LocalDb] Biometric attempt ${attempts}/${maxAttempts}...`);
 
-            const verified = await Promise.race([biometricPromise, timeoutPromise])
-                .then(() => true)
-                .catch((err: any) => {
-                    this.logger.warn("[LocalDb] Biometric verification failed or timed out:", err);
-                    return false;
+                const biometricPromise = NativeBiometric.verifyIdentity({
+                    reason: "Unlock your secure messaging vault",
+                    title: "Vault Access",
+                    subtitle: "ChatFlect Security",
+                    description: "Verify your identity to access encrypted messages.",
+                    useFallback: true
                 });
+
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error("BIOMETRIC_TIMEOUT")), 25000);
+                });
+
+                verified = await Promise.race([biometricPromise, timeoutPromise])
+                    .then(() => true)
+                    .catch(async (err: any) => {
+                        this.logger.warn(`[LocalDb] Biometric attempt ${attempts} failed:`, err);
+                        if (attempts < maxAttempts) {
+                            await new Promise(r => setTimeout(r, 1000)); // Cool down
+                            return false;
+                        }
+                        return false;
+                    });
+            }
 
             if (verified) {
                 localStorage.setItem('vault_fail_count', '0');
@@ -393,6 +472,66 @@ export class LocalDbService {
                 received_at INTEGER NOT NULL,
                 PRIMARY KEY(sender_device_uuid, message_uuid)
             );
+
+            -- 13. Legacy Aliases (HF-8.35: Support older components during bridge phase)
+            CREATE TABLE IF NOT EXISTS chats (
+                id TEXT PRIMARY KEY,
+                data TEXT,
+                last_timestamp INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS meta_cache (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at INTEGER
+            );
+
+            -- 14. StorageService Specific Tables
+            CREATE TABLE IF NOT EXISTS contacts (
+                user_id TEXT PRIMARY KEY,
+                first_name TEXT,
+                last_name TEXT,
+                phone_number TEXT,
+                email TEXT,
+                photo_url TEXT,
+                public_key TEXT,
+                fetched_at INTEGER,
+                last_seen INTEGER,
+                updated_at INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS discovery_cache (
+                query TEXT PRIMARY KEY,
+                results TEXT,
+                expires_at INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS media_cache (
+                url TEXT PRIMARY KEY,
+                blob_path TEXT,
+                mime TEXT,
+                file_size INTEGER DEFAULT 0,
+                updated_at INTEGER,
+                last_verified_at INTEGER,
+                verification_status TEXT DEFAULT 'verified',
+                last_used INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS media_retries (
+                url TEXT PRIMARY KEY,
+                count INTEGER DEFAULT 0,
+                next_retry INTEGER,
+                last_logged INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS outbox (
+                id TEXT PRIMARY KEY,
+                chat_id TEXT,
+                action TEXT,
+                payload TEXT,
+                timestamp INTEGER,
+                retry_count INTEGER DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_outbox_chat ON outbox(chat_id);
         `;
         await this.db.execute(schema);
     }
@@ -411,5 +550,51 @@ export class LocalDbService {
     async execute(statements: string) {
         const db = await this.getReady();
         return db.execute(statements);
+    }
+
+    async runHealthCheck() {
+        if (!(await this.isReady())) return; // Guard
+        try {
+            console.log('[LocalDbService][v14] Running Integrity Check...');
+            const values = await this.safeQuery('PRAGMA integrity_check');
+            const result = values.length > 0 ? Object.values(values[0])[0] : 'unknown';
+
+            if (result !== 'ok') {
+                console.error('[LocalDbService][v14] CORRUPTION DETECTED:', result);
+                // Attempt VACUUM to rebuild
+                await this.safeExecute('VACUUM');
+                console.log('[LocalDbService][v14] VACUUM completed. Re-checking...');
+
+                const res2 = await this.query('PRAGMA integrity_check');
+                const result2 = res2.length > 0 ? Object.values(res2[0])[0] : 'unknown';
+
+                if (result2 !== 'ok') {
+                    console.error('[LocalDbService][v14] FATAL: VACUUM failed. Database may be unsafe.');
+                }
+            } else {
+                console.log('[LocalDbService][v14] Integrity Check Passed (ok)');
+
+                // Optional: Log Size
+                const sizeRes = await this.query('PRAGMA page_count');
+                const pageSizeRes = await this.query('PRAGMA page_size');
+                if (sizeRes.length > 0 && pageSizeRes.length > 0) {
+                    const size = (Object.values(sizeRes[0])[0] as number) * (Object.values(pageSizeRes[0])[0] as number);
+                    console.log(`[LocalDbService][v14] DB Size: ${(size / 1024 / 1024).toFixed(2)} MB`);
+                }
+            }
+        } catch (e) {
+            console.error('[LocalDbService] Integrity Check Exception', e);
+        }
+    }
+
+    // Helper for health check
+    private async safeQuery<T = any>(statement: string, values: any[] = []): Promise<T[]> {
+        return this.query<T>(statement, values);
+    }
+    private async safeExecute(statements: string): Promise<any> {
+        return this.execute(statements);
+    }
+    private async isReady(): Promise<boolean> {
+        return this.vaultState.value === VaultState.READY;
     }
 }

@@ -59,6 +59,7 @@ function handlePostKeys($userId, $conn)
     $regId = (int) $input['registrationId'];
     // Story 3.1: Handle Key Version (Default to 1 for Backward Compat)
     $keyVersion = isset($input['keyVersion']) ? (int) $input['keyVersion'] : 1;
+    $signingPubKey = $input['signing_public_key'] ?? null; // Epic 5 ECDSA Key
 
     $identityKey = $input['identityKey'];
     $signedPreKey = $input['signedPreKey']; // { keyId, publicKey, signature }
@@ -70,18 +71,18 @@ function handlePostKeys($userId, $conn)
     try {
         // 1. Verify Device Ownership (Strict)
         // Ensure user owns this device_uuid -> device_id mapping
-        $devCheck = $conn->prepare("SELECT 1 FROM user_devices WHERE user_id = ? AND libsignal_device_id = ? AND is_active = 1");
+        $devCheck = $conn->prepare("SELECT 1 FROM user_devices WHERE user_id = ? AND libsignal_device_id = ? AND status = 'active'");
         $devCheck->bind_param("si", $userId, $deviceId);
         $devCheck->execute();
         if ($devCheck->get_result()->num_rows === 0) {
             throw new Exception("Device Ownership Mismatch. User $userId does not own Device ID $deviceId.");
         }
 
-        // Story 3.1: Sync key_version to user_devices (Ensure consistency)
+        // Story 3.1 & Epic 5: Sync key_version and ECDSA key to user_devices (Ensure consistency)
         // We only update if the new version is greater or equal? 
         // For initial upload (register), it matches or sets. 
-        $updDev = $conn->prepare("UPDATE user_devices SET key_version = ?, last_active = NOW() WHERE user_id = ? AND libsignal_device_id = ?");
-        $updDev->bind_param("isi", $keyVersion, $userId, $deviceId);
+        $updDev = $conn->prepare("UPDATE user_devices SET key_version = ?, last_active = NOW(), signing_public_key = COALESCE(?, signing_public_key) WHERE user_id = ? AND libsignal_device_id = ?");
+        $updDev->bind_param("issi", $keyVersion, $signingPubKey, $userId, $deviceId);
         $updDev->execute();
 
         // 2. Identity Key Immutability Check
@@ -116,7 +117,7 @@ function handlePostKeys($userId, $conn)
             }
         } else {
             // New Registration
-            $ins = $conn->prepare("INSERT INTO identity_keys (user_id, device_id, registration_id, public_key) VALUES (?, ?, ?, ?)");
+            $ins = $conn->prepare("INSERT INTO identity_keys (user_id, device_id, registration_id, public_key) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE public_key = VALUES(public_key), updated_at = NOW()");
             $ins->bind_param("siis", $userId, $deviceId, $regId, $identityKey);
             $ins->execute();
         }

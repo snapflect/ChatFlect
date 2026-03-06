@@ -1,6 +1,7 @@
 <?php
+// api/ping.php — Health check endpoint
 header("Content-Type: application/json");
-require_once __DIR__ . '/api/db.php';
+require_once __DIR__ . '/db.php';
 
 echo json_encode([
     "status" => "online",

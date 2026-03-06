@@ -5,6 +5,7 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
 import { App } from '@capacitor/app';
 import { Network } from '@capacitor/network';
+import { AuthService } from './auth.service';
 
 /**
  * RetrySchedulerService (v2.3 Reliability Engine)
@@ -27,7 +28,8 @@ export class RetrySchedulerService {
     constructor(
         private localDb: LocalDbService,
         private logger: LoggingService,
-        private http: HttpClient
+        private http: HttpClient,
+        private authService: AuthService
     ) {
         this.initLifecycle();
     }
@@ -57,6 +59,10 @@ export class RetrySchedulerService {
     private async poll() {
         if (!this.isPolling) return;
 
+        // HF-Race Fix: Wait for Vault Unlock AND Auth Readiness
+        await this.localDb.readyPromise;
+        await this.authService.authReadyPromise;
+
         try {
             const hasWork = await this.processQueue();
 
@@ -72,8 +78,14 @@ export class RetrySchedulerService {
                 this.MAX_POLL_INTERVAL
             );
 
-        } catch (err) {
+        } catch (err: any) {
             this.logger.error('[RetryScheduler] Poll Error', err);
+            if (err.message === 'VAULT_LOCKED') {
+                this.logger.warn('[RetryScheduler] Vault locked during poll. Suspending...');
+                this.localDb.lockVault();
+                // We don't stop polling conceptually, the next loop iteration will just 
+                // block forever on `await this.localDb.readyPromise` until unlocked!
+            }
         }
 
         setTimeout(() => this.poll(), this.currentPollInterval);
@@ -181,6 +193,10 @@ export class RetrySchedulerService {
         }, 20000);
 
         try {
+            // HF-Race Fix: Wait for Vault Unlock AND Auth Readiness before querying
+            await this.localDb.readyPromise;
+            await this.authService.authReadyPromise;
+
             const pending = await this.localDb.query(`
                 SELECT Q.*, M.payload, M.chat_id, M.type 
                 FROM local_pending_queue Q

@@ -131,8 +131,12 @@ try {
         $userId = $existingUser['user_id'];
         $isProfileComplete = (int) $existingUser['is_profile_complete'];
 
-        $updateStmt = $conn->prepare("UPDATE users SET public_key = ?, google_sub = ?, google_profile_data = ? WHERE user_id = ?");
-        $updateStmt->bind_param("ssss", $publicKey, $googleSub, $googleProfileData, $userId);
+        // Sync Google info into profile if not already set or updated
+        $firstName = explode(' ', $name)[0] ?? $name;
+        $lastName = trim(str_replace($firstName, '', $name)) ?: null;
+
+        $updateStmt = $conn->prepare("UPDATE users SET public_key = ?, google_sub = ?, google_profile_data = ?, first_name = COALESCE(first_name, ?), last_name = COALESCE(last_name, ?), photo_url = COALESCE(photo_url, ?) WHERE user_id = ?");
+        $updateStmt->bind_param("sssssss", $publicKey, $googleSub, $googleProfileData, $firstName, $lastName, $photoUrl, $userId);
         $updateStmt->execute();
         $updateStmt->close();
 

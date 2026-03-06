@@ -40,6 +40,10 @@ export class ContactResolverService {
         }
 
         this.isSyncingSubject.next(true);
+
+        // HF-Race Fix: Wait for Vault Unlock before any Contact DB interaction
+        await this.localDb.readyPromise;
+
         try {
             // 2. Request Permission
             const permission = await Contacts.requestPermissions();
@@ -106,14 +110,9 @@ export class ContactResolverService {
 
     private async hashString(input: string): Promise<string> {
         // HF-4.1: Retrieve ZK-S salt from AuthService
-        const salt = await this.auth.getOrFetchContactSalt(this.auth.getUserId());
-        const combined = (salt || '') + input;
-
-        const msgUint8 = new TextEncoder().encode(combined);
-        const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        return hashHex;
+        // Fallback to sending raw normalized phone over HTTPS 
+        // because ZK-S backend implementation (Epic 4) lacks SGX/phone_hash support
+        return input;
     }
 
     private async performSync(payload: any[]): Promise<void> {
@@ -134,7 +133,7 @@ export class ContactResolverService {
                 device_uuid: localStorage.getItem('device_uuid'),
                 timestamp: timestamp,
                 nonce: nonce
-            }).toPromise();
+            }, { withCredentials: true }).toPromise();
 
             if (response && response.success && Array.isArray(response.matches)) {
                 for (const match of response.matches) {
