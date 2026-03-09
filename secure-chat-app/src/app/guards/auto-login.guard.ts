@@ -1,20 +1,26 @@
 import { Injectable } from '@angular/core';
 import { CanActivate, Router, UrlTree } from '@angular/router';
 import { AuthService } from '../services/auth.service';
-import { Observable } from 'rxjs';
-import { filter, take, map } from 'rxjs/operators';
+import { AppInitService } from '../services/app-init.service';
+import { Observable, from, of } from 'rxjs';
+import { filter, take, map, switchMap } from 'rxjs/operators';
 
 @Injectable({
     providedIn: 'root'
 })
 export class AutoLoginGuard implements CanActivate {
-    constructor(private auth: AuthService, private router: Router) { }
+    constructor(
+        private auth: AuthService,
+        private router: Router,
+        private appInit: AppInitService
+    ) { }
 
     canActivate(): Observable<boolean | UrlTree> {
-        const { from, of } = require('rxjs');
-        const { switchMap } = require('rxjs/operators');
 
-        return this.auth.currentUserId.pipe(
+        return this.appInit.initialized$.pipe(
+            filter(init => init === true),
+            take(1),
+            switchMap(() => this.auth.currentUserId),
             filter(val => val !== null || val === null), // Trigger
             take(1),
             switchMap((userId: string | null) => {

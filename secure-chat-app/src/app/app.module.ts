@@ -27,19 +27,11 @@ import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 
 import { HTTP_INTERCEPTORS } from '@angular/common/http';
 import { AuthInterceptor } from './interceptors/auth.interceptor';
-
 import { APP_INITIALIZER } from '@angular/core';
-import { LocalDbService } from './services/local-db.service';
+import { AppInitService } from './services/app-init.service';
 
-export function initLocalDatabase(localDb: LocalDbService) {
-  return () => {
-    // HF-8.20: Trigger initialization in background to prevent "black screen" 
-    // if native biometric or SQLite bridge hangs during bootstrap.
-    localDb.initialize().catch(err => {
-      console.error('[AppInit] LocalDb background init failed:', err);
-    });
-    return Promise.resolve(); // Proceed with app startup immediately
-  };
+export function initializeAppFactory(appInit: AppInitService) {
+  return () => appInit.init();
 }
 
 @NgModule({
@@ -62,28 +54,13 @@ export function initLocalDatabase(localDb: LocalDbService) {
     { provide: HTTP_INTERCEPTORS, useClass: AuthInterceptor, multi: true },
     {
       provide: APP_INITIALIZER,
-      useFactory: initLocalDatabase,
-      deps: [LocalDbService],
+      useFactory: initializeAppFactory,
+      deps: [AppInitService],
       multi: true
     }
   ],
   bootstrap: [AppComponent],
 })
 export class AppModule {
-  constructor() {
-    try {
-      const app = initializeApp(environment.firebase);
-      const db = getFirestore(app);
-      enableIndexedDbPersistence(db).catch((err: any) => {
-        if (err.code === 'failed-precondition') {
-          console.warn('Firestore persistence failed: multiple tabs open');
-        } else if (err.code === 'unimplemented') {
-          console.warn('Firestore persistence not supported by browser');
-        }
-      });
-      console.log('Firebase Initialized Globally with Persistence');
-    } catch (e) {
-      console.warn('Firebase already initialized or error', e);
-    }
-  }
+  constructor() { }
 }

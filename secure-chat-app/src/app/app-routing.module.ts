@@ -1,5 +1,5 @@
 import { NgModule } from '@angular/core';
-import { PreloadAllModules, RouterModule, Routes } from '@angular/router';
+import { NoPreloading, RouterModule, Routes } from '@angular/router';
 import { AuthGuard } from './guards/auth-guard';
 import { AutoLoginGuard } from './guards/auto-login.guard';
 import { ProfileCompletionGuard } from './guards/profile-completion.guard';
@@ -7,8 +7,12 @@ import { ProfileCompletionGuard } from './guards/profile-completion.guard';
 const routes: Routes = [
   {
     path: '',
-    redirectTo: 'login',
+    redirectTo: 'boot',
     pathMatch: 'full'
+  },
+  {
+    path: 'boot',
+    loadChildren: () => import('./pages/boot/boot.module').then(m => m.BootPageModule)
   },
   {
     path: 'login',
@@ -103,28 +107,29 @@ const routes: Routes = [
     path: 'starred-messages',
     loadChildren: () => import('./pages/starred-messages/starred-messages.module').then(m => m.StarredMessagesPageModule),
     canActivate: [AuthGuard]
-  },  {
+  },
+  {
     path: 'contact-picker-modal',
-    loadChildren: () => import('./pages/contact-picker-modal/contact-picker-modal.module').then( m => m.ContactPickerModalPageModule)
+    loadChildren: () => import('./pages/contact-picker-modal/contact-picker-modal.module').then(m => m.ContactPickerModalPageModule)
   },
   {
     path: 'linked-devices',
-    loadChildren: () => import('./pages/linked-devices/linked-devices.module').then( m => m.LinkedDevicesPageModule)
+    loadChildren: () => import('./pages/linked-devices/linked-devices.module').then(m => m.LinkedDevicesPageModule)
   },
   {
     path: 'admin-dashboard',
-    loadChildren: () => import('./pages/admin-dashboard/admin-dashboard.module').then( m => m.AdminDashboardPageModule)
+    loadChildren: () => import('./pages/admin-dashboard/admin-dashboard.module').then(m => m.AdminDashboardPageModule)
   },
   {
     path: 'security-history',
-    loadChildren: () => import('./pages/security-history/security-history.module').then( m => m.SecurityHistoryPageModule)
+    loadChildren: () => import('./pages/security-history/security-history.module').then(m => m.SecurityHistoryPageModule)
   },
 
 ];
 
 @NgModule({
   imports: [
-    RouterModule.forRoot(routes, { preloadingStrategy: PreloadAllModules })
+    RouterModule.forRoot(routes, { preloadingStrategy: NoPreloading })
   ],
   exports: [RouterModule]
 })

@@ -1,18 +1,26 @@
-import { Component, OnInit } from '@angular/core';
-import { SplashScreen } from '@capacitor/splash-screen';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { CallService } from './services/call.service';
-import { ModalController } from '@ionic/angular';
 import { CallModalPage } from './pages/call-modal/call-modal.page';
 import { PushService } from './services/push.service';
 import { PresenceService } from './services/presence.service';
 import { App } from '@capacitor/app';
 import { NativeBiometric } from 'capacitor-native-biometric';
-import { AlertController } from '@ionic/angular';
+import { Platform, AlertController, ModalController } from '@ionic/angular';
 import { Router } from '@angular/router';
 import { SoundService } from './services/sound.service';
 import { ChatService } from './services/chat.service';
 import { SyncService } from './services/sync.service';
 import { SignalStoreService, IdentityMismatchEvent } from './services/signal-store.service';
+import { Network } from '@capacitor/network';
+import { filter, take } from 'rxjs/operators';
+import { AppInitService } from './services/app-init.service';
+import { LocalDbService, VaultState } from './services/local-db.service';
+
+import { BehaviorSubject, Subscription, Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
+import { StorageService } from './services/storage.service';
+import { AuthService } from './services/auth.service';
+import { Injector } from '@angular/core';
 
 @Component({
   selector: 'app-root',
@@ -20,69 +28,108 @@ import { SignalStoreService, IdentityMismatchEvent } from './services/signal-sto
   styleUrls: ['app.component.scss'],
   standalone: false
 })
-export class AppComponent implements OnInit {
+export class AppComponent implements OnInit, OnDestroy {
+  public isOffline$ = new BehaviorSubject<boolean>(false);
+  public bootError$ = this.appInit.bootError$;
+  private networkSub: any; // Capacitor Network.addListener returns a Promise<PluginListenerHandle>
+  private authSub!: Subscription; // This is not used in the provided snippet, but kept as per instruction
+  private appReady = false;
+  private appStateListener: any;
+  private destroy$ = new Subject<void>();
+
+  private get callService(): CallService { return this.injector.get(CallService); }
+  private get pushService(): PushService { return this.injector.get(PushService); }
+  private get presence(): PresenceService { return this.injector.get(PresenceService); }
+  private get soundService(): SoundService { return this.injector.get(SoundService); }
+  private get chatService(): ChatService { return this.injector.get(ChatService); }
+  private get syncService(): SyncService { return this.injector.get(SyncService); }
+  private get signalStore(): SignalStoreService { return this.injector.get(SignalStoreService); }
+  private get auth(): AuthService { return this.injector.get(AuthService); }
+  private get localDb(): LocalDbService { return this.injector.get(LocalDbService); }
+
   constructor(
-    private callService: CallService,
     private modalCtrl: ModalController,
-    private pushService: PushService,
-    private presence: PresenceService,
     private alertCtrl: AlertController,
     private router: Router,
-    private soundService: SoundService,
-    private chatService: ChatService,
-    private syncService: SyncService,
-    private signalStore: SignalStoreService // Inject for Epic 6
-  ) { }
+    private appInit: AppInitService,
+    private platform: Platform,
+    private storage: StorageService,
+    private injector: Injector
+  ) {
+  }
 
   async ngOnInit() {
-    console.log('AppComponent Initialized - Hiding Splash Screen');
-    try {
-      await SplashScreen.hide();
-    } catch (e) {
-      console.warn('Splash Screen Hide Error', e);
+    // Phase 4: Network Monitor
+    if (this.platform.is('capacitor')) {
+      this.networkSub = await Network.addListener('networkStatusChange', status => {
+        console.log('[AppComponent] Network status changed:', status.connected);
+        this.isOffline$.next(!status.connected);
+      });
+      const status = await Network.getStatus();
+      this.isOffline$.next(!status.connected);
     }
 
-    this.pushService.initPush();
-    this.callService.init();
+    this.appInit.bootState$.pipe(
+      filter(s => s === 'BOOT_COMPLETE'),
+      take(1)
+    ).subscribe(() => {
+      this.finishInit();
+    });
+
+    this.appStateListener = await App.addListener('appStateChange', async (state: { isActive: boolean }) => {
+      const { isActive } = state;
+      this.presence.setPresence(isActive ? 'online' : 'offline');
+
+      if (isActive) {
+        console.log(`[Lifecycle] Resume - Vault:${this.localDb.vaultState.value === VaultState.READY}`);
+
+        const enabled = localStorage.getItem('biometric_enabled') === 'true';
+        if (enabled && this.localDb.vaultState.value !== VaultState.READY) {
+          await this.performBiometricCheck();
+        }
+
+        // HF-Resume: Resume sync services safely
+        try {
+          await this.syncService.start();
+        } catch (e) {
+          console.error('[Lifecycle] Error resuming sync service', e);
+        }
+
+        // Refresh auth token gracefully on resume
+        this.auth.checkTokenExpiry();
+      }
+    });
+  }
+
+  private finishInit() {
+    if (this.appReady) {
+      console.log('[AppComponent] finishInit already executed. Skipping.');
+      return;
+    }
+    this.appReady = true;
 
     // Presence Logic
     this.presence.setPresence('online');
 
     // Push Notification Messages (deep link on tap)
-    // Push Notification Messages (deep link on tap)
-    this.pushService.tapSubject.subscribe(chatId => {
+    this.pushService.tapSubject.pipe(takeUntil(this.destroy$)).subscribe((chatId: string | null) => {
       if (chatId) {
-        // Deep link when user taps notification
         this.router.navigateByUrl(`/chat-detail/${chatId}`);
       }
     });
 
-    // Real-time Message Sound (from Firestore listener)
-    this.chatService.newMessage$.subscribe(msg => {
-      // SoundService checks if user is already in this chat
-      // Temporarily disabled to debug crash
-      // this.soundService.playMessageSound(msg.chatId);
+    // Real-time Message Sound
+    this.chatService.newMessage$.pipe(takeUntil(this.destroy$)).subscribe(() => {
+      // Possible sound logic
     });
 
     // Story 6.2: Global Identity Mismatch Alert
-    this.signalStore.identityMismatch$.subscribe(event => {
+    this.signalStore.identityMismatch$.pipe(takeUntil(this.destroy$)).subscribe((event: IdentityMismatchEvent) => {
       this.showIdentityMismatchAlert(event);
     });
 
-    App.addListener('appStateChange', async ({ isActive }) => {
-      this.presence.setPresence(isActive ? 'online' : 'offline');
-
-      if (isActive) {
-        const enabled = localStorage.getItem('biometric_enabled') === 'true';
-        if (enabled) {
-          await this.performBiometricCheck();
-        }
-      }
-    });
-
-    // Global Call Listener - Only show modal for INCOMING calls
-    // Outgoing calls navigate directly to /group-call page (handled by chat-detail.page.ts)
-    this.callService.callStatus.subscribe(async (status) => {
+    // Global Call Listener
+    this.callService.callStatus.pipe(takeUntil(this.destroy$)).subscribe(async (status: string) => {
       if (status === 'incoming') {
         const callType = this.callService.activeCallType || 'audio';
         const isGroup = this.callService.isGroupCall;
@@ -98,7 +145,6 @@ export class AppComponent implements OnInit {
         });
         await modal.present();
       } else if (status === 'connected') {
-        // Ensure we navigate to the main call screen
         this.router.navigate(['/group-call']);
       }
     });
@@ -149,7 +195,7 @@ export class AppComponent implements OnInit {
           description: "Please verify your identity"
         });
       }
-    } catch (e) {
+    } catch {
       const alert = await this.alertCtrl.create({
         header: 'Locked',
         message: 'Authentication required to access chats.',
@@ -167,6 +213,41 @@ export class AppComponent implements OnInit {
         ]
       });
       await alert.present();
+    }
+  }
+
+  async retryBoot() {
+    await this.appInit.retry();
+  }
+
+  async resetAndReload() {
+    const alert = await this.alertCtrl.create({
+      header: 'Reset All Data?',
+      message: 'This will wipe all local messages and encryption keys. You will need to log in again. This cannot be undone.',
+      buttons: [
+        { text: 'Cancel', role: 'cancel' },
+        {
+          text: 'Reset Everything',
+          role: 'destructive',
+          handler: () => {
+            this.localDb.triggerNuke();
+          }
+        }
+      ]
+    });
+    await alert.present();
+  }
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+
+    if (this.networkSub) {
+      this.networkSub.remove();
+    }
+
+    if (this.appStateListener) {
+      this.appStateListener.remove();
     }
   }
 }

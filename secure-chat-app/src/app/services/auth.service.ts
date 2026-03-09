@@ -1,6 +1,6 @@
 import { Injectable, Injector } from '@angular/core';
 import { ApiService } from './api.service';
-import { BehaviorSubject, throwError } from 'rxjs';
+import { BehaviorSubject, throwError, firstValueFrom, Subject } from 'rxjs';
 import { filter, take } from 'rxjs/operators';
 import { CryptoService } from './crypto.service';
 import { PushService } from './push.service';
@@ -30,11 +30,15 @@ export class AuthService {
     currentUserId = this.userIdSource.asObservable();
     private db = db; // Use singleton
 
+    public logoutSubject = new Subject<void>();
+    public logout$ = this.logoutSubject.asObservable();
+
     // Blocked Users Stream
     private blockedUsersSubject = new BehaviorSubject<string[]>([]);
     blockedUsers$ = this.blockedUsersSubject.asObservable();
     private blockedUnsub?: Unsubscribe;
     private firebaseSigningIn = false;
+    private authUnsub?: Unsubscribe;
 
     // 🔥 Auth State Barrier (HF-Race Fix)
     public authReadyPromise = new Promise<void>((resolve) => {
@@ -42,6 +46,9 @@ export class AuthService {
     });
     private authReadyResolver!: () => void;
     private authResolved = false;
+
+    private refreshInProgress: Promise<void> | null = null;
+    private refreshTimer: any = null;
 
     private resolveAuthPromise() {
         if (!this.authResolved && this.authReadyResolver) {
@@ -85,18 +92,28 @@ export class AuthService {
         return this._signalStore!;
     }
 
+    private _localDb: LocalDbService | null = null;
+    private get localDb(): LocalDbService {
+        if (!this._localDb) this._localDb = this.injector.get(LocalDbService);
+        return this._localDb!;
+    }
+
     constructor(
         private api: ApiService,
         private crypto: CryptoService,
         private logger: LoggingService,
         private secureStorage: SecureStorageService,
-        private injector: Injector,
-        private localDb: LocalDbService
-    ) {
-        // App initialized in firebase.config.ts
-        // this.db assigned above
+        private injector: Injector
+    ) { }
 
-        // Initialize Google Auth on native platforms
+    /**
+     * Phase 4: Deterministic Boot Sequence
+     * Called by AppInitService to ensure AuthService is ready before app starts.
+     */
+    public async initialize(): Promise<void> {
+        this.logger.log('[Auth] Initializing AuthService...');
+
+        // 1. Initialize Google Auth on native platforms
         if (Capacitor.isNativePlatform()) {
             GoogleAuth.initialize({
                 clientId: environment.googleClientId,
@@ -105,8 +122,8 @@ export class AuthService {
             });
         }
 
-        // 🔥 Event-Driven Readiness (The Truth)
-        onAuthStateChanged(auth, user => { // Use singleton 'auth'
+        // 2. Setup Firebase Auth Listener
+        this.authUnsub = onAuthStateChanged(auth, user => {
             if (user) {
                 this.logger.log('[Auth] Firebase AUTH READY', { uid: user.uid });
                 this.firebaseReadySubject.next(true);
@@ -117,39 +134,32 @@ export class AuthService {
             }
         });
 
-        // 🛡️ Defensive Hardening (Enterprise Level)
-        // If auth user exists but event didn't fire (race condition), force it after 3s
-        setTimeout(() => {
-            if (!this.firebaseReadySubject.value && auth.currentUser) {
-                this.logger.warn('[Auth] Auth user present but event missed – correcting');
-                this.firebaseReadySubject.next(true);
-            }
-        }, 3000);
-
+        // 3. Restore Session
         const savedId = localStorage.getItem('user_id');
         if (savedId && savedId.trim()) {
             const norm = savedId.trim().toUpperCase();
             this.userIdSource.next(norm);
-            this.userBlockedAlertShown = false; // Reset on new user login
+            this.userBlockedAlertShown = false;
             this.initBlockedListener(norm);
 
-            // HF-8.10: Gate DI resolution by breaking the constructor block
-            setTimeout(() => {
-                this.signInToFirebase(norm);
-            }, 0);
+            // Proactively sign in to Firebase
+            await this.signInToFirebase(norm);
+
+            // Start proactive refresh loop
+            this.startRefreshTimer();
+        } else {
+            // No saved session, we are "ready" to show login screen
+            this.resolveAuthPromise();
         }
 
-        // v16.5: Gate Push Token Sync (Race Condition Fix)
-        // HF-8.10: Also deferred to ensure AuthService instance is stable in Injector
-        setTimeout(() => {
-            this.firebaseReady$
-                .pipe(filter(Boolean), take(1))
-                .subscribe({
-                    next: () => this.pushService.syncToken(),
-                    complete: () => this.logger.log('[Auth] Push token synced')
-                });
-        }, 0);
-
+        // 4. Trigger Push Sync (Non-blocking)
+        this.firebaseReady$
+            .pipe(filter(Boolean), take(1))
+            .subscribe(() => {
+                this.pushService.syncToken().catch((e: any) =>
+                    this.logger.error('[Auth] Initial Push Sync Failed', e)
+                );
+            });
     }
 
     private initBlockedListener(userId: string) {
@@ -214,7 +224,7 @@ export class AuthService {
     async getOrFetchContactSalt(userId: string): Promise<string | null> {
         try {
             // 1. Check Secure Storage
-            let salt = await this.secureStorage.getItem('contact_device_salt');
+            const salt = await this.secureStorage.getItem('contact_device_salt');
             if (salt) return salt;
 
             // 2. Fetch from Backend
@@ -242,6 +252,9 @@ export class AuthService {
         }
 
         localStorage.setItem('user_id', normalizedId);
+        // Clear nuke flag on successful session
+        localStorage.removeItem('vault_nuked');
+        localStorage.removeItem('vault_fail_count');
         // Cookie Migration: Tokens now invalid in LocalStorage - removed to enforce Cookie usage
         // if (token) localStorage.setItem('id_token', token);
         if (isProfileComplete) localStorage.setItem('is_profile_complete', '1');
@@ -255,6 +268,9 @@ export class AuthService {
         } catch (e) {
             console.error('Device Reg Failed', e);
         }
+
+        // Phase 4: Start refresh loop
+        this.startRefreshTimer();
 
         // HF-5A: Proactive Signal Registration
         try {
@@ -272,53 +288,116 @@ export class AuthService {
 
         // Force Push Registration / Sync
         // this.pushService.syncToken(); // Moved to signInToFirebase result
-        this.callService.init();
-
-        // Ensure Firebase Auth (device must be registered first)
-        this.signInToFirebase(normalizedId);
     }
 
-    async refreshToken(): Promise<string | null> {
-        const userId = localStorage.getItem('user_id');
-        // Cookie Migration: Refresh token read from Cookie by backend
-        const deviceUuid = localStorage.getItem('device_uuid');
+    private startRefreshTimer() {
+        if (this.refreshTimer) clearTimeout(this.refreshTimer);
 
-        if (!userId) return null;
+        // Check every 5 minutes
+        this.refreshTimer = setInterval(() => {
+            this.checkTokenExpiry();
+        }, 5 * 60 * 1000);
+
+        // Run immediately once
+        this.checkTokenExpiry();
+    }
+
+    public async checkTokenExpiry() {
+        const userId = localStorage.getItem('user_id');
+        if (!userId) {
+            if (this.refreshTimer) clearInterval(this.refreshTimer);
+            return;
+        }
+
+        // We check if the Firebase token is near expiry, or if our PHP session might be old.
+        // For simplicity in Phase 4, we'll just force a refresh if Firebase currentUser is missing or token is > 50 mins old.
+        const authInstance = auth;
+        if (!authInstance.currentUser) {
+            this.logger.log('[Auth] Proactive: No Firebase user, triggering refresh...');
+            this.refreshToken().catch(() => { });
+            return;
+        }
 
         try {
-            const res: any = await this.api.post('refresh_token.php', {
-                user_id: userId,
-                // refresh_token: refreshToken, // Backend reads cookie
-                device_uuid: deviceUuid
-            }).toPromise();
+            const tokenResult = await authInstance.currentUser.getIdTokenResult();
+            const issuedAt = new Date(tokenResult.issuedAtTime).getTime();
+            const now = Date.now();
+            const ageMinutes = (now - issuedAt) / 1000 / 60;
 
-            if (res && res.status === 'success') {
-                if (res.token) localStorage.setItem('auth_token', res.token);
-                return res.token;
+            if (ageMinutes > 45) { // Refresh if older than 45 mins (Firebase tokens last 60 mins)
+                this.logger.log('[Auth] Proactive: Token age > 45m, refreshing...', { ageMinutes });
+                this.refreshToken().catch(() => { });
             }
-        } catch (e: any) {
-            const errorBody = e?.error;
-            // HF-7.1 / HF-7.3: Handle Session Revocation & Fraud Detection
-            if (e?.status === 403 && (errorBody?.error === 'FRAUD_DETECTED' || errorBody?.error === 'SESSION_REVOKED')) {
-                this.logger.error("[Auth] Security Revocation Triggered", errorBody);
-                this.logout();
-                alert("Security Alert: Your session has been terminated. Please log in again.");
-                return null;
-            }
-
-            if (e?.status === 403 && errorBody?.status === 'blocked') {
-                if (!this.userBlockedAlertShown) {
-                    this.userBlockedAlertShown = true;
-                    this.logout();
-                    alert("This account has been blocked. Please contact support.");
-                }
-            } else if (e?.status === 403) {
-                // Device error or session issue — don't force logout
-                this.logger.warn('[Auth] 403 from refresh (device/session issue)', errorBody);
-            }
-            this.logger.error("Token Refresh Failed", e);
+        } catch (e) {
+            this.logger.error('[Auth] Failed to check token expiry', e);
         }
-        return null;
+    }
+
+    async refreshToken(): Promise<void> {
+        if (this.refreshInProgress) {
+            return this.refreshInProgress;
+        }
+
+        this.refreshInProgress = (async () => {
+            const userId = localStorage.getItem('user_id');
+            const deviceUuid = localStorage.getItem('device_uuid');
+
+            if (!userId) {
+                this.refreshInProgress = null;
+                return;
+            }
+
+            try {
+                this.logger.log('[Auth] Attempting token refresh...');
+                // Cookie Migration: Refresh token read from Cookie by backend
+                // withCredentials is CRITICAL for cookie exchange
+                const res: any = await firstValueFrom(
+                    this.api.post('refresh_token.php', {
+                        user_id: userId,
+                        device_uuid: deviceUuid
+                    }, false)
+                );
+
+                if (res && res.status === 'success') {
+                    // Update auth_token if provided as JTI/Fallback
+                    if (res.token) localStorage.setItem('auth_token', res.token);
+                    this.logger.log('[Auth] Token refreshed successfully');
+
+                    // Re-sync Firebase if token refreshed
+                    const userId = localStorage.getItem('user_id');
+                    if (userId) this.signInToFirebase(userId);
+                } else {
+                    throw new Error(res?.message || 'Refresh failed on server');
+                }
+            } catch (e: any) {
+                const errorBody = e?.error;
+                this.logger.error('[Auth] Token refresh EXCEPTION', e);
+
+                // HF-7.1 / HF-7.3: Handle Session Revocation & Fraud Detection
+                if (e?.status === 403 && (errorBody?.error === 'FRAUD_DETECTED' || errorBody?.error === 'SESSION_REVOKED')) {
+                    this.logger.error("[Auth] Security Revocation Triggered", errorBody);
+                    this.logout();
+                    alert("Security Alert: Your session has been terminated. Please log in again.");
+                    throw e;
+                }
+
+                if (e?.status === 403 && errorBody?.status === 'blocked') {
+                    if (!this.userBlockedAlertShown) {
+                        this.userBlockedAlertShown = true;
+                        this.logout();
+                        alert("This account has been blocked. Please contact support.");
+                    }
+                    throw e;
+                }
+
+                // Generic failure - let the interceptor handle it
+                throw e;
+            } finally {
+                this.refreshInProgress = null;
+            }
+        })();
+
+        return this.refreshInProgress;
     }
 
     private firebaseReadySubject = new BehaviorSubject<boolean>(false);
@@ -327,26 +406,11 @@ export class AuthService {
     async signInToFirebase(userId: string): Promise<void> {
         const authInstance = auth;
 
-        // 1. Race Condition Guard
+        // 1. Race Condition Guard (HF-Phase4)
         if (authInstance.currentUser) {
             this.logger.log('[Auth] Firebase ALREADY authenticated', { uid: authInstance.currentUser.uid });
-
-            try {
-                // 🔥 HF-Enterprise Fix: Ensure Backend PHP Session is alive even if Firebase is cached
-                await this.api.get('ping.php').toPromise();
-                this.logger.log('[Auth] Backend session confirmed (warm boot)');
-            } catch (e) {
-                this.logger.warn('[Auth] Warm boot backend session invalid, forcing re-auth');
-                await signOut(authInstance);
-                return this.signInToFirebase(userId);
-            }
-
-            // 🔥 HF-Race Fix: Unblock background services if session already exists AND backend matches
             this.resolveAuthPromise();
-
-            if (!this.firebaseReadySubject.value) {
-                // Wait for listener or the defensive timeout
-            }
+            this.firebaseReadySubject.next(true);
             return;
         }
 
@@ -574,7 +638,15 @@ export class AuthService {
 
         this.signOutGoogle();
         this.mediaService.clearCache('LOGOUT');
-        this.mediaService.clearCache('LOGOUT');
+
+        // Notify background services that the user logged out
+        this.logoutSubject.next();
+
+        if (this.refreshTimer) {
+            clearInterval(this.refreshTimer);
+            this.refreshTimer = null;
+        }
+
         localStorage.removeItem('user_id');
         localStorage.removeItem('id_token'); // Just in case
         localStorage.removeItem('is_profile_complete');
@@ -595,6 +667,7 @@ export class AuthService {
 
         // Reset the Auth Barrier so background tasks pause again
         this.authResolved = false;
+        this.authUnsub?.();
         this.authReadyPromise = new Promise<void>((resolve) => {
             this.authReadyResolver = resolve;
         });

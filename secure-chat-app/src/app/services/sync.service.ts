@@ -1,5 +1,5 @@
 import { Injectable, Injector } from '@angular/core';
-
+import { PluginListenerHandle } from '@capacitor/core';
 import { Network } from '@capacitor/network';
 import { StorageService } from './storage.service';
 import { ChatService } from './chat.service';
@@ -16,10 +16,17 @@ import { debounceTime } from 'rxjs/operators';
 export class SyncService {
 
     private isSyncing = false;
-    private syncInterval: any;
+    private startPromise: Promise<void> | null = null;
+    private networkListenerInitialized = false;
+    private networkListener?: PluginListenerHandle;
     private triggerSync$ = new Subject<void>();
 
-    private _auth: any = null;
+    // Lazy AuthService to break DI cycle (Signal-style boot fix)
+    private _authService: AuthService | null = null;
+    private get authService(): AuthService {
+        if (!this._authService) this._authService = this.injector.get(AuthService);
+        return this._authService;
+    }
 
     constructor(
         private storage: StorageService,
@@ -32,22 +39,34 @@ export class SyncService {
         this.triggerSync$.pipe(debounceTime(3000)).subscribe(() => {
             this.processOutbox();
         });
+
+        // HF-14.4: Listen to Auth Logout safely via orchestrator
+        // Deferred to avoid Injector.get(AuthService) during construction
+        setTimeout(() => {
+            this.authService.logout$.subscribe(() => {
+                this.logger.log('[SyncService] Auth logout detected. Resetting state.');
+                this.reset();
+            });
+        }, 0);
     }
 
-    private get authService(): any {
-        if (!this._auth) {
-            // Using require to ensure the file is loaded only once and type is preserved
-            const { AuthService } = require('./auth.service');
-            this._auth = this.injector.get(AuthService);
-        }
-        return this._auth;
-    }
+
 
     /**
      * HF-14.3: Standard Lifecycle Start
      * Ensures background processes only begin once security layers are unlocked.
      */
-    async start() {
+    start(): Promise<void> {
+        if (this.startPromise) {
+            this.logger.log('[SyncService] Initialization already in progress or completed. Skipping.');
+            return this.startPromise;
+        }
+
+        this.startPromise = this.performStart();
+        return this.startPromise;
+    }
+
+    private async performStart(): Promise<void> {
         this.logger.log('[SyncService] Waiting for security layers...');
 
         // Block until vault is ready and auth is initialized
@@ -56,7 +75,7 @@ export class SyncService {
 
         this.logger.log('[SyncService] Security layers READY. Initializing Sync lifecycle.');
 
-        this.initNetworkListener();
+        await this.initNetworkListener();
 
         // Initial Check
         const status = await Network.getStatus();
@@ -65,13 +84,41 @@ export class SyncService {
         }
     }
 
-    private initNetworkListener() {
-        Network.addListener('networkStatusChange', status => {
+    private async initNetworkListener() {
+        if (this.networkListenerInitialized) {
+            return;
+        }
+        this.networkListenerInitialized = true;
+
+        this.networkListener = await Network.addListener('networkStatusChange', status => {
             if (status.connected) {
                 this.logger.log('[SyncService][v14] Network restored. Debouncing sync...');
                 this.triggerSync$.next();
             }
         });
+    }
+
+    /**
+     * Clear the start promise so the service can boot again after logout.
+     * Also removes any active network listeners.
+     */
+    async reset() {
+        this.startPromise = null;
+        this.networkListenerInitialized = false; // Reset listener flag just in case
+
+        if (this.networkListener) {
+            await this.networkListener.remove();
+            this.networkListener = undefined;
+        }
+    }
+
+    /**
+     * Public method to allow manual triggering of the sync queue
+     * (e.g. immediately after a user sends a message instead of waiting for network bounce)
+     */
+    public triggerSync() {
+        this.logger.log('[SyncService] Manual queue flush triggered');
+        this.triggerSync$.next();
     }
 
     /**
@@ -92,10 +139,12 @@ export class SyncService {
 
             this.logger.log(`[SyncService][v14] Processing queue: ${queue.length} items`);
 
+            // Resolve ChatService outside loop to prevent repeated DI
+            const chatService = this.injector.get(ChatService);
+
             for (const item of queue) {
                 try {
                     // 1. Attempt Action (HF-8.36: Lazy Load ChatService)
-                    const chatService = this.injector.get(ChatService);
                     await chatService.retryOfflineAction(item.chat_id, item.action, item.payload);
 
 
@@ -104,7 +153,7 @@ export class SyncService {
 
                 } catch (err: any) {
                     // 3. Error Handling
-                    console.error(`[SyncService] Action ${item.id} failed:`, err);
+                    this.logger.error(`[SyncService] Action ${item.id} failed`, err);
 
                     // Detect Conflict (409)
                     if (err.status === 409 || err.message?.includes('Conflict')) {
@@ -112,16 +161,20 @@ export class SyncService {
                         if (resolution === 'keep_remote') {
                             await this.storage.removeFromOutbox(item.id); // Discard local
                         } else if (resolution === 'retry') {
-                            // Logic to "Force" or just retry? For now, we leave in queue to retry naturally
-                            // Ideally, we'd update the payload to 'force=true' if API supported it
-                            // or we just re-run loop
-                            // V14 Scope: Just retry (maybe next loop)
                             await this.storage.incrementOutboxRetry(item.id);
                         }
                     } else {
-                        // Standard Retry (Backoff logic could go here)
+                        // Standard Retry (Backoff logic)
                         this.logger.warn("OUTBOX_FLUSH_RETRY", { id: item.id, error: err.message });
                         await this.storage.incrementOutboxRetry(item.id);
+
+                        // Exponential backoff logic based on item's retry count
+                        const retries = item.retry_count || 1;
+                        const backoffSeconds = Math.min(30, Math.pow(2, retries));
+
+                        this.logger.log(`[SyncService] Applying backoff of ${backoffSeconds}s for item ${item.id}`);
+                        await new Promise(resolve => setTimeout(resolve, backoffSeconds * 1000));
+
                         // Break queue processing on generic error to preserve order
                         break;
                     }
