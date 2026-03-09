@@ -209,11 +209,12 @@ export class ContactResolverService {
     }
 
     /**
-     * SHA-256(salt + E.164 phone). If no salt available, falls back to SHA-256(phone).
-     * Never sends raw phone numbers to the server.
+     * SHA-256(cleaned_phone + salt). If no salt available, falls back to SHA-256(cleaned_phone).
+     * Must exactly match PHP backend: hash('sha256', preg_replace('/\D/', '', $phone) . $salt)
      */
     private async hashPhone(e164: string): Promise<string> {
-        const input = this.deviceSalt ? (this.deviceSalt + e164) : e164;
+        const cleanPhone = e164.replace(/\D/g, ''); // Strip '+' and any non-digits
+        const input = this.deviceSalt ? (cleanPhone + this.deviceSalt) : cleanPhone;
         const encoder = new TextEncoder();
         const data = encoder.encode(input);
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
