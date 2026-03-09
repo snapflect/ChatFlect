@@ -128,8 +128,8 @@ function handlePostKeys($userId, $conn)
         $updSpk->bind_param("si", $userId, $deviceId);
         $updSpk->execute();
 
-        // Insert new one
-        $insSpk = $conn->prepare("INSERT INTO signed_pre_keys (user_id, device_id, key_id, public_key, signature, is_active) VALUES (?, ?, ?, ?, ?, 1)");
+        // Insert new one (upsert to handle re-registration on resume)
+        $insSpk = $conn->prepare("INSERT INTO signed_pre_keys (user_id, device_id, key_id, public_key, signature, is_active) VALUES (?, ?, ?, ?, ?, 1) ON DUPLICATE KEY UPDATE public_key = VALUES(public_key), signature = VALUES(signature), is_active = 1");
         $insSpk->bind_param("siiss", $userId, $deviceId, $signedPreKey['keyId'], $signedPreKey['publicKey'], $signedPreKey['signature']);
         $insSpk->execute();
 

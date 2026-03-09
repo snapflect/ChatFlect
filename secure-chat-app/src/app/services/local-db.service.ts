@@ -211,17 +211,45 @@ export class LocalDbService {
                 return legacy.value;
             }
 
-            // 2. Hybrid Derivation Strategy (HF-2.1)
-            let masterSeed = (await SecureStoragePlugin.get({ key: 'sqlite_master_seed' }).catch(() => ({ value: null }))).value;
-            let deviceSalt = (await SecureStoragePlugin.get({ key: 'sqlite_device_salt' }).catch(() => ({ value: null }))).value;
+            // 2. Hybrid Derivation Strategy (HF-2.1) with Retry + Integrity
+            let masterSeed = await this.secureGetWithRetry('sqlite_master_seed');
+            let deviceSalt = await this.secureGetWithRetry('sqlite_device_salt');
+
+            const secretsShouldExist = localStorage.getItem('vault_secrets_exist') === 'true';
 
             if (!masterSeed || !deviceSalt) {
+                if (secretsShouldExist) {
+                    // Secrets SHOULD exist but Keystore returned null — data loss risk
+                    this.logger.error("[LocalDb] CRITICAL: Vault secrets exist (sentinel=true) but SecureStorage returned null. Possible Keystore corruption.");
+                    this.logger.error("[LocalDb] CRITICAL: Regenerating secrets will make the old database unreadable.");
+                }
+
                 this.logger.warn("[LocalDb] Hardware secrets missing. Generating new hardware-bound vault secrets...");
                 masterSeed = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
                 deviceSalt = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
 
                 await SecureStoragePlugin.set({ key: 'sqlite_master_seed', value: masterSeed });
                 await SecureStoragePlugin.set({ key: 'sqlite_device_salt', value: deviceSalt });
+
+                // Store sentinel + hash for integrity verification on future reads
+                localStorage.setItem('vault_secrets_exist', 'true');
+                const seedHash = await this.sha256(masterSeed);
+                localStorage.setItem('vault_seed_hash', seedHash);
+            } else {
+                // Integrity verification: check seed hash matches stored hash
+                const storedHash = localStorage.getItem('vault_seed_hash');
+                if (storedHash) {
+                    const currentHash = await this.sha256(masterSeed);
+                    if (currentHash !== storedHash) {
+                        this.logger.error("[LocalDb] CRITICAL: Master seed hash mismatch! Keystore may be corrupted or tampered.");
+                        throw new Error("VAULT_INTEGRITY_FAILURE: Master seed hash does not match stored hash.");
+                    }
+                } else {
+                    // First boot after upgrade — store hash for future verification
+                    const seedHash = await this.sha256(masterSeed);
+                    localStorage.setItem('vault_seed_hash', seedHash);
+                    localStorage.setItem('vault_secrets_exist', 'true');
+                }
             }
 
             const derived = await this.derivePassphrase(masterSeed, deviceSalt);
@@ -234,6 +262,35 @@ export class LocalDbService {
             this.logger.error("[LocalDb] Vault Access Failure - Hardware Lockout?", err);
             throw new Error("SECURE_VAULT_UNREACHABLE: Handset security module rejected request.");
         }
+    }
+
+    /**
+     * Retry SecureStoragePlugin.get() up to 3 times with 500ms delay.
+     * Handles transient Android Keystore failures.
+     */
+    private async secureGetWithRetry(key: string, maxRetries = 3): Promise<string | null> {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                const result = await SecureStoragePlugin.get({ key });
+                if (result?.value) return result.value;
+            } catch {
+                // Keystore read failure
+            }
+            if (attempt < maxRetries) {
+                await new Promise(r => setTimeout(r, 500));
+            }
+        }
+        return null;
+    }
+
+    /**
+     * SHA-256 hash for integrity verification of vault secrets.
+     */
+    private async sha256(input: string): Promise<string> {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(input);
+        const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+        return btoa(String.fromCharCode(...new Uint8Array(hashBuffer)));
     }
 
     private async derivePassphrase(seed: string, salt: string): Promise<string> {

@@ -8,7 +8,7 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { LoggingService } from './logging.service';
 import { CallService } from './call.service';
 import { getFirestore, collection, doc, onSnapshot, getDoc, setDoc, deleteDoc, Unsubscribe } from 'firebase/firestore';
-import { getAuth, signInWithCustomToken, signOut, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInWithCustomToken, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { initializeApp } from 'firebase/app';
 import { environment } from 'src/environments/environment';
 import { GoogleAuth } from '@codetrix-studio/capacitor-google-auth';
@@ -39,6 +39,10 @@ export class AuthService {
     private blockedUnsub?: Unsubscribe;
     private firebaseSigningIn = false;
     private authUnsub?: Unsubscribe;
+
+    // Session-Ready Barrier: only TRUE after Firebase signIn + backend ping.php cookie confirmed
+    private sessionReadySubject = new BehaviorSubject<boolean>(false);
+    public sessionReady$ = this.sessionReadySubject.asObservable();
 
     // 🔥 Auth State Barrier (HF-Race Fix)
     public authReadyPromise = new Promise<void>((resolve) => {
@@ -113,6 +117,13 @@ export class AuthService {
     public async initialize(): Promise<void> {
         this.logger.log('[Auth] Initializing AuthService...');
 
+        // 0. Persist Firebase auth state across WebView suspension
+        try {
+            await setPersistence(auth, browserLocalPersistence);
+        } catch (e) {
+            this.logger.warn('[Auth] setPersistence failed (non-fatal)', e);
+        }
+
         // 1. Initialize Google Auth on native platforms
         if (Capacitor.isNativePlatform()) {
             GoogleAuth.initialize({
@@ -143,7 +154,13 @@ export class AuthService {
             this.initBlockedListener(norm);
 
             // Proactively sign in to Firebase
-            await this.signInToFirebase(norm);
+            try {
+                await this.signInToFirebase(norm);
+            } catch (e) {
+                this.logger.warn('[Auth] signInToFirebase failed during init, resolving auth anyway', e);
+            }
+            // Always resolve auth promise so guards/services don't hang
+            this.resolveAuthPromise();
 
             // Start proactive refresh loop
             this.startRefreshTimer();
@@ -445,8 +462,12 @@ export class AuthService {
                 try {
                     await this.api.get('ping.php').toPromise();
                     this.logger.log("[Auth] Backend session confirmed via ping.");
+                    // Session fully ready: Firebase signed in + backend cookie confirmed
+                    this.sessionReadySubject.next(true);
                 } catch (pe) {
                     this.logger.warn("[Auth] Backend session ping failed/slow, resolving anyway to avoid hang", pe);
+                    // Still mark session ready — the cookie may be valid even if ping failed
+                    this.sessionReadySubject.next(true);
                 }
 
                 // 🔥 HF-Race Fix: Unblock background services!
@@ -663,6 +684,7 @@ export class AuthService {
 
         // 🔥 Robust Subject Reset
         this.firebaseReadySubject.next(false);
+        this.sessionReadySubject.next(false);
         this.firebaseSigningIn = false;
 
         // Reset the Auth Barrier so background tasks pause again

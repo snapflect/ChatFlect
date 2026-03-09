@@ -6,10 +6,11 @@ import {
     HttpInterceptor,
     HttpErrorResponse
 } from '@angular/common/http';
-import { Observable, throwError, from } from 'rxjs';
-import { catchError, switchMap } from 'rxjs/operators';
+import { Observable, throwError, from, timer } from 'rxjs';
+import { catchError, switchMap, timeout } from 'rxjs/operators';
 import { AuthService } from '../services/auth.service';
 import { LoggingService } from '../services/logging.service';
+import { environment } from 'src/environments/environment';
 
 @Injectable()
 export class AuthInterceptor implements HttpInterceptor {
@@ -20,9 +21,17 @@ export class AuthInterceptor implements HttpInterceptor {
     ) { }
 
     intercept(request: HttpRequest<unknown>, next: HttpHandler): Observable<HttpEvent<unknown>> {
+        // Skip interception for non-API URLs (Firebase, Google, etc.)
+        if (!request.url.includes(environment.apiUrl)) {
+            return next.handle(request);
+        }
+
         const userId = localStorage.getItem('user_id');
-        // Cookie Migration: Stop reading token from LocalStorage
-        // const idToken = localStorage.getItem('id_token'); 
+
+        // Skip 401 handling if user isn't logged in (pre-auth requests are expected to 401)
+        if (!userId) {
+            return next.handle(request);
+        }
 
         const authReq = this.addAuthHeader(request, userId, null);
 
@@ -38,8 +47,9 @@ export class AuthInterceptor implements HttpInterceptor {
                         return throwError(() => error);
                     }
 
-                    // Mutex implementation in AuthService ensures only one refresh call
+                    // Mutex implementation with 5s timeout to prevent hanging
                     return from(authService.refreshToken()).pipe(
+                        timeout(5000),
                         switchMap(() => {
                             // Retry with incremented attempt header
                             const retryReq = request.clone({
@@ -50,8 +60,21 @@ export class AuthInterceptor implements HttpInterceptor {
                             return next.handle(retryReq);
                         }),
                         catchError(refreshErr => {
-                            this.logger.error('[AuthInterceptor] Refresh failed after mutex', refreshErr);
-                            authService.logout();
+                            // Only logout on explicit auth rejection from server
+                            const status = refreshErr?.status || refreshErr?.error?.status;
+                            if (status === 401 || status === 403) {
+                                this.logger.error('[AuthInterceptor] Server rejected refresh (401/403). Logging out.', refreshErr);
+                                authService.logout();
+                            } else if (refreshErr?.name === 'TimeoutError') {
+                                this.logger.warn('[AuthInterceptor] Refresh timed out (5s). Will retry on next request.');
+                            } else {
+                                // Network error (status 0), server error (5xx), or timeout
+                                // Do NOT logout — transient issue, just propagate the error
+                                this.logger.warn('[AuthInterceptor] Refresh failed (non-auth). Not logging out.', {
+                                    status: refreshErr?.status,
+                                    name: refreshErr?.name
+                                });
+                            }
                             return throwError(() => refreshErr);
                         })
                     );
@@ -67,7 +90,6 @@ export class AuthInterceptor implements HttpInterceptor {
                             alert("This account has been blocked. Please contact support.");
                         }
                     } else {
-                        // Other 403s (Device Binding etc) are handled in background or ignored here
                         console.warn('[AuthInterceptor] 403 Forbidden (Not a block)', errorBody);
                     }
                 }

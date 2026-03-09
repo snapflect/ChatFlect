@@ -3,6 +3,8 @@ import { LocalDbService } from './local-db.service';
 import { LoggingService } from './logging.service';
 import { HttpClient } from '@angular/common/http';
 import { environment } from 'src/environments/environment';
+import { firstValueFrom } from 'rxjs';
+import { filter, take } from 'rxjs/operators';
 import { App } from '@capacitor/app';
 import { Network } from '@capacitor/network';
 import { AuthService } from './auth.service';
@@ -22,6 +24,8 @@ export class MessageAckService {
     private readonly MAX_POLL_INTERVAL = 600000; // 10m
     private currentPollInterval = 45000;
     private idleCounter = 0;
+    private pollGeneration = 0; // Incremented on each start() — old loops self-terminate
+    private startedAt = 0; // Timestamp of last start() for boot suppression
     private _authService: AuthService | null = null;
     private get authService(): AuthService {
         if (!this._authService) {
@@ -52,18 +56,31 @@ export class MessageAckService {
     }
 
     start() {
-        if (this.isPolling) return;
+        // Terminate any existing poll loop by incrementing generation
+        this.pollGeneration++;
         this.isPolling = true;
+        this.startedAt = Date.now();
         this.resetPollSpeed();
-        this.poll();
+        this.poll(this.pollGeneration);
     }
 
-    private async poll() {
-        if (!this.isPolling) return;
+    private async poll(generation: number) {
+        // Self-terminate if this is a stale generation
+        if (generation !== this.pollGeneration || !this.isPolling) return;
 
-        // HF-Race Fix: Gate background loops at the absolute root of execution
-        await this.localDb.readyPromise;
-        await this.authService.authReadyPromise;
+        // Gate on backend session readiness (Firebase signIn + cookie confirmed)
+        try {
+            await this.localDb.readyPromise;
+            await firstValueFrom(
+                this.authService.sessionReady$.pipe(filter(Boolean), take(1))
+            );
+        } catch {
+            // sessionReady$ not available yet — retry after interval
+            if (generation === this.pollGeneration) {
+                setTimeout(() => this.poll(generation), this.currentPollInterval);
+            }
+            return;
+        }
 
         try {
             const hasWork = await this.syncReceipts();
@@ -88,7 +105,7 @@ export class MessageAckService {
             }
         }
 
-        setTimeout(() => this.poll(), this.currentPollInterval);
+        setTimeout(() => this.poll(generation), this.currentPollInterval);
     }
 
     /**
@@ -108,9 +125,15 @@ export class MessageAckService {
         const net = await Network.getStatus();
         if (!net.connected) return false;
 
-        // HF-Race Fix: Gate network pulls behind Vault readiness AND Auth readiness
         await this.localDb.readyPromise;
-        await this.authService.authReadyPromise;
+        // Gate on session readiness — no HTTP calls until cookie is confirmed
+        try {
+            await firstValueFrom(
+                this.authService.sessionReady$.pipe(filter(Boolean), take(1))
+            );
+        } catch {
+            return false;
+        }
 
         try {
             const response: any = await this.http.get(`${environment.apiUrl}/v4/messages/pull.php`, { withCredentials: true }).toPromise();
@@ -129,8 +152,11 @@ export class MessageAckService {
             }
             return false;
         } catch (err: any) {
-            // HF-8.37: Treat empty/cancelled/locked as DEBUG, not WARN
-            if (err.status === 404 || err.status === 204 || err.status === 0) {
+            // Suppress 401s during first 10s after start (boot transient)
+            const isBootWindow = (Date.now() - this.startedAt) < 10000;
+            if (err.status === 401 && isBootWindow) {
+                this.logger.log('[MessageAck] Auth not ready yet (boot window), will retry');
+            } else if (err.status === 404 || err.status === 204 || err.status === 0) {
                 this.logger.log('[MessageAck] No receipts pending or poll deferred');
             } else {
                 this.logger.warn('[MessageAck] Failed to pull receipts', err);
