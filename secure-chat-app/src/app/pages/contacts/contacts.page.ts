@@ -1,10 +1,11 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Router } from '@angular/router';
 import { ToastController, AlertController } from '@ionic/angular';
-import { ContactResolverService } from 'src/app/services/contact-resolver.service';
+import { ContactResolverService, ResolvedContact } from 'src/app/services/contact-resolver.service';
 import { ChatService } from 'src/app/services/chat.service';
 import { Share } from '@capacitor/share';
 import { LoggingService } from 'src/app/services/logging.service';
+import { Subject, takeUntil } from 'rxjs';
 
 @Component({
   selector: 'app-contacts',
@@ -12,16 +13,18 @@ import { LoggingService } from 'src/app/services/logging.service';
   styleUrls: ['./contacts.page.scss'],
   standalone: false
 })
+export class ContactsPage implements OnInit, OnDestroy {
+  registeredContacts: ResolvedContact[] = [];
+  unregisteredContacts: ResolvedContact[] = [];
 
+  // Display lists (filtered by search)
+  groupedRegistered: { letter: string, contacts: ResolvedContact[] }[] = [];
 
-// ...
-
-export class ContactsPage implements OnInit {
-  contacts: any[] = [];
-  groupedContacts: { letter: string, contacts: any[] }[] = [];
   globalResults: any[] = [];
   searchQuery: string = '';
   isSearchingGlobally = false;
+
+  private destroy$ = new Subject<void>();
 
   constructor(
     private contactResolver: ContactResolverService,
@@ -34,6 +37,20 @@ export class ContactsPage implements OnInit {
 
   ngOnInit() {
     this.loadContacts();
+
+    // Listen to background sync completions
+    this.contactResolver.isSyncing$
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(isSyncing => {
+        if (!isSyncing) {
+          this.refreshFromLocalDB();
+        }
+      });
+  }
+
+  ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   async loadContacts(event?: any) {
@@ -41,57 +58,29 @@ export class ContactsPage implements OnInit {
 
     try {
       // 1. Fetch from Local SQLite (Instant)
-      this.contacts = await this.contactResolver.getResolvedContacts();
-      this.updateGroupedContacts();
+      await this.refreshFromLocalDB();
 
       // 2. Background Sync (Throttled)
-      this.contactResolver.syncContacts().then(async () => {
-        // Re-load if sync updated something
-        this.contacts = await this.contactResolver.getResolvedContacts();
-        this.updateGroupedContacts();
-      });
+      // Pass false to respect 12h throttling, but pull-to-refresh (event exists) forces sync
+      this.contactResolver.syncContacts(!!event);
 
     } catch (e) {
-      this.logger.error("Sync failed", e);
+      this.logger.error("Load failed", e);
     } finally {
       if (event) event.target.complete();
     }
   }
 
-  updateGroupedContacts() {
-    let filtered = this.contacts;
-
-    // Search Filter
-    if (this.searchQuery && this.searchQuery.trim() !== '') {
-      const q = this.searchQuery.toLowerCase();
-      filtered = filtered.filter(c =>
-        (c.displayName && c.displayName.toLowerCase().includes(q)) ||
-        (c.phone_number && c.phone_number.includes(q)) ||
-        (c.short_note && c.short_note.toLowerCase().includes(q))
-      );
-    }
-
-    // Sort Alphabetically
-    filtered.sort((a, b) => (a.displayName || '').localeCompare((b.displayName || ''), undefined, { sensitivity: 'base' }));
-
-    // Group by First Letter
-    const groups: { [key: string]: any[] } = {};
-    filtered.forEach(c => {
-      const letter = (c.displayName || '#').charAt(0).toUpperCase();
-      const key = /[A-Z]/.test(letter) ? letter : '#';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(c);
-    });
-
-    this.groupedContacts = Object.keys(groups).sort().map(letter => ({
-      letter,
-      contacts: groups[letter]
-    }));
+  private async refreshFromLocalDB() {
+    const result = await this.contactResolver.getResolvedContacts();
+    this.registeredContacts = result.registered;
+    this.unregisteredContacts = result.unregistered;
+    this.applySearchFilter();
   }
 
   onSearchChange(event: any) {
     this.searchQuery = event.detail.value;
-    this.updateGroupedContacts();
+    this.applySearchFilter();
 
     if (this.searchQuery && this.searchQuery.length > 3) {
       this.globalSearch();
@@ -100,37 +89,67 @@ export class ContactsPage implements OnInit {
     }
   }
 
-  async globalSearch() {
-    this.isSearchingGlobally = true;
-    try {
-      const results: any = await this.contactResolver.searchGlobal(this.searchQuery);
-      // Filter out people already in my contacts
-      this.globalResults = results.filter((r: any) =>
-        !this.contacts.some(c => c.user_id === r.user_id) &&
-        r.user_id !== localStorage.getItem('user_id')
-      );
-    } catch (e) {
-      this.logger.error("Global Search Error", e);
-    } finally {
-      this.isSearchingGlobally = false;
+  private applySearchFilter() {
+    let filteredReg = this.registeredContacts;
+    let filteredUnreg = this.unregisteredContacts;
+
+    if (this.searchQuery && this.searchQuery.trim() !== '') {
+      const q = this.searchQuery.toLowerCase();
+
+      const matchFn = (c: ResolvedContact) =>
+        (c.display_name && c.display_name.toLowerCase().includes(q)) ||
+        (c.server_name && c.server_name.toLowerCase().includes(q)) ||
+        (c.phone_last4 && c.phone_last4.includes(q)) ||
+        (c.phone_e164 && c.phone_e164.includes(q));
+
+      filteredReg = filteredReg.filter(matchFn);
+      filteredUnreg = filteredUnreg.filter(matchFn);
     }
+
+    // Update Unregistered list (simple list, already sorted)
+    this.unregisteredContacts = filteredUnreg;
+
+    // Update Registered grouped list
+    this.groupRegisteredContacts(filteredReg);
   }
 
-  async addContact() {
+  private groupRegisteredContacts(filtered: ResolvedContact[]) {
+    const groups: { [key: string]: ResolvedContact[] } = {};
+
+    filtered.forEach(c => {
+      const letter = (c.display_name || '#').charAt(0).toUpperCase();
+      const key = /[A-Z]/.test(letter) ? letter : '#';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(c);
+    });
+
+    this.groupedRegistered = Object.keys(groups).sort().map(letter => ({
+      letter,
+      contacts: groups[letter]
+    }));
+  }
+
+  async inviteContact(contact: ResolvedContact) {
+    const defaultMsg = `Hey ${contact.display_name}! Let's chat securely on ChatFlect. Download here: https://snapflect.com/download`;
+
     const alert = await this.alertCtrl.create({
-      header: 'New Contact',
-      message: 'Enter phone number (with country code):',
+      header: `Invite ${contact.display_name}`,
+      message: 'Customize your invitation message:',
       inputs: [
-        { name: 'name', type: 'text', placeholder: 'Name (Optional)' },
-        { name: 'phone', type: 'tel', placeholder: '+1234567890' }
+        {
+          name: 'message',
+          type: 'textarea',
+          value: defaultMsg,
+          attributes: { rows: 4 }
+        }
       ],
       buttons: [
         { text: 'Cancel', role: 'cancel' },
         {
-          text: 'Add & Chat',
+          text: 'Send Invite',
           handler: async (data) => {
-            if (data.phone) {
-              this.findAndChat(data.phone);
+            if (data.message) {
+              await this.shareInvite(data.message, contact.phone_e164);
             }
           }
         }
@@ -139,47 +158,43 @@ export class ContactsPage implements OnInit {
     await alert.present();
   }
 
-  async findAndChat(phone: string) {
+  private async shareInvite(message: string, phoneE164: string | null) {
     try {
-      // v2.3 Flow: We don't have a direct "lookup" endpoint for privacy.
-      // We usually sync the address book and then open.
-      // For a one-off "New Message", we'd need a backend lookup by SHA256.
-      // Since the backend 'contacts/map.php' handles batches, we'll use it.
-      const t = await this.toast.create({ message: 'Searching...', duration: 1000 });
-      t.present();
-
-      // Temporary implementation: Use resolver sync logic for this number
-      // In a full app, we'd have a specific lookup endpoint.
-      this.router.navigate(['/home']); // Redir for now as placeholder
-    } catch (e) {
-      this.logger.error("Error finding contact", e);
-    }
-  }
-
-  async inviteFriend() {
-    try {
-      const myId = localStorage.getItem('user_id');
-      const link = `https://snapflect.com/?ref=${myId}`; // Generalized Invite Link
-
       await Share.share({
         title: 'Join me on ChatFlect!',
-        text: 'Let\'s chat securely! Download ChatFlect here: ',
-        url: link,
-        dialogTitle: 'Invite Friends'
+        text: message,
+        dialogTitle: 'Send Invitation'
       });
     } catch (e) {
-      if ((e as any).message !== 'Share canceled') { // Ignore user cancellation logic
-        this.logger.error("Share failed", e);
+      if ((e as any).message !== 'Share canceled') {
+        this.logger.error("Share invite failed", e);
       }
     }
   }
 
+  async globalSearch() {
+    this.isSearchingGlobally = true;
+    try {
+      const results: any = await this.contactResolver.searchGlobal(this.searchQuery);
+      const myId = localStorage.getItem('user_id');
+
+      // Filter out people already in my registered contacts and myself
+      this.globalResults = results.filter((r: any) =>
+        !this.registeredContacts.some(c => c.user_id === r.user_id) &&
+        r.user_id !== myId
+      );
+    } catch (e) {
+      this.logger.error("Global Search Error", e);
+    } finally {
+      this.isSearchingGlobally = false;
+    }
+  }
+
   async startChat(contact: any) {
-    if (!contact.user_id && !contact.id) return;
-    const targetId = contact.user_id || contact.id; // API returns user_id, fallback to id
+    if (!contact.user_id) return;
 
     try {
-      const chatId = await this.chatService.getOrCreateChat(targetId);
+      const chatId = await this.chatService.getOrCreateChat(contact.user_id);
       this.router.navigate(['/chat-detail', chatId]);
     } catch (e: any) {
       this.logger.error("Chat Init Error", e);

@@ -56,7 +56,7 @@ export class ArchivedChatsPage implements OnInit, OnDestroy {
     this.isLoading = true;
 
     try {
-      const resolvedContacts = await this.contactResolver.getResolvedContacts();
+      const resolvedContacts = await this.contactResolver.getAllResolvedContactsAsArray();
 
       this.chatService.getMyChats().pipe(take(1)).subscribe(async (initialChats: any[]) => {
         const chatIds = initialChats.map(c => c.id);

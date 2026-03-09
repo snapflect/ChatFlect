@@ -24,12 +24,12 @@ export class ContactPickerModalPage implements OnInit {
 
   async loadContacts() {
     try {
-      this.contacts = await this.contactResolver.getResolvedContacts();
+      this.contacts = await this.contactResolver.getAllResolvedContactsAsArray();
       this.updateGroupedContacts();
 
       // Trigger background refresh (throttled)
       this.contactResolver.syncContacts().then(async () => {
-        this.contacts = await this.contactResolver.getResolvedContacts();
+        this.contacts = await this.contactResolver.getAllResolvedContactsAsArray();
         this.updateGroupedContacts();
       });
     } catch (e) {
@@ -43,16 +43,17 @@ export class ContactPickerModalPage implements OnInit {
     if (this.searchQuery && this.searchQuery.trim() !== '') {
       const q = this.searchQuery.toLowerCase();
       filtered = filtered.filter(c =>
-        (c.displayName && c.displayName.toLowerCase().includes(q)) ||
-        (c.phone_number && c.phone_number.includes(q))
+        (c.display_name && c.display_name.toLowerCase().includes(q)) ||
+        (c.phone_last4 && c.phone_last4.includes(q)) ||
+        (c.phone_e164 && c.phone_e164.includes(q))
       );
     }
 
-    filtered.sort((a, b) => (a.displayName || '').localeCompare((b.displayName || ''), undefined, { sensitivity: 'base' }));
+    filtered.sort((a, b) => (a.display_name || '').localeCompare((b.display_name || ''), undefined, { sensitivity: 'base' }));
 
     const groups: { [key: string]: any[] } = {};
     filtered.forEach(c => {
-      const letter = (c.displayName || '#').charAt(0).toUpperCase();
+      const letter = (c.display_name || '#').charAt(0).toUpperCase();
       const key = /[A-Z]/.test(letter) ? letter : '#';
       if (!groups[key]) groups[key] = [];
       groups[key].push(c);

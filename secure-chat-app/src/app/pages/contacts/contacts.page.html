@@ -23,48 +23,57 @@
   </ion-refresher>
 
   <div class="ion-padding-top">
-    <!-- Actions -->
-    <ion-list lines="none" class="bg-transparent actions-list">
-      <ion-item button (click)="addContact()" class="contact-item">
-        <ion-avatar slot="start" class="contact-avatar add-avatar">
-          <ion-icon name="person-add" color="light"></ion-icon>
-        </ion-avatar>
-        <ion-label>
-          <h2 class="contact-name">New Contact</h2>
-        </ion-label>
-      </ion-item>
-
-      <ion-item button (click)="inviteFriend()" class="contact-item">
-        <ion-avatar slot="start" class="contact-avatar invite-avatar">
-          <ion-icon name="share-social" color="light"></ion-icon>
-        </ion-avatar>
-        <ion-label>
-          <h2 class="contact-name">Invite Friends</h2>
-        </ion-label>
-      </ion-item>
-    </ion-list>
 
     <!-- Empty State -->
-    <div *ngIf="groupedContacts.length === 0" class="empty-state ion-text-center ion-padding">
+    <div *ngIf="groupedRegistered.length === 0 && unregisteredContacts.length === 0 && globalResults.length === 0"
+      class="empty-state ion-text-center ion-padding">
       <p class="text-muted">No contacts found.</p>
     </div>
 
-    <!-- Grouped Contacts -->
-    <ion-item-group *ngFor="let group of groupedContacts">
-      <ion-item-divider sticky class="group-header">
-        <ion-label>{{ group.letter }}</ion-label>
-      </ion-item-divider>
+    <!-- Contacts on ChatFlect (Registered) -->
+    <div *ngIf="groupedRegistered.length > 0">
+      <ion-list-header>
+        <ion-label color="secondary">Contacts on ChatFlect</ion-label>
+        <ion-badge color="tertiary" slot="end">{{ registeredContacts.length }}</ion-badge>
+      </ion-list-header>
 
-      <ion-item *ngFor="let c of group.contacts" button (click)="startChat(c)" class="contact-item">
-        <ion-avatar slot="start" class="contact-avatar">
-          <img [appSecureSrc]="c.photo_url" />
+      <ion-item-group *ngFor="let group of groupedRegistered">
+        <ion-item-divider sticky class="group-header">
+          <ion-label>{{ group.letter }}</ion-label>
+        </ion-item-divider>
+
+        <ion-item *ngFor="let c of group.contacts" button (click)="startChat(c)" class="contact-item">
+          <ion-avatar slot="start" class="contact-avatar">
+            <img [appSecureSrc]="c.photo_url" />
+          </ion-avatar>
+          <ion-label>
+            <h2 class="contact-name">{{ c.display_name }}</h2>
+            <p class="contact-note">{{ c.short_note || 'Available' }}</p>
+          </ion-label>
+        </ion-item>
+      </ion-item-group>
+    </div>
+
+    <!-- Invite to ChatFlect (Unregistered) -->
+    <div *ngIf="unregisteredContacts.length > 0" class="ion-margin-top anim-fade-in">
+      <ion-list-header>
+        <ion-label color="medium">Invite to ChatFlect</ion-label>
+        <ion-badge color="medium" slot="end">{{ unregisteredContacts.length }}</ion-badge>
+      </ion-list-header>
+
+      <ion-item *ngFor="let c of unregisteredContacts" class="contact-item invite-item">
+        <ion-avatar slot="start" class="contact-avatar placeholder-avatar">
+          <ion-icon name="person-outline" color="medium"></ion-icon>
         </ion-avatar>
         <ion-label>
-          <h2 class="contact-name">{{ c.displayName }}</h2>
-          <p class="contact-number">{{ c.short_note || c.phone_number }}</p>
+          <h2 class="contact-name text-muted">{{ c.display_name }}</h2>
+          <p class="contact-number text-muted" *ngIf="c.phone_last4">•••• {{ c.phone_last4 }}</p>
         </ion-label>
+        <ion-button slot="end" fill="outline" shape="round" color="secondary" size="small" (click)="inviteContact(c)">
+          Invite
+        </ion-button>
       </ion-item>
-    </ion-item-group>
+    </div>
 
     <!-- Global Results (Email Search) -->
     <div *ngIf="globalResults.length > 0" class="ion-margin-top anim-fade-in">
@@ -86,29 +95,3 @@
     </div>
   </div>
 </ion-content>
-
-<style>
-  .add-avatar,
-  .invite-avatar {
-    background: var(--ion-color-secondary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .invite-avatar {
-    background: var(--ion-color-tertiary);
-  }
-
-  .group-header {
-    --background: transparent;
-    --color: var(--ion-color-medium);
-    font-weight: 600;
-    font-size: 0.9rem;
-    margin-top: 10px;
-  }
-
-  .actions-list {
-    margin-bottom: 0px;
-  }
-</style>

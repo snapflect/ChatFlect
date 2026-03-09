@@ -35,7 +35,7 @@ export class ForwardModalPage implements OnInit {
 
     private async resolveChatInfos() {
         // v2.3: Load all resolved contacts once to avoid multiple DB hits
-        const resolvedContacts = await this.contactResolver.getResolvedContacts();
+        const resolvedContacts = await this.contactResolver.getAllResolvedContactsAsArray();
 
         for (const chat of this.chats) {
             if (chat.isGroup) {

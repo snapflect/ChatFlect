@@ -514,12 +514,15 @@ export class LocalDbService {
             );
             -- 9. Local Contacts (Phase 3 Product Unlock)
             CREATE TABLE IF NOT EXISTS local_contacts (
-                hash TEXT PRIMARY KEY, -- SHA-256(E164)
-                user_id TEXT, -- Resolved if available
-                display_name TEXT, -- Local name from device
+                hash TEXT PRIMARY KEY, -- SHA-256(salt + E164)
+                user_id TEXT, -- Resolved if on ChatFlect
+                display_name TEXT, -- Local name from device address book
+                server_name TEXT, -- first_name from backend (fallback)
                 phone_last4 TEXT, -- For UI display only
+                phone_e164 TEXT, -- Full E.164 for invite SMS (local only, never sent to server)
                 status TEXT DEFAULT 'invite', -- 'on_chatflect', 'invite'
                 photo_url TEXT,
+                short_note TEXT, -- User's status/about from server
                 last_synced_at INTEGER
             );
 

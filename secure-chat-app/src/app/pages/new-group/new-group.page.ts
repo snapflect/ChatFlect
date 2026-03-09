@@ -36,7 +36,7 @@ export class NewGroupPage implements OnInit {
   }
 
   async loadContacts() {
-    this.contacts = await this.contactResolver.getResolvedContacts();
+    this.contacts = await this.contactResolver.getAllResolvedContactsAsArray();
     // Filter only those already on ChatFlect for group creation
     this.contacts = this.contacts.filter(c => c.status === 'on_chatflect');
   }

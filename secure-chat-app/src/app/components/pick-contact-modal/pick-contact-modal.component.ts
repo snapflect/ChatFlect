@@ -25,7 +25,7 @@ export class PickContactModalComponent implements OnInit {
     }
 
     async loadContacts() {
-        const all = await this.contactResolver.getResolvedContacts();
+        const all = await this.contactResolver.getAllResolvedContactsAsArray();
         // Filter out already in group and only those on ChatFlect
         this.contacts = all.filter((c: any) =>
             !this.excludeIds.includes(String(c.user_id)) &&
