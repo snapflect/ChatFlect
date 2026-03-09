@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component } from '@angular/core';
 import { BackupService } from '../../services/backup.service';
 import { ToastController, AlertController, LoadingController } from '@ionic/angular';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -9,7 +9,7 @@ import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
     styleUrls: ['./backup.page.scss'],
     standalone: false
 })
-export class BackupPage implements OnInit {
+export class BackupPage {
 
     constructor(
         private backupService: BackupService,
@@ -18,8 +18,6 @@ export class BackupPage implements OnInit {
         private loadingCtrl: LoadingController
     ) { }
 
-    ngOnInit() {
-    }
 
     async createBackup() {
         const alert = await this.alertCtrl.create({

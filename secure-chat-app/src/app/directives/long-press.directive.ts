@@ -2,7 +2,7 @@ import { Directive, ElementRef, EventEmitter, HostListener, OnDestroy, Output } 
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 
 @Directive({
-    selector: '[longPress]',
+    selector: '[appLongPress]',
     standalone: false
 })
 export class LongPressDirective implements OnDestroy {

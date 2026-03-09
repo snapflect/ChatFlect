@@ -27,7 +27,7 @@
 
       <ion-item *ngFor="let c of group.contacts" button (click)="selectContact(c)" class="contact-item">
         <ion-avatar slot="start" class="contact-avatar">
-          <img [secureSrc]="c.photo_url || c.photo" onerror="this.src='assets/user.png'" />
+          <img [appSecureSrc]="c.photo_url || c.photo" onerror="this.src='assets/user.png'" />
         </ion-avatar>
         <ion-label>
           <h2 class="contact-name">{{ c.displayName }}</h2>

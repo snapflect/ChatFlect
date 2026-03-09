@@ -16,7 +16,7 @@
     <div slot="start" class="avatar-wrapper">
       <div [class.ring-container]="myStatus" [class.ring-active]="myStatus">
         <ion-avatar>
-          <img [secureSrc]="getFirstMediaUrl(myStatus) || myProfilePic" />
+          <img [appSecureSrc]="getFirstMediaUrl(myStatus) || myProfilePic" />
         </ion-avatar>
       </div>
 
@@ -48,7 +48,7 @@
         <div slot="start" class="ring-container" [style.background]="getRingStyle(s)">
           <div class="inner-ring-bg">
             <ion-avatar class="status-ring">
-              <img [secureSrc]="s.avatar" />
+              <img [appSecureSrc]="s.avatar" />
             </ion-avatar>
           </div>
         </div>
@@ -71,7 +71,7 @@
         <div slot="start" class="ring-container" [style.background]="getRingStyle(s)">
           <div class="inner-ring-bg">
             <ion-avatar class="status-ring">
-              <img [secureSrc]="s.avatar" />
+              <img [appSecureSrc]="s.avatar" />
             </ion-avatar>
           </div>
         </div>
@@ -93,7 +93,7 @@
       <ion-item *ngFor="let s of mutedUpdates" (click)="viewStatus(s)" lines="none" class="status-item muted">
         <div slot="start" class="ring-container ring-muted">
           <ion-avatar class="status-ring">
-            <img [secureSrc]="s.avatar" />
+            <img [appSecureSrc]="s.avatar" />
           </ion-avatar>
         </div>
         <ion-label>

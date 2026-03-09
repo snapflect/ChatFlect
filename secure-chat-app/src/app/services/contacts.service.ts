@@ -19,7 +19,7 @@ export class ContactsService {
     ) {
         try {
             this.db = getFirestore();
-        } catch { }
+        } catch { /* firestore init failed */ }
     }
 
     /* ================================
@@ -133,14 +133,17 @@ export class ContactsService {
             batches.push(phones.slice(i, i + batchSize));
         }
 
-        console.log(`[ContactsDebug] Syncing ${phones.length} contacts in ${batches.length} batches...`);
+        console.log(`[ContactsDebug] Syncing ${phones.length} contacts in ${batches.length} batches (ZK-S) ...`);
 
         let mergedResults: any[] = [];
 
         for (const batch of batches) {
             try {
+                // ZK-S: Hash before sending
+                const hashes = await Promise.all(batch.map(n => this.hashPhone(n)));
+
                 const res = await this.api
-                    .post('contacts.php', { phone_numbers: batch })
+                    .post('contacts.php', { phone_hashes: hashes })
                     .toPromise();
 
                 if (Array.isArray(res)) {
@@ -157,6 +160,28 @@ export class ContactsService {
         console.log(`[ContactsDebug] Total Unique Matches: ${unique.length}`);
 
         return unique;
+    }
+
+    /**
+     * ZK-S: Privacy Normalization & Hashing (Phase 4)
+     */
+    private normalize(phone: string): string {
+        // Strip non-digits
+        const clean = phone.replace(/\D/g, '');
+        // For matching, we use the last 10 digits as a common denominator
+        // but for ZK-S, a fixed normalization (like E164) is better.
+        // User suggested E164-ish logic.
+        return clean;
+    }
+
+    private async hashPhone(phone: string): Promise<string> {
+        const normalized = this.normalize(phone);
+        const encoder = new TextEncoder();
+        const data = encoder.encode(normalized);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        return Array.from(new Uint8Array(hashBuffer))
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
     }
 
     async searchGlobal(query: string): Promise<any[]> {

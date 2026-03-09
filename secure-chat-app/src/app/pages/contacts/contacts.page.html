@@ -57,7 +57,7 @@
 
       <ion-item *ngFor="let c of group.contacts" button (click)="startChat(c)" class="contact-item">
         <ion-avatar slot="start" class="contact-avatar">
-          <img [secureSrc]="c.photo_url" />
+          <img [appSecureSrc]="c.photo_url" />
         </ion-avatar>
         <ion-label>
           <h2 class="contact-name">{{ c.displayName }}</h2>
@@ -75,7 +75,7 @@
 
       <ion-item *ngFor="let c of globalResults" button (click)="startChat(c)" class="contact-item">
         <ion-avatar slot="start" class="contact-avatar global-avatar">
-          <img [secureSrc]="c.photo_url" />
+          <img [appSecureSrc]="c.photo_url" />
         </ion-avatar>
         <ion-label>
           <h2 class="contact-name">{{ c.first_name }} {{ c.last_name }}</h2>

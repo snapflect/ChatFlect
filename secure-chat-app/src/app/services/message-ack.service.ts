@@ -6,6 +6,7 @@ import { environment } from 'src/environments/environment';
 import { App } from '@capacitor/app';
 import { Network } from '@capacitor/network';
 import { AuthService } from './auth.service';
+import { Injector } from '@angular/core';
 
 /**
  * MessageAckService (v2.3 Reliability Engine)
@@ -21,12 +22,19 @@ export class MessageAckService {
     private readonly MAX_POLL_INTERVAL = 600000; // 10m
     private currentPollInterval = 45000;
     private idleCounter = 0;
+    private _authService: AuthService | null = null;
+    private get authService(): AuthService {
+        if (!this._authService) {
+            this._authService = this.injector.get(AuthService);
+        }
+        return this._authService;
+    }
 
     constructor(
         private localDb: LocalDbService,
         private logger: LoggingService,
         private http: HttpClient,
-        private authService: AuthService
+        private injector: Injector
     ) {
         this.initLifecycle();
     }

@@ -18,7 +18,7 @@ export class FormatTextPipe implements PipeTransform {
 
     // 2. Format Links (https://...)
     // Simple regex for URL detection
-    const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+    const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#/%?=~_|!:,.;]*[-A-Z0-9+&@#/% =~_|])/ig;
     text = text.replace(urlRegex, (url) => {
       return `<a href="${url}" target="_blank" class="chat-link">${url}</a>`;
     });

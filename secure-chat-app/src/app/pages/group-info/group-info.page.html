@@ -12,7 +12,7 @@
   <div class="group-header">
     <div class="avatar-wrapper" [class.clickable]="iAmAdmin" (click)="triggerIconUpload()">
       <ion-avatar class="group-avatar-large">
-        <img [secureSrc]="group.icon_url" />
+        <img [appSecureSrc]="group.icon_url" />
       </ion-avatar>
       <div class="edit-badge" *ngIf="iAmAdmin">
         <ion-icon name="camera" color="light"></ion-icon>
@@ -34,7 +34,7 @@
 
     <ion-item *ngFor="let m of members" (click)="onMemberClick(m)" lines="none" class="glass-item">
       <ion-avatar slot="start">
-        <img [secureSrc]="m.photo_url" />
+        <img [appSecureSrc]="m.photo_url" />
       </ion-avatar>
       <ion-label>
         <h2>{{ m.user_id === myId ? 'You' : (m.first_name ? m.first_name + ' ' + (m.last_name || '') : 'User ' +

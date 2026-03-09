@@ -1,4 +1,5 @@
 import { Injectable } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
 import { LoggingService } from './logging.service';
@@ -11,6 +12,8 @@ import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
     providedIn: 'root'
 })
 export class ProfileService {
+    private profileCache = new Map<string, any>();
+    private pendingProfileRequests = new Map<string, Promise<any>>();
 
     constructor(
         private api: ApiService,
@@ -21,17 +24,70 @@ export class ProfileService {
         private localDb: LocalDbService
     ) { }
 
+    private normalizeId(userId: any): string {
+        return String(userId || '').trim().toUpperCase();
+    }
+
+    getCachedProfile(userId: string) {
+        return this.profileCache.get(this.normalizeId(userId));
+    }
+
+    /**
+     * Resolves a user profile with caching and fallbacks.
+     * Returns a safe object for UI display.
+     */
+    async resolve(userId: string): Promise<{ name: string, photo: string, profile?: any }> {
+        if (!userId) return { name: 'User', photo: 'assets/user.png' };
+
+        const raw = await this.resolveRaw(userId);
+        if (!raw) return { name: 'User', photo: 'assets/user.png' };
+
+        const name = ((raw.first_name || raw.username || 'User') + (raw.last_name ? ' ' + raw.last_name : '')).trim();
+        const photo = raw.photo_url || raw.img || raw.avatar_url || 'assets/user.png';
+
+        return { name, photo, profile: raw };
+    }
+
+    /**
+     * Resolves the raw profile data from cache, API, or Firestore.
+     */
+    async resolveRaw(userId: string): Promise<any> {
+        const key = this.normalizeId(userId);
+        if (!key) return null;
+
+        if (this.profileCache.has(key)) {
+            return this.profileCache.get(key);
+        }
+
+        // Request Coalescing: Prevent duplicate syncs for the same user
+        if (this.pendingProfileRequests.has(key)) {
+            return this.pendingProfileRequests.get(key);
+        }
+
+        const request = this.syncProfileInBackground(key);
+        this.pendingProfileRequests.set(key, request);
+
+        try {
+            const profile = await request;
+            if (profile) {
+                this.profileCache.set(key, profile);
+            }
+            return profile;
+        } finally {
+            this.pendingProfileRequests.delete(key);
+        }
+    }
+
     async getProfile() {
         // HF-Race Fix: Wait for Vault Unlock before touching storage
         await this.localDb.readyPromise;
 
-        // We use the ID from localStorage as it's more reliable than the observable in some flows
-        const id = localStorage.getItem('user_id');
+        const id = this.auth.getUserId();
         if (!id) return null;
 
         // 1. Try Cache First for instant UI
         const cached = await this.storage.getMeta('profile_data');
-        if (cached && cached.user_id === id) {
+        if (cached && this.normalizeId(cached.user_id) === id) {
             console.log('[Profile] Loaded from cache');
             // Background sync
             this.syncProfileInBackground(id);
@@ -42,12 +98,13 @@ export class ProfileService {
     }
 
     getUserProfile(userId: string) {
-        return this.api.get(`profile.php?user_id=${userId}`);
+        return this.api.get(`profile.php?user_id=${this.normalizeId(userId)}`);
     }
 
     private async syncProfileInBackground(id: string) {
+        const normId = this.normalizeId(id);
         try {
-            const apiRes: any = await this.api.get(`profile.php?user_id=${id}`).toPromise();
+            const apiRes: any = await firstValueFrom(this.api.get(`profile.php?user_id=${normId}`));
 
             // Check if API returned valid data. 
             if (!apiRes || !apiRes.first_name || !apiRes.phone_number) {
@@ -91,10 +148,10 @@ export class ProfileService {
     }
 
     async updateProfile(profileData: any) {
-        const id = localStorage.getItem('user_id');
+        const id = this.auth.getUserId();
 
         // 1. Update MySQL (Legacy/API) - Primary, must complete
-        const result = await this.api.post('profile.php', { ...profileData, user_id: id }).toPromise();
+        const result = await firstValueFrom(this.api.post('profile.php', { ...profileData, user_id: id }));
 
         // 2. Update Firestore (Sync for CallService) - Background, non-blocking
         if (id) {
@@ -120,17 +177,15 @@ export class ProfileService {
     }
 
     async requestPhoneUpdateOtp(email: string, newPhone: string) {
-        return this.api.post('register.php', { email, phone_number: newPhone, action: 'phone_update' }).toPromise();
+        return firstValueFrom(this.api.post('register.php', { email, phone_number: newPhone, action: 'phone_update' }));
     }
 
     async verifyPhoneUpdate(email: string, otp: string) {
-        // Technically this could just be a special call to profile.php 
-        // to verify against the otps table for this email
-        return this.api.post('profile.php', {
+        return firstValueFrom(this.api.post('profile.php', {
             action: 'verify_phone_otp',
             email: email,
             otp: otp
-        }).toPromise();
+        }));
     }
 
     async uploadPhoto(formData: FormData): Promise<string> {

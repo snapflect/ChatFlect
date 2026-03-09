@@ -11,7 +11,7 @@ import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 })
 export class GifPickerComponent implements OnInit {
     @Output() gifSelected = new EventEmitter<GiphyGif>();
-    @Output() close = new EventEmitter<void>();
+    @Output() closePickerRequested = new EventEmitter<void>();
 
     gifs: GiphyGif[] = [];
     searchQuery = '';
@@ -98,7 +98,7 @@ export class GifPickerComponent implements OnInit {
     }
 
     closePanel() {
-        this.close.emit();
+        this.closePickerRequested.emit();
     }
 
     clearSearch() {

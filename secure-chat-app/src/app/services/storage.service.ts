@@ -462,7 +462,7 @@ export class StorageService {
         try {
             await this.safeRun('INSERT OR REPLACE INTO media_retries (url, count, next_retry, last_logged) VALUES (?, ?, ?, ?)',
                 [url, count, nextRetry, lastLogged]);
-        } catch (e) { }
+        } catch { /* ignore retry save error */ }
     }
 
     async deleteMediaRetry(url: string) {

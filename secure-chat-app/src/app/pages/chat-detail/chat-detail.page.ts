@@ -30,8 +30,10 @@ import { ContactPickerModalPage } from '../contact-picker-modal/contact-picker-m
 import { SecureMediaService } from 'src/app/services/secure-media.service';
 import { TransferProgressService } from 'src/app/services/transfer-progress.service';
 import { combineLatest } from 'rxjs';
-
-// ... 
+import { ProfileService } from 'src/app/services/profile.service';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
+import { MessageStoreService } from 'src/app/services/message-store.service';
 
 @Component({
   selector: 'app-chat-detail',
@@ -40,7 +42,6 @@ import { combineLatest } from 'rxjs';
   encapsulation: ViewEncapsulation.None,
   standalone: false
 })
-
 export class ChatDetailPage implements OnInit, OnDestroy {
   @ViewChild(IonContent, { static: false }) content!: IonContent;
   @ViewChild('chatInput') chatInput!: ElementRef;
@@ -74,9 +75,6 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   isSearchActive: boolean = false;
   searchTerm: string = '';
 
-  // Group Participants Cache
-  participantsMap = new Map<string, any>();
-
   // Mention State
   showMentionPicker: boolean = false;
   mentionFilteredParticipants: any[] = [];
@@ -90,10 +88,9 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   isSelectionMode: boolean = false;
   selectedMessages = new Set<string>();
 
-  // Lazy Loading State
-  messagesMap = new Map<string, any>();
   isLoadingOlder = false;
   private lastGeocodeTs = 0;
+  private destroy$ = new Subject<void>();
 
   constructor(
     private route: ActivatedRoute,
@@ -117,12 +114,19 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     private soundService: SoundService,
     private secureMedia: SecureMediaService,
     public progressService: TransferProgressService,
+    private profileService: ProfileService,
+    private messageStore: MessageStoreService,
     private zone: NgZone
   ) {
-    this.auth.currentUserId.subscribe(id => this.currentUserId = String(id));
+    this.auth.currentUserId
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(id => this.currentUserId = String(id));
   }
 
   ngOnDestroy() {
+    this.destroy$.next();
+    this.destroy$.complete();
+    this.messageStore.disconnect();
     this.soundService.clearActiveChat();
     if (this.networkListener) this.networkListener.remove();
     this.chatPic = null;
@@ -133,7 +137,6 @@ export class ChatDetailPage implements OnInit, OnDestroy {
   ionViewWillEnter() {
     // START WITH CLEAN SLATE - Fixes "First File Missing" bug
     this.messages = [];
-    this.messagesMap.clear();
     this.filteredMessages = [];
 
     // Reset Header State
@@ -160,236 +163,87 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     this.chatId = this.route.snapshot.paramMap.get('id');
     if (this.chatId) {
       this.soundService.setActiveChat(this.chatId);
-      this.chatService.getChatDetails(this.chatId).subscribe(async (chat: any) => {
-        if (chat) {
-          this.chatDetails = chat;
-          this.isGroup = chat.isGroup;
-          this.participants = chat.participants || [];
 
-          if (this.isGroup) {
-            this.chatName = chat.groupName;
-            this.chatPic = chat.groupImage || 'assets/user.png';
-          } else {
-            // 1:1 Chat - Find the other user and fetch their profile
-            const otherId = this.participants.find(p => String(p) !== String(this.currentUserId)) || null;
-            this.otherUserId = otherId;
+      // Subscription 1: Chat Details (Members, Name, Typing)
+      this.chatService.getChatDetails(this.chatId)
+        .pipe(takeUntil(this.destroy$))
+        .subscribe(async (chat: any) => {
+          if (chat) {
+            this.chatDetails = chat;
+            this.isGroup = chat.isGroup;
+            this.participants = chat.participants || [];
 
-            if (otherId) {
-              try {
-                const profile: any = await this.auth.getProfile(otherId);
-                if (profile) {
-                  this.chatName = profile.first_name || profile.username || 'User';
-                  if (profile.last_name) this.chatName += ' ' + profile.last_name;
-                  const pUrl = profile.photo_url || profile.img || profile.avatar_url;
-                  this.chatPic = pUrl || 'assets/user.png';
-                } else {
-                  this.chatName = 'User';
-                }
-              } catch (e) {
-                console.error("Profile Fetch Error", e);
-                this.chatName = 'User';
+            if (this.isGroup) {
+              this.chatName = chat.groupName;
+              this.chatPic = chat.groupImage || 'assets/user.png';
+            } else {
+              const otherId = this.participants.find(p => String(p) !== String(this.currentUserId)) || null;
+              this.otherUserId = otherId;
+
+              if (otherId) {
+                this.profileService.resolve(otherId).then(p => {
+                  this.chatName = p.name;
+                  this.chatPic = p.photo;
+                });
+
+                this.presence.getPresence(otherId)
+                  .pipe(takeUntil(this.destroy$))
+                  .subscribe(p => {
+                    this.otherUserPresence = p;
+                  });
               }
-              this.presence.getPresence(otherId).subscribe(p => {
-                this.otherUserPresence = p;
+            }
+
+            if (this.participants.length > 0) {
+              await Promise.all(
+                this.participants
+                  .filter(uid => String(uid) !== String(this.currentUserId))
+                  .map(uid => this.profileService.resolve(String(uid)))
+              );
+            }
+
+            if (chat.typing) {
+              const now = Date.now();
+              const typingIds = Object.keys(chat.typing).filter(uid => {
+                const ts = chat.typing[uid];
+                return (now - ts < 5000) && (String(uid) !== String(this.currentUserId));
               });
+              this.typingUsers = typingIds;
+            } else {
+              this.typingUsers = [];
+            }
+
+            const unreadKey = `unread_${this.currentUserId}`;
+            if (chat[unreadKey] && chat[unreadKey] > 0) {
+              this.chatService.markAsRead(this.chatId!);
             }
           }
-
-          if (this.participants.length > 0) {
-            this.participants.forEach(async (uid) => {
-              if (String(uid) === String(this.currentUserId)) return;
-              if (!this.participantsMap.has(String(uid))) {
-                try {
-                  const p: any = await this.auth.getProfile(String(uid));
-                  if (p) {
-                    const pUrl = p.photo_url || p.img || p.avatar_url;
-                    this.participantsMap.set(String(uid), {
-                      name: (p.first_name || p.username),
-                      photo: pUrl || 'assets/user.png'
-                    });
-                  }
-                } catch (e) { console.warn("Failed to load profile for", uid); }
-              }
-            });
-          }
-
-          if (chat.typing) {
-            const now = Date.now();
-            const typingIds = Object.keys(chat.typing).filter(uid => {
-              const ts = chat.typing[uid];
-              return (now - ts < 5000) && (String(uid) !== String(this.currentUserId));
-            });
-            this.typingUsers = typingIds;
-          } else {
-            this.typingUsers = [];
-          }
-
-          const unreadKey = `unread_${this.currentUserId}`;
-          if (chat[unreadKey] && chat[unreadKey] > 0) {
-            this.chatService.markAsRead(this.chatId!);
-          }
-        }
-
-        combineLatest([
-          this.chatService.getMessages(this.chatId || ''),
-          this.chatService.pendingMessages$
-        ]).subscribe(([msgs, pendingMap]) => {
-          const pending = pendingMap[this.chatId!] || [];
-          this.mergeMessages(msgs, pending);
         });
-      });
-    }
-  }
 
+      // Subscription 2: Unified Message Stream
+      this.messageStore.connect(this.chatId);
+      this.messageStore.messages$
+        .pipe(takeUntil(this.destroy$))
+        .subscribe((msgs: any[]) => {
+          this.messages = msgs;
+          this.filterMessages();
 
-
-
-
-
-  // --- Lazy Loading Logic ---
-
-  mergeMessages(realMsgs: any[], pendingMsgs: any[]) {
-    // 1. Add/Update Real Messages
-    realMsgs.forEach(m => this.messagesMap.set(m.id, m));
-
-    // 2. Prepare Matchers for Deduplication
-    // We create a robust index of "Real" messages to check against.
-    const realMsgIndex = realMsgs.map(m => {
-      const t = m.text || {};
-      return {
-        id: m.id,
-        // Check all possible locations for tempId
-        tempId: m.tempId || t.tempId || t._tempId,
-        // Create a content signature for fuzzy matching
-        // usage: type + name + size (params that shouldn't change between local and server)
-        // For images/video: type + caption + approx_timestamp? 
-        // Timestamp is risky due to server time drift.
-        // Size is good for docs/video. Name is good for docs.
-        signature: this.createSignature(m)
-      };
-    });
-
-    const filteredPending = pendingMsgs.filter(p => {
-      // If the pending msg is already in the map as a real message ID (unlikely but possible if IDs collide)
-      if (this.messagesMap.has(p.id)) return false;
-
-      const pTempId = p.id;
-      const pSignature = this.createSignature(p);
-
-      // Layer 1: Strict ID Match
-      // Check multiple locations for tempId (root, text, _tempId)
-      const strictMatch = realMsgIndex.find(r => {
-        const anyR = r as any; // Cast to access text prop
-        const rTemp = anyR.tempId || anyR.text?.tempId || anyR.text?._tempId;
-        return rTemp == pTempId;
-      });
-
-      if (strictMatch) {
-        // console.log(`[Dedup] Strict Match Found: ${pTempId}`);
-        return false;
-      }
-
-      // Layer 2: Fuzzy Content Match (Only for my own messages)
-      if (String(p.senderId) === String(this.currentUserId)) {
-        if (pSignature && pSignature.length > 5) {
-          const fuzzyMatch = realMsgIndex.find(r => {
-            // Check root signature OR text signature
-            const anyR = r as any;
-            const rSig = anyR.signature || anyR.text?.signature;
-            return rSig === pSignature;
-          });
-
-          if (fuzzyMatch) {
-            // console.log(`[Dedup] Fuzzy Match Found: ${pSignature}`);
-            return false;
+          if (!this.isLoadingOlder && this.messages.length <= 25 && !this.isSearchActive) {
+            this.scrollToBottom();
           }
-        }
-      }
-
-      return true; // Keep pending
-    });
-
-    // 3. Add Verified Pending Messages to Map
-    filteredPending.forEach(p => this.messagesMap.set(p.id, p));
-
-    // 4. Convert Map to Array & Sort
-    const allMsgs = Array.from(this.messagesMap.values());
-
-    // Sort: Ascending Timestamp
-    allMsgs.sort((a, b) => {
-      const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : a.timestamp;
-      const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : b.timestamp;
-      return tA - tB;
-    });
-
-    this.messages = allMsgs;
-    this.removeDuplicates(); // NUCLEAR OPTION: Final sweep
-    this.filterMessages();
-  }
-
-  // Aggressive Post-Processing to kill duplicates
-  removeDuplicates() {
-    const realTempIds = new Set<string>();
-    const realSignatures = new Set<string>();
-
-    // 1. Index Real Messages
-    this.messages.forEach(m => {
-      // If it's a real message (from Firestore)
-      if (m.id && (m.id.startsWith('msg_') || !m.id.startsWith('up_'))) {
-        // Index TempID
-        const t = m.tempId || m.text?.tempId || m.text?._tempId;
-        if (t) realTempIds.add(t);
-
-        // Index Signature
-        const anyM = m as any;
-        const s = anyM.signature || anyM.text?.signature;
-        if (s && s.length > 5) realSignatures.add(s);
-      }
-    });
-
-    // 2. Filter Pending Messages
-    this.messages = this.messages.filter(m => {
-      // If it's a pending message
-      if (m.id && m.id.startsWith('up_')) {
-        // Check ID Match
-        if (realTempIds.has(m.id)) {
-          // console.log(`[Nuclear] Killed Pending via ID: ${m.id}`);
-          return false;
-        }
-
-        // Check Signature Match
-        const sig = this.createSignature(m);
-        if (sig && realSignatures.has(sig)) {
-          // console.log(`[Nuclear] Killed Pending via Sig: ${sig}`);
-          return false;
-        }
-      }
-      return true;
-    });
-
-    // Only scroll to bottom on INITIAL load (small size) or if user was at bottom
-    if (!this.isLoadingOlder && this.messages.length <= 25 && !this.isSearchActive) {
-      this.scrollToBottom();
+        });
     }
   }
 
-  createSignature(msg: any): string {
-    const t = msg.text || {};
-    // 3. Last Resort: Type-based content signature
-    const type = msg.type;
-    if (type === 'document') {
-      if (t.name && t.size) return `doc_${this.chatId}_${t.name}_${t.size}`;
-    } else if (type === 'image') {
-      return `image_${this.chatId}_${t.size || 0}_${t.caption || 'nc'}`;
-    } else if (type === 'video') {
-      return `video_${this.chatId}_${t.size || 0}_${t.caption || 'nc'}`;
-    }
-    return '';
-  }
+
+
+
+
+
 
   filterMessages() {
     if (!this.searchTerm || this.searchTerm.trim() === '') {
-      this.filteredMessages = [...this.messages];
+      this.filteredMessages = this.messages;
     } else {
       const term = this.searchTerm.toLowerCase();
       this.filteredMessages = this.messages.filter(msg => {
@@ -423,7 +277,13 @@ export class ChatDetailPage implements OnInit, OnDestroy {
 
   getSenderProfile(userId: string) {
     if (String(userId) === String(this.currentUserId)) return { name: 'You', photo: null };
-    return this.participantsMap.get(String(userId)) || { name: 'Unknown', photo: 'assets/user.png' };
+    const p = this.profileService.getCachedProfile(userId);
+    if (p) {
+      const name = ((p.first_name || p.username || 'User') + (p.last_name ? ' ' + p.last_name : '')).trim();
+      const photo = p.photo_url || p.img || p.avatar_url || 'assets/user.png';
+      return { name, photo };
+    }
+    return { name: 'User', photo: 'assets/user.png' };
   }
 
 
@@ -454,21 +314,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
       const olderMsgs = await this.chatService.getOlderMessages(this.chatId, oldestTs);
 
       if (olderMsgs && olderMsgs.length > 0) {
-        olderMsgs.forEach(m => this.messagesMap.set(m.id, m));
-        // Re-sort
-        this.mergeMessages([], []); // Re-trigger sort using existing map.
-        // Wait, mergeMessages expects args. Let's make args optional or refactor.
-        // Refactor mergeMessages to use internal map + args.
-
-        // Just manually trigger sort assignment:
-        const allMsgs = Array.from(this.messagesMap.values());
-        allMsgs.sort((a, b) => {
-          const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : a.timestamp;
-          const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : b.timestamp;
-          return tA - tB;
-        });
-        this.messages = allMsgs;
-        this.filterMessages();
+        this.messageStore.addOlderMessages(olderMsgs);
 
         // Restore Scroll Position
         // Angular change detection needs to run first
@@ -530,13 +376,15 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     this.showMentionPicker = false;
   }
 
-  filterMentions(term: string) {
-    const allParts = Array.from(this.participantsMap.values());
+  async filterMentions(term: string) {
+    const participants = this.chatDetails?.participants || [];
+    const profiles = await Promise.all(participants.map((uid: string) => this.profileService.resolve(String(uid))));
+
     if (!term.trim()) {
-      this.mentionFilteredParticipants = allParts;
+      this.mentionFilteredParticipants = profiles;
     } else {
       const lower = term.toLowerCase();
-      this.mentionFilteredParticipants = allParts.filter(p => p.name.toLowerCase().includes(lower));
+      this.mentionFilteredParticipants = profiles.filter(p => p.name.toLowerCase().includes(lower));
     }
     this.showMentionPicker = this.mentionFilteredParticipants.length > 0;
   }
@@ -985,7 +833,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     // 2. Forward Media (Image, Video, Audio, Document, Location)
     else {
       let sessionKey: CryptoKey | null = null;
-      let ivBase64 = msg.iv || msg.text?.i || ''; // Check both locations
+      const ivBase64 = msg.iv || msg.text?.i || ''; // Check both locations
 
       // Metadata construction
       const metadata: any = {
@@ -2120,9 +1968,9 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     if (typeof msg.text === 'string') {
       if (msg.text.startsWith('{')) {
         try {
-          let parsed = JSON.parse(msg.text);
+          const parsed = JSON.parse(msg.text);
           if (parsed.type || (parsed.lat && parsed.lng)) return '';
-        } catch (e) { }
+        } catch { /* ignore parse error */ }
       }
       // Fallback for service-level strings
       if (msg.text === 'live_location' || msg.text === 'location') return '';
@@ -2513,7 +2361,7 @@ export class ChatDetailPage implements OnInit, OnDestroy {
     if (!text || typeof text !== 'string') return '';
 
     // 1. Linkify URLs
-    const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/ig;
+    const urlRegex = /(\b(https?|ftp|file):\/\/[-A-Z0-9+&@#/%?=~_|!:,.;]*[-A-Z0-9+&@#/% =~_|])/ig;
     let html = text.replace(urlRegex, (url) => {
       return `<a href="${url}" target="_blank" class="chat-link">${url}</a>`;
     });

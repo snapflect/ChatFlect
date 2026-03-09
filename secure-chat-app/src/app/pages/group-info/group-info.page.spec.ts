@@ -14,7 +14,7 @@ describe('GroupInfoPage', () => {
   let fixture: ComponentFixture<GroupInfoPage>;
 
   beforeEach(async () => {
-    try { initializeApp({ apiKey: "fake", projectId: "test" }); } catch (e) { }
+    try { initializeApp({ apiKey: "fake", projectId: "test" }); } catch (e) { /* ignore duplicate init */ }
 
     await TestBed.configureTestingModule({
       declarations: [GroupInfoPage],

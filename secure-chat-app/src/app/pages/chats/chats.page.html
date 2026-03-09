@@ -68,7 +68,7 @@
           class="chat-item">
 
           <ion-avatar slot="start" class="chat-avatar">
-            <img [secureSrc]="chat.avatar" />
+            <img [appSecureSrc]="chat.avatar" />
             <div *ngIf="!chat.isGroup && chat.otherUserId && isUserOnline(chat.otherUserId)" class="online-indicator">
             </div>
           </ion-avatar>

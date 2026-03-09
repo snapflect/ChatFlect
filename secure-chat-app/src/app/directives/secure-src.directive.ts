@@ -11,18 +11,18 @@ import { SecureMediaService } from '../services/secure-media.service';
 import { Subscription } from 'rxjs';
 
 @Directive({
-    selector: '[secureSrc]',
+    selector: '[appSecureSrc]',
     standalone: false
 })
 export class SecureSrcDirective implements OnChanges, OnDestroy {
 
-    @Input('secureSrc') src: string | null = null;
-    @Input('pymKey') key?: string;
-    @Input('pymIv') iv?: string;
-    @Input('pymHash') hash?: string;
-    @Input('pymSize') size?: number;
-    @Input('pymMime') mime?: string;
-    @Input('thumb') thumb?: string; // v15 Progressive
+    @Input() appSecureSrc: string | null = null;
+    @Input() pymKey?: string;
+    @Input() pymIv?: string;
+    @Input() pymHash?: string;
+    @Input() pymSize?: number;
+    @Input() pymMime?: string;
+    @Input() thumb?: string; // v15 Progressive
 
     private sub: Subscription | null = null;
     private resolvedUrl: string | null = null;
@@ -34,13 +34,13 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
     ) { }
 
     ngOnChanges(changes: SimpleChanges): void {
-        if (changes['src'] || changes['key'] || changes['iv'] || changes['thumb'] || changes['hash']) {
+        if (changes['appSecureSrc'] || changes['pymKey'] || changes['pymIv'] || changes['thumb'] || changes['pymHash']) {
             this.load();
         }
     }
 
     private load(): void {
-        console.log(`[SecureSrcDirective] Loading URL: ${this.src}`);
+        console.log(`[SecureSrcDirective] Loading URL: ${this.appSecureSrc}`);
         this.cancel();
 
         // 1. Progressive Loading: Show Thumbnail immediately if available
@@ -59,7 +59,7 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
             this.setBlur('0px');
         }
 
-        if (!this.src || typeof this.src !== 'string') {
+        if (!this.appSecureSrc || typeof this.appSecureSrc !== 'string') {
             this.setOpacity('1');
             this.setBlur('0px');
             return;
@@ -67,17 +67,17 @@ export class SecureSrcDirective implements OnChanges, OnDestroy {
 
         // v15.2: Synchronous skip for External/Unencrypted URLs
         // This prevents "flicker" and NotReadableError issues for public resources
-        const isExternal = this.src.startsWith('http') && !this.key;
+        const isExternal = this.appSecureSrc.startsWith('http') && !this.pymKey;
         if (isExternal) {
-            this.setSrc(this.src);
+            this.setSrc(this.appSecureSrc);
             this.setOpacity('1');
             this.setBlur('0px');
             return;
         }
 
         // 2. Fetch High-Res
-        const integrity = (this.hash || this.size) ? { hash: this.hash || '', size: this.size || 0 } : undefined;
-        this.sub = this.mediaService.getMedia(this.src, this.key, this.iv, this.mime, integrity).subscribe({
+        const integrity = (this.pymHash || this.pymSize) ? { hash: this.pymHash || '', size: this.pymSize || 0 } : undefined;
+        this.sub = this.mediaService.getMedia(this.appSecureSrc, this.pymKey, this.pymIv, this.pymMime, integrity).subscribe({
             next: (url: string) => {
                 // Revoke previously resolved object URL usage (v8)
                 if (this.resolvedUrl && this.resolvedUrl !== url) {

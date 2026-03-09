@@ -13,12 +13,12 @@ class MockSecureMediaService {
         }
         return of(null);
     }
-    revokeObjectUrl(url: string) { }
+    releaseMedia(url: string) { }
 }
 
 // Test Host Component
 @Component({
-    template: `<img [secureSrc]="src" [pymKey]="key" [pymIv]="iv">`
+    template: `<img [appSecureSrc]="src" [pymKey]="key" [pymIv]="iv">`
 })
 class TestHostComponent {
     src: string | null = null;
@@ -83,13 +83,13 @@ describe('SecureSrcDirective', () => {
     }));
 
     it('should cleanup object URL on destroy', fakeAsync(() => {
-        spyOn(mediaService, 'revokeObjectUrl');
+        spyOn(mediaService, 'releaseMedia');
 
         component.src = 'valid-url';
         fixture.detectChanges();
         tick();
 
         fixture.destroy();
-        expect(mediaService.revokeObjectUrl).toHaveBeenCalledWith('blob:http://localhost/valid-blob-url');
+        expect(mediaService.releaseMedia).toHaveBeenCalledWith('blob:http://localhost/valid-blob-url');
     }));
 });

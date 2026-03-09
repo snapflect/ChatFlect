@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, AfterViewInit, ElementRef, ViewChild } from '@angular/core';
+import { Component, OnDestroy, AfterViewInit, ElementRef, ViewChild } from '@angular/core';
 import { ModalController, ToastController, LoadingController } from '@ionic/angular';
 import { DrawingEditorService } from 'src/app/services/drawing-editor.service';
 import { StatusService } from 'src/app/services/status.service';
@@ -9,7 +9,7 @@ import { StatusService } from 'src/app/services/status.service';
     styleUrls: ['./drawing-editor.page.scss'],
     standalone: false
 })
-export class DrawingEditorPage implements OnInit, AfterViewInit, OnDestroy {
+export class DrawingEditorPage implements AfterViewInit, OnDestroy {
     @ViewChild('canvasContainer', { static: false }) canvasContainer!: ElementRef;
 
     // Tool state
@@ -44,7 +44,6 @@ export class DrawingEditorPage implements OnInit, AfterViewInit, OnDestroy {
         private loading: LoadingController
     ) { }
 
-    ngOnInit() { }
 
     ngAfterViewInit() {
         setTimeout(() => this.initializeCanvas(), 100);

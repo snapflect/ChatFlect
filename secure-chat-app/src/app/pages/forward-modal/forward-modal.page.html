@@ -13,7 +13,7 @@
     <ion-list class="bg-transparent">
         <ion-item *ngFor="let chat of chats" (click)="selectChat(chat)" detail lines="none" class="contact-item">
             <ion-avatar slot="start">
-                <img [secureSrc]="chat.avatar" (error)="$any($event).target.src = 'assets/user.png'" />
+                <img [appSecureSrc]="chat.avatar" (error)="$any($event).target.src = 'assets/user.png'" />
             </ion-avatar>
             <ion-label>
                 <h2>{{ chat.name }}</h2>

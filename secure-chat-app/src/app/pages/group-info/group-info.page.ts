@@ -248,7 +248,7 @@ export class GroupInfoPage implements OnInit {
       }
     } catch (e) {
       console.error(e);
-      let t = await this.toast.create({ message: 'Failed to update icon', duration: 2000 });
+      const t = await this.toast.create({ message: 'Failed to update icon', duration: 2000 });
       t.present();
     }
   }

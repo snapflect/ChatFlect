@@ -42,7 +42,7 @@ export class LoggingService {
             };
         }
 
-        let safeError = this.safeSerializeAndParse(rawError);
+        const safeError = this.safeSerializeAndParse(rawError);
 
         console.error(`%c[APP Error]`, 'color: red; font-weight: bold', message, safeError);
 

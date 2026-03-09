@@ -13,7 +13,7 @@
   <div class="profile-header ion-text-center">
     <div class="avatar-container">
       <ion-avatar class="profile-avatar" (click)="viewPhoto()">
-        <img [secureSrc]="profile.photo_url || 'assets/placeholder_user.png'" (error)="onImageError($event)"
+        <img [appSecureSrc]="profile.photo_url || 'assets/placeholder_user.png'" (error)="onImageError($event)"
           referrerpolicy="no-referrer" />
       </ion-avatar>
       <ion-button fill="clear" class="change-photo-btn" (click)="changePhoto()">
@@ -38,9 +38,9 @@
         <ion-label position="stacked" color="secondary">Phone Number (Mandatory)</ion-label>
         <div style="display: flex; align-items: center; width: 100%;">
           <ion-input [(ngModel)]="profile.phone_number" placeholder="+1234567890"
-            [disabled]="profile.is_profile_complete == 1 && !isEditingPhone" style="flex: 1;"></ion-input>
+            [disabled]="profile.is_profile_complete === 1 && !isEditingPhone" style="flex: 1;"></ion-input>
 
-          <ion-button *ngIf="profile.is_profile_complete == 1 && !isEditingPhone" fill="clear"
+          <ion-button *ngIf="profile.is_profile_complete === 1 && !isEditingPhone" fill="clear"
             (click)="startPhoneEdit()">
             <ion-icon name="create-outline" slot="icon-only"></ion-icon>
           </ion-button>

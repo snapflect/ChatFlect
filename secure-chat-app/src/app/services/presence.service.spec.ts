@@ -3,7 +3,7 @@ import { PresenceService } from './presence.service';
 import { LoggingService } from './logging.service';
 import { of } from 'rxjs';
 
-const firestore = require('firebase/firestore');
+import * as firestore from 'firebase/firestore';
 
 describe('PresenceService', () => {
     let service: PresenceService;
@@ -29,10 +29,10 @@ describe('PresenceService', () => {
             };
 
             try {
-                if (jasmine.isSpy(firestoreMock[fn])) {
-                    firestoreMock[fn].and.callFake(implementation);
+                if (jasmine.isSpy((firestore as any)[fn])) {
+                    (firestore as any)[fn].and.callFake(implementation);
                 } else {
-                    spyOn(firestore, fn as any).and.callFake(implementation);
+                    spyOn(firestore as any, fn as any).and.callFake(implementation);
                 }
             } catch (e) {
                 try {

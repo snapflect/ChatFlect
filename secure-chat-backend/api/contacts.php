@@ -23,6 +23,9 @@ function getBaseUrl(): string
 
 /* ---------- INPUT ---------- */
 $data = json_decode(file_get_contents("php://input"));
+$whereClauses = [];
+$params = [];
+$types = "";
 
 // Email Discovery Support
 if (isset($data->query) && !empty($data->query)) {
@@ -50,45 +53,37 @@ if (isset($data->query) && !empty($data->query)) {
     exit;
 }
 
-if (!isset($data->phone_numbers) || !is_array($data->phone_numbers)) {
+// Hashed Matching (ZK-S)
+$hashedPhones = [];
+if (isset($data->phone_hashes) && is_array($data->phone_hashes)) {
+    foreach ($data->phone_hashes as $h) {
+        if (preg_match('/^[a-f0-9]{64}$/', $h)) {
+            $hashedPhones[] = $h;
+        }
+    }
+}
+
+if (empty($whereClauses) && empty($hashedPhones)) {
     echo json_encode([]);
     exit;
 }
 
-$phones = array_map(
-    fn($p) => substr(preg_replace('/[^0-9]/', '', $p), -10),
-    $data->phone_numbers
-);
+$sql = "SELECT user_id, phone_number, first_name, last_name, photo_url FROM users WHERE ";
+$conditions = [];
 
-if (!$phones) {
-    echo json_encode([]);
-    exit;
+if (!empty($whereClauses)) {
+    $conditions[] = "(" . implode(" OR ", $whereClauses) . ")";
 }
-
-/* ---------- SAFE SQL COMPATIBILITY FIX ---------- */
-// Instead of REGEXP_REPLACE (MySQL 8.0+), use standard LIKE matching
-$whereClauses = [];
-$types = "";
-$params = [];
-
-foreach ($phones as $p) {
-    // Sanitize to last 10 digits to match DB format regardless of country code
-    $clean = preg_replace('/[^0-9]/', '', $p);
-    if (strlen($clean) >= 10) {
-        $last10 = substr($clean, -10);
-        // Standard Match: Data is clean, and charset is now enforced in db.php
-        $whereClauses[] = "phone_number LIKE CONCAT('%', ?)";
-        $params[] = $last10;
+if (!empty($hashedPhones)) {
+    $placeholders = implode(',', array_fill(0, count($hashedPhones), '?'));
+    $conditions[] = "phone_hash IN ($placeholders)";
+    foreach ($hashedPhones as $h) {
+        $params[] = $h;
         $types .= "s";
     }
 }
 
-if (empty($whereClauses)) {
-    echo json_encode([]);
-    exit;
-}
-
-$sql = "SELECT user_id, phone_number, first_name, last_name, photo_url FROM users WHERE " . implode(" OR ", $whereClauses);
+$sql .= implode(" OR ", $conditions);
 
 $stmt = $conn->prepare($sql);
 $stmt->bind_param($types, ...$params);

@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component } from '@angular/core';
 
 @Component({
   selector: 'app-tabs',
@@ -6,11 +6,9 @@ import { Component, OnInit } from '@angular/core';
   styleUrls: ['./tabs.page.scss'],
   standalone: false
 })
-export class TabsPage implements OnInit {
+export class TabsPage {
 
   constructor() { }
 
-  ngOnInit() {
-  }
 
 }

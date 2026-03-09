@@ -4,6 +4,9 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { Platform } from '@ionic/angular';
 import { ApiService } from './api.service';
 import { RelaySyncService } from './relay-sync.service';
+import { AuthService } from './auth.service';
+import { ChatService } from './chat.service';
+import { MessageAckService } from './message-ack.service';
 
 @Injectable({
     providedIn: 'root'
@@ -13,28 +16,26 @@ export class PushService {
     public tapSubject = new BehaviorSubject<string | null>(null);
 
     // Lazy-loaded to break circular DI: PushService <-> AuthService
-    private _auth: any = null;
-    private get auth(): any {
+    private _auth: AuthService | null = null;
+    private get auth(): AuthService {
         if (!this._auth) {
-            const { AuthService } = require('./auth.service');
+            // HF-4.4: Circular Dependency handled by lazy Injector.get
             this._auth = this.injector.get(AuthService);
         }
         return this._auth;
     }
 
-    private _chat: any = null;
-    private get chat(): any {
+    private _chat: ChatService | null = null;
+    private get chat(): ChatService {
         if (!this._chat) {
-            const { ChatService } = require('./chat.service');
             this._chat = this.injector.get(ChatService);
         }
         return this._chat;
     }
 
-    private _ack: any = null;
-    private get ack(): any {
+    private _ack: MessageAckService | null = null;
+    private get ack(): MessageAckService {
         if (!this._ack) {
-            const { MessageAckService } = require('./message-ack.service');
             this._ack = this.injector.get(MessageAckService);
         }
         return this._ack;
@@ -59,6 +60,9 @@ export class PushService {
                 PushNotifications.register();
             }
         });
+
+        // HF-4.5: Periodic Token Refresh (7-day threshold)
+        this.checkRotation();
 
         // 2. Registration Success
         PushNotifications.addListener('registration', (token) => {
@@ -110,22 +114,38 @@ export class PushService {
                 token: token,
                 platform: platformName
             }).toPromise();
+
+            // HF-4.5: Stamp successful sync
+            localStorage.setItem('last_push_token_sync', Date.now().toString());
+            localStorage.setItem('last_push_token_value', token);
+
             console.log('Push: Token Registered with Relay Backend');
         } catch (e) {
             console.error('Push: Registration Failed', e);
         }
     }
 
+    private checkRotation() {
+        const lastSync = localStorage.getItem('last_push_token_sync');
+        if (!lastSync) return;
+
+        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+        const now = Date.now();
+
+        if (now - parseInt(lastSync, 10) > sevenDaysMs) {
+            console.log('Push: Sync threshold (7d) exceeded. Re-registering token...');
+            this.syncToken();
+        }
+    }
+
     // Call this after login manually to ensure sync
-    syncToken() {
+    async syncToken(): Promise<void> {
         if (!this.platform.is('capacitor')) return;
 
-        PushNotifications.checkPermissions().then(async (res) => {
-            if (res.receive === 'granted') {
-                // Force re-registration logic
-                PushNotifications.register();
-            }
-        });
+        const res = await PushNotifications.checkPermissions();
+        if (res.receive === 'granted') {
+            await PushNotifications.register();
+        }
     }
     // Compatibility properties
     // Compatibility Methods

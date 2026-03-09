@@ -150,7 +150,7 @@ export class StatusPage implements OnInit {
 
     // Separate Mine vs Others
     this.myStatus = allUsers.find(u => u.user_id === this.myUserId) || null;
-    let others = allUsers.filter(u => u.user_id !== this.myUserId);
+    const others = allUsers.filter(u => u.user_id !== this.myUserId);
 
     // Sort others by latest timestamp
     others.sort((a, b) => new Date((b as any).timestamp || 0).getTime() - new Date((a as any).timestamp || 0).getTime());

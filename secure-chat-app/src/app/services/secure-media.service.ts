@@ -172,7 +172,7 @@ export class SecureMediaService implements OnDestroy {
                 try {
                     const stat = await Filesystem.stat({ path: partPath, directory: Directory.Cache });
                     startByte = stat.size;
-                } catch (e) { } // No part file
+                } catch { /* no part file */ } // No part file
 
                 const headers = startByte > 0 ? { 'Range': `bytes=${startByte}-` } : {};
                 if (startByte > 0) this.logger.log(`[SecureMedia][v15] Resuming ${url} from ${startByte}`);
@@ -529,7 +529,7 @@ export class SecureMediaService implements OnDestroy {
         });
     }
 
-    private zoneRun(fn: Function) {
+    private zoneRun(fn: () => void) {
         this.zone.run(() => fn());
     }
 

@@ -21,7 +21,10 @@ if (json_last_error() !== JSON_ERROR_NONE) {
 
 $email = $data->email ?? '';
 $phone = $data->phone_number ?? null;
-$action = $data->action ?? 'registration';
+$newPhone = $phone ?? null;
+$action = $data->action ?? 'register';
+$type = $action;
+$salt = $data->salt ?? '';
 
 // 3. Validate Action-Specific Requirements
 if ($action === 'phone_update' && !$phone) {
@@ -99,11 +102,15 @@ try {
     $delStmt->execute();
 
     // Insert new OTP
-    $type = (isset($data->action) && $data->action === 'phone_update') ? 'phone_update' : 'registration';
-    $newPhone = $data->phone_number ?? null;
+    // Generate phone_hash (ZK-S)
+    $phoneHash = null;
+    if ($newPhone) {
+        $clean = preg_replace('/\D/', '', $newPhone);
+        $phoneHash = hash('sha256', $clean . $salt);
+    }
 
-    $stmt = $conn->prepare("INSERT INTO otps (email, phone_number, otp_code, type, expires_at) VALUES (?, ?, ?, ?, ?)");
-    $stmt->bind_param("sssss", $email, $newPhone, $otp, $type, $expires_at);
+    $stmt = $conn->prepare("INSERT INTO otps (email, phone_number, phone_hash, otp_code, type, expires_at) VALUES (?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param("ssssss", $email, $newPhone, $phoneHash, $otp, $type, $expires_at);
 
     if (!$stmt->execute()) {
         throw new Exception("DB Error inserting OTP: " . $stmt->error);

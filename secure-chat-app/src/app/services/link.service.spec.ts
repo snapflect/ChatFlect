@@ -4,7 +4,7 @@ import { LoggingService } from './logging.service';
 import { CryptoService } from './crypto.service';
 import { of } from 'rxjs';
 
-const firestore = require('firebase/firestore');
+import * as firestore from 'firebase/firestore';
 
 describe('LinkService', () => {
     let service: LinkService;
@@ -26,11 +26,11 @@ describe('LinkService', () => {
                 return {};
             };
 
-            if (jasmine.isSpy(firestore[fn])) {
-                (firestore[fn] as jasmine.Spy).and.callFake(implementation);
+            if (jasmine.isSpy((firestore as any)[fn])) {
+                ((firestore as any)[fn] as jasmine.Spy).and.callFake(implementation);
             } else {
                 try {
-                    spyOn(firestore, fn).and.callFake(implementation);
+                    spyOn(firestore as any, fn).and.callFake(implementation);
                 } catch (e) {
                     const spy = jasmine.createSpy(fn).and.callFake(implementation);
                     try {

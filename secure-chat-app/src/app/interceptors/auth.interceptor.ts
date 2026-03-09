@@ -9,34 +9,50 @@ import {
 import { Observable, throwError, from } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import { AuthService } from '../services/auth.service';
+import { LoggingService } from '../services/logging.service';
 
 @Injectable()
 export class AuthInterceptor implements HttpInterceptor {
 
-    constructor(private injector: Injector) { }
+    constructor(
+        private injector: Injector,
+        private logger: LoggingService
+    ) { }
 
     intercept(request: HttpRequest<unknown>, next: HttpHandler): Observable<HttpEvent<unknown>> {
         const userId = localStorage.getItem('user_id');
         // Cookie Migration: Stop reading token from LocalStorage
         // const idToken = localStorage.getItem('id_token'); 
 
-        let authReq = this.addAuthHeader(request, userId, null);
+        const authReq = this.addAuthHeader(request, userId, null);
 
         return next.handle(authReq).pipe(
             catchError((error: HttpErrorResponse) => {
                 if (error.status === 401) {
-                    // Start token refresh flow
                     const authService = this.injector.get(AuthService);
+                    const refreshAttempt = parseInt(request.headers.get('X-Refresh-Attempt') || '0', 10);
+
+                    if (refreshAttempt >= 3) {
+                        this.logger.error('[AuthInterceptor] Maximum refresh attempts (3) reached. Forcing logout.');
+                        authService.logout();
+                        return throwError(() => error);
+                    }
+
+                    // Mutex implementation in AuthService ensures only one refresh call
                     return from(authService.refreshToken()).pipe(
-                        switchMap(newToken => {
-                            if (newToken) {
-                                // Retry with new token
-                                const retryReq = this.addAuthHeader(request, userId, newToken);
-                                return next.handle(retryReq);
-                            }
-                            // Redirect to login or logout if refresh fails
+                        switchMap(() => {
+                            // Retry with incremented attempt header
+                            const retryReq = request.clone({
+                                setHeaders: {
+                                    'X-Refresh-Attempt': (refreshAttempt + 1).toString()
+                                }
+                            });
+                            return next.handle(retryReq);
+                        }),
+                        catchError(refreshErr => {
+                            this.logger.error('[AuthInterceptor] Refresh failed after mutex', refreshErr);
                             authService.logout();
-                            return throwError(() => error);
+                            return throwError(() => refreshErr);
                         })
                     );
                 }

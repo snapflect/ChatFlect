@@ -18,8 +18,8 @@ export class ConflictResolverService {
     async resolve(actionId: string, error: any): Promise<'retry' | 'discard' | 'keep_remote'> {
         console.log('[ConflictResolver] Handling conflict for', actionId);
 
-        return new Promise(async (resolve) => {
-            const alert = await this.alertCtrl.create({
+        return new Promise((resolve) => {
+            this.alertCtrl.create({
                 header: 'Sync Conflict',
                 message: 'This item was modified remotely while you were offline. How do you want to proceed?',
                 backdropDismiss: false,
@@ -38,8 +38,7 @@ export class ConflictResolverService {
                         }
                     }
                 ]
-            });
-            await alert.present();
+            }).then(alert => alert.present());
         });
     }
 }

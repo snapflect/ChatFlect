@@ -13,7 +13,7 @@
   <!-- Profile Header (Simplified) -->
   <div class="profile-header ion-margin-bottom" routerLink="/profile">
     <ion-avatar class="small-avatar">
-      <img [secureSrc]="user.photo_url" />
+      <img [appSecureSrc]="user.photo_url" />
     </ion-avatar>
     <div class="profile-info">
       <h2>{{ user.first_name }} {{ user.last_name }}</h2>

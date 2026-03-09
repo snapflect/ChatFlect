@@ -61,4 +61,5 @@ import 'zone.js';  // Included with Angular CLI.
     version: '',
     nextTick: (fn: any) => setTimeout(fn, 0)
 };
-(window as any).Buffer = (window as any).Buffer || require('buffer').Buffer;
+import { Buffer } from 'buffer';
+(window as any).Buffer = (window as any).Buffer || Buffer;

@@ -265,14 +265,14 @@ export class SignalService {
         let innerPayload = plainText;
         try {
             let content: any = plainText;
-            try { content = JSON.parse(plainText); } catch (e) { }
+            try { content = JSON.parse(plainText); } catch { /* ignore parse error */ }
 
             if (typeof content === 'object' && content !== null) {
                 content['_duid'] = myDeviceUuid;
                 content['_mid'] = crypto.randomUUID();
                 innerPayload = JSON.stringify(content);
             }
-        } catch (e) { }
+        } catch { /* ignore identity binding error */ }
 
         const senderKeyName = `sender_key_${groupId}_${myUserId}_${myDeviceId}`;
 
@@ -687,7 +687,7 @@ export class SignalService {
         // Standard Signal: 30 digits in 6 groups of 5.
         // We will do a simplified version: taking 5 byte chunks, modulo 100000.
 
-        let codes = [];
+        const codes = [];
         for (let i = 0; i < 6; i++) { // 6 groups
             if ((i * 5) + 5 > bytes.length) break;
             const chunk = bytes.slice(i * 5, i * 5 + 5);

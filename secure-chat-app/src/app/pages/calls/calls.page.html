@@ -13,7 +13,7 @@
     <ion-item-sliding *ngFor="let call of calls" class="call-slider">
       <ion-item class="call-item glass-item" (click)="makeCall(call)">
         <ion-avatar slot="start">
-          <img [secureSrc]="getAvatar(call) || 'assets/user-placeholder.png'" />
+          <img [appSecureSrc]="getAvatar(call) || 'assets/user-placeholder.png'" />
         </ion-avatar>
 
         <ion-label>

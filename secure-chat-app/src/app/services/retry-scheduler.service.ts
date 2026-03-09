@@ -6,6 +6,7 @@ import { environment } from 'src/environments/environment';
 import { App } from '@capacitor/app';
 import { Network } from '@capacitor/network';
 import { AuthService } from './auth.service';
+import { Injector } from '@angular/core';
 
 /**
  * RetrySchedulerService (v2.3 Reliability Engine)
@@ -24,12 +25,19 @@ export class RetrySchedulerService {
 
     private readonly BACKOFF_STRATEGY = [30000, 120000, 600000, 3600000]; // 30s, 2m, 10m, 1h
     private readonly MAX_RETRIES = 5;
+    private _authService: AuthService | null = null;
+    private get authService(): AuthService {
+        if (!this._authService) {
+            this._authService = this.injector.get(AuthService);
+        }
+        return this._authService;
+    }
 
     constructor(
         private localDb: LocalDbService,
         private logger: LoggingService,
         private http: HttpClient,
-        private authService: AuthService
+        private injector: Injector
     ) {
         this.initLifecycle();
     }

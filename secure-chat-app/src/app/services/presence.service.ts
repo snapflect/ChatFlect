@@ -2,6 +2,7 @@ import { Injectable, OnDestroy } from '@angular/core';
 import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
 import { Observable, Subscription } from 'rxjs';
+import { Injector } from '@angular/core';
 
 @Injectable({
     providedIn: 'root'
@@ -21,20 +22,31 @@ export class PresenceService implements OnDestroy {
     private lastTypingSent = 0;
     private readonly TYPING_THROTTLE_MS = 10000; // 10s server guard
 
-    private authSub: Subscription;
+    private authSub: Subscription = Subscription.EMPTY;
+
+    private _authService: AuthService | null = null;
+    private get auth(): AuthService {
+        if (!this._authService) {
+            this._authService = this.injector.get(AuthService);
+        }
+        return this._authService;
+    }
 
     constructor(
         private api: ApiService, // Handles token injection automatically
-        private auth: AuthService
+        private injector: Injector
     ) {
-        this.authSub = this.auth.currentUserId.subscribe(uid => {
-            this.myId = uid;
-            if (uid) {
-                this.initPresenceTracking();
-            } else {
-                this.stopPresenceTracking();
-            }
-        });
+        // Defer subscription to avoid injecting Auth too early
+        setTimeout(() => {
+            this.authSub = this.auth.currentUserId.subscribe(uid => {
+                this.myId = uid;
+                if (uid) {
+                    this.initPresenceTracking();
+                } else {
+                    this.stopPresenceTracking();
+                }
+            });
+        }, 0);
 
         this.deviceUuid = localStorage.getItem('device_uuid');
     }
@@ -44,11 +56,14 @@ export class PresenceService implements OnDestroy {
         this.authSub?.unsubscribe();
     }
 
+    private isInitialized = false;
+
     initPresenceTracking() {
-        if (!this.myId) return;
+        if (!this.myId || this.isInitialized) return;
 
         // Visibility Listener
         document.addEventListener('visibilitychange', this.handleVisibilityChange);
+        this.isInitialized = true;
 
         // Start Heartbeat
         this.isVisible = document.visibilityState === 'visible';
@@ -60,6 +75,7 @@ export class PresenceService implements OnDestroy {
         document.removeEventListener('visibilitychange', this.handleVisibilityChange);
         if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
         this.heartbeatInterval = null;
+        this.isInitialized = false;
     }
 
     private handleVisibilityChange = () => {

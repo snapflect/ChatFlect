@@ -170,6 +170,8 @@ export class LocationService {
                         return true;
                     });
                 observer.next(locations);
+            }, (err) => {
+                this.logger.error("getLocations Snapshot error", err);
             });
             return () => unsub();
         });
@@ -201,9 +203,12 @@ export class LocationService {
         const q = query(ref, where('chatId', '==', chatId), orderBy('timestamp', 'desc'), limit(20));
 
         return new Observable(observer => {
-            onSnapshot(q, (snap) => {
+            const unsub = onSnapshot(q, (snap) => {
                 observer.next(snap.docs.map(d => d.data()));
+            }, (err) => {
+                this.logger.error("getViewerHistory Snapshot error", err);
             });
+            return () => unsub();
         });
     }
 }

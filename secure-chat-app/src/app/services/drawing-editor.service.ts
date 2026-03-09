@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 
-declare var fabric: any;
+declare const fabric: any;
 
 export interface DrawingTool {
     id: string;

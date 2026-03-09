@@ -7,7 +7,7 @@ import { PushService } from './push.service';
 import { CallService } from './call.service';
 import { of } from 'rxjs';
 
-const firestore = require('firebase/firestore');
+import * as firestore from 'firebase/firestore';
 
 describe('AuthService', () => {
   let service: AuthService;

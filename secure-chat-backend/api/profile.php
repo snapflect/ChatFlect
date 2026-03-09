@@ -68,6 +68,7 @@ if ($method === 'POST' && json_last_error() !== JSON_ERROR_NONE) {
 if ($method === 'POST') {
     // SECURITY FIX (Review 1.7): CSRF Protection for Login/Profile Actions
     validateCSRF();
+    $salt = $data->salt ?? '';
 
     /* ---------- OTP CONFIRM (UNCHANGED) ---------- */
     /* ---------- OTP CONFIRM (HYBRID) ---------- */
@@ -84,7 +85,7 @@ if ($method === 'POST') {
         }
 
         // 1. Verify OTP
-        $stmt = $conn->prepare("SELECT id FROM otps WHERE email = ? AND otp_code = ? AND expires_at > NOW()");
+        $stmt = $conn->prepare("SELECT id, phone_hash FROM otps WHERE email = ? AND otp_code = ? AND expires_at > NOW()");
         $stmt->bind_param("ss", $email, $otp);
         $stmt->execute();
         $res = $stmt->get_result();
@@ -94,6 +95,8 @@ if ($method === 'POST') {
             echo json_encode(["error" => "Invalid or Expired OTP"]);
             exit;
         }
+        $otpRow = $res->fetch_assoc();
+        $phoneHash = $otpRow['phone_hash'] ?? null;
 
         // 2. Check/Create User
         $cachedExists = CacheService::checkUserExists($email);
@@ -123,9 +126,9 @@ if ($method === 'POST') {
             $userId = trim(strtoupper($row['user_id'])); // Fix: Read from DB, not request
             $isProfileComplete = (int) $row['is_profile_complete'];
 
-            // Update Key
-            $upd = $conn->prepare("UPDATE users SET public_key = ? WHERE user_id = ?");
-            $upd->bind_param("ss", $publicKey, $userId);
+            // Update Key & Hash (Ensure hash propagates)
+            $upd = $conn->prepare("UPDATE users SET public_key = ?, phone_hash = COALESCE(?, phone_hash) WHERE user_id = ?");
+            $upd->bind_param("sss", $publicKey, $phoneHash, $userId);
             $upd->execute();
             $upd->close();
         } else {
@@ -134,8 +137,8 @@ if ($method === 'POST') {
             $userId = 'U' . strtoupper(bin2hex(random_bytes(12)));
             $isProfileComplete = 0;
 
-            $ins = $conn->prepare("INSERT INTO users (user_id, email, public_key, is_profile_complete) VALUES (?, ?, ?, 0)");
-            $ins->bind_param("sss", $userId, $email, $publicKey);
+            $ins = $conn->prepare("INSERT INTO users (user_id, email, public_key, phone_hash, is_profile_complete) VALUES (?, ?, ?, ?, 0)");
+            $ins->bind_param("ssss", $userId, $email, $publicKey, $phoneHash);
             if (!$ins->execute()) {
                 http_response_code(500);
                 echo json_encode(["error" => "Registration DB Error: " . $ins->error]);
@@ -306,6 +309,12 @@ if ($method === 'POST') {
                 $fields[] = "phone_number=?";
                 $types .= "s";
                 $params[] = $newPhone;
+
+                // Sync phone_hash (ZK-S)
+                $clean = preg_replace('/\D/', '', $newPhone);
+                $fields[] = "phone_hash=?";
+                $types .= "s";
+                $params[] = hash('sha256', $clean . $salt);
 
                 // If this was the missing piece, mark profile complete
                 $fields[] = "is_profile_complete=1";

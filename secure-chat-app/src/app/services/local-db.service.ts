@@ -1,10 +1,11 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Injector } from '@angular/core';
+import { AppInitService } from './app-init.service';
 import { CapacitorSQLite, SQLiteConnection, SQLiteDBConnection } from '@capacitor-community/sqlite';
 import { SecureStoragePlugin } from 'capacitor-secure-storage-plugin';
 import { NativeBiometric } from 'capacitor-native-biometric';
 import { LoggingService } from './logging.service';
 import { Platform } from '@ionic/angular';
-import { BehaviorSubject, firstValueFrom } from 'rxjs';
+import { BehaviorSubject, firstValueFrom, Subject } from 'rxjs';
 import { filter, take } from 'rxjs/operators';
 
 
@@ -32,6 +33,16 @@ export class LocalDbService {
     // HF-Race Fix: Event-driven Vault State
     public vaultState = new BehaviorSubject<VaultState>(VaultState.LOCKED);
     private isUnlocking: boolean = false; // Persistent guard for initialize()
+    private tableChangeSubject = new Subject<string>();
+    public tableChange$ = this.tableChangeSubject.asObservable();
+
+    public notifyTableChange(tableName: string) {
+        this.tableChangeSubject.next(tableName);
+    }
+
+    public onTableChange(tableName: string) {
+        return this.tableChange$.pipe(filter(t => t === tableName));
+    }
 
     /**
      * HF-8.37: Barrier promise that never orphans waiters.
@@ -51,124 +62,120 @@ export class LocalDbService {
 
     constructor(
         private logger: LoggingService,
-        private platform: Platform
+        private platform: Platform,
+        private injector: Injector
     ) { }
 
+    private get appInit(): AppInitService {
+        return this.injector.get(AppInitService);
+    }
+
+    /**
+     * HF-Robust: Singleton initialization guard.
+     */
     async initialize(): Promise<void> {
         if (this.initPromise) return this.initPromise;
-        if (this.isUnlocking) return this.readyPromise; // Wait for active unlock
+        this.initPromise = this.performInitialization();
+        return this.initPromise;
+    }
 
-        this.initPromise = (async () => {
-            try {
-                this.isUnlocking = true;
-                this.vaultState.next(VaultState.UNLOCKING);
-                this.logger.log(`[LocalDb] [Checkpoint 1] Starting initialization (Vault State: UNLOCKING)...`);
+    private async performInitialization(): Promise<void> {
+        try {
+            this.isUnlocking = true;
+            this.vaultState.next(VaultState.UNLOCKING);
+            this.logger.log(`[LocalDb] [Boot] Starting initialization...`);
 
-                const passphrase = await this.getOrCreatePassphrase();
-                this.logger.log("[LocalDb] [Checkpoint 2] Passphrase derived.");
+            await this.platform.ready();
+            this.logger.log("[LocalDb] [Boot] Platform ready.");
 
-                if (this.platform.is('hybrid')) {
-                    this.logger.log("[LocalDb] [Checkpoint 3] Hybrid mode. Waiting for platform ready...");
-                    await this.platform.ready();
+            // Check if vault was nuked - allow boot without biometrics
+            const isNuked = localStorage.getItem('vault_nuked') === 'true';
+            if (isNuked) {
+                this.logger.warn("[LocalDb] [Boot] Vault nuked detected. Skipping biometric gate for recovery.");
+            }
 
-                    // HF-8.31: Reduced delay to minimize race condition window
-                    this.logger.log("[LocalDb] [Checkpoint 3.1] Platform ready. Stabilizing UI...");
-                    await new Promise(r => setTimeout(r, 500));
+            const passphrase = await this.getOrCreatePassphrase();
+            this.logger.log("[LocalDb] [Boot] Passphrase derived.");
 
-                    const isBiometricVerified = await this.verifyBiometrics();
-                    if (!isBiometricVerified) {
-                        this.logger.warn("[LocalDb] [Checkpoint 3.F] Biometric gate not cleared (Check: BAL Block/User Cancel). VAULT_LOCKED.");
-                        this.lockVault();
-                        return;
-                    }
-                    this.logger.log("[LocalDb] [Checkpoint 4] Biometrics verified. Proceeding...");
+            if (this.platform.is('hybrid') && !isNuked) {
+                this.logger.log("[LocalDb] [Boot] Hybrid detected. Entering biometric gate...");
+                // HF-8.31: Stabilizing UI before biometric prompt
+                await new Promise(r => setTimeout(r, 800));
+
+                this.logger.log("[LocalDb] [Boot] Checking biometric availability...");
+                const isBiometricVerified = await this.verifyBiometrics();
+                if (!isBiometricVerified) {
+                    this.logger.warn("[LocalDb] [Boot] Biometric gate failed. VAULT_LOCKED.");
+                    this.lockVault();
+                    throw new Error('BIOMETRIC_FAILED');
                 }
+                this.logger.log("[LocalDb] [Boot] Biometrics verified.");
+            }
 
-                let retryCount = 0;
-                const maxRetries = 2;
+            let retryCount = 0;
+            const maxRetries = 2;
 
-                while (retryCount <= maxRetries) {
+            while (retryCount <= maxRetries) {
+                try {
+                    this.logger.log(`[LocalDb] [Boot] Connection attempt ${retryCount + 1}...`);
+
+                    // 2. Handle Management (Retrieve or Create)
                     try {
-                        this.logger.log(`[LocalDb] [Checkpoint 5] Connection attempt ${retryCount + 1}/${maxRetries + 1}...`);
-
-                        // 2. Handle Management (Retrieve or Create)
-                        try {
-                            const isConn = await this.sqlite.isConnection(this.DB_NAME, false);
-                            if (isConn.result) {
-                                this.logger.log("[LocalDb] [Checkpoint 5.1] Retrieving existing connection...");
-                                this.db = await this.sqlite.retrieveConnection(this.DB_NAME, false);
-                            } else {
-                                this.logger.log("[LocalDb] [Checkpoint 5.2] Creating fresh connection...");
-                                // HF-8.32: Use encrypted: false when providing encryptionKey manually in open()
-                                this.db = await this.sqlite.createConnection(this.DB_NAME, false, 'no-encryption', 1, false);
-                            }
-                        } catch (handleErr) {
-                            this.logger.warn("[LocalDb] [Checkpoint 5.H] Handle setup issue, forcing consistency reset...", handleErr);
-                            await this.sqlite.checkConnectionsConsistency();
+                        this.logger.log(`[LocalDb] [Boot] Checking connection existence for ${this.DB_NAME}...`);
+                        const isConn = await this.sqlite.isConnection(this.DB_NAME, false);
+                        if (isConn.result) {
+                            this.logger.log("[LocalDb] [Boot] Retrieving existing connection...");
+                            this.db = await this.sqlite.retrieveConnection(this.DB_NAME, false);
+                        } else {
+                            this.logger.log("[LocalDb] [Boot] Creating fresh connection...");
                             this.db = await this.sqlite.createConnection(this.DB_NAME, false, 'no-encryption', 1, false);
                         }
+                    } catch (handleErr) {
+                        this.logger.warn("[LocalDb] [Boot] Handle issue, resetting consistency...", handleErr);
+                        await this.sqlite.checkConnectionsConsistency();
+                        this.db = await this.sqlite.createConnection(this.DB_NAME, false, 'no-encryption', 1, false);
+                    }
 
-                        // 3. Open with Recovery Pattern
-                        try {
-                            this.logger.log("[LocalDb] [Checkpoint 6] Opening database...");
-                            if (!passphrase || passphrase.length < 10) throw new Error("INVALID_PASSPHRASE_MIN_LENGTH");
-                            await (this.db as any).open({ encryptionKey: passphrase });
-                        } catch (openErr: any) {
-                            const msg = openErr.message || "";
-                            if (msg.includes("already been set") || msg.includes("already open")) {
-                                this.logger.log("[LocalDb] [Checkpoint 6.S] Database already open, continuing.");
-                            } else if (msg.includes("No available connection") && retryCount < maxRetries) {
-                                this.logger.warn("[LocalDb] [Checkpoint 6.R] No connection available, nuking handle and retrying.");
-                                await this.sqlite.closeConnection(this.DB_NAME, false).catch(() => { });
-                                retryCount++;
-                                continue;
-                            } else {
-                                throw openErr;
-                            }
-                        }
-
-                        await this.createTables();
-                        this.isInitialized = true;
-
-                        // HF-Race Fix: Vault is fully operational
-                        this.vaultState.next(VaultState.READY);
-
-                        this.logger.log(`[LocalDb] [Checkpoint 8] SUCCESS: Initialized and Unlocked.`);
-
-                        return; // Done
-
-                    } catch (err: any) {
-                        this.logger.warn(`[LocalDb] [Checkpoint 5.E] Attempt failed: ${err.message}`, err);
-                        if (retryCount < maxRetries) {
+                    // 3. Open with Recovery Pattern
+                    try {
+                        if (!passphrase || passphrase.length < 10) throw new Error("INVALID_PASSPHRASE_MIN_LENGTH");
+                        await (this.db as any).open({ encryptionKey: passphrase });
+                    } catch (openErr: any) {
+                        const msg = openErr.message || "";
+                        if (msg.includes("already been set") || msg.includes("already open")) {
+                            this.logger.log("[LocalDb] [Boot] Database already open.");
+                        } else if (msg.includes("No available connection") && retryCount < maxRetries) {
+                            await this.sqlite.closeConnection(this.DB_NAME, false).catch(() => { });
                             retryCount++;
-                            await new Promise(r => setTimeout(r, 500));
+                            continue;
                         } else {
-                            throw err;
+                            throw openErr;
                         }
                     }
-                }
-            } catch (err: any) {
-                // Precise error serialization for debugging
-                const errorDetail = err instanceof Error ? {
-                    message: err.message,
-                    name: err.name,
-                    stack: err.stack,
-                    ...(err as any)
-                } : err;
 
-                if (err.message === 'VAULT_LOCKED') {
-                    this.logger.error("[LocalDb] Vault is locked.");
-                } else {
-                    this.logger.error(`[LocalDb] Initialization Fatal Error: ${JSON.stringify(errorDetail)}`, err);
+                    await this.createTables();
+                    this.isInitialized = true;
+                    this.vaultState.next(VaultState.READY);
+                    this.logger.log(`[LocalDb] [Boot] SUCCESS: Vault operational.`);
+                    return;
+
+                } catch (err: any) {
+                    this.logger.warn(`[LocalDb] [Boot] Attempt ${retryCount + 1} failed: ${err.message}`, err);
+                    if (retryCount < maxRetries) {
+                        retryCount++;
+                        await new Promise(r => setTimeout(r, 500));
+                    } else {
+                        throw err;
+                    }
                 }
-                this.lockVault();
-                throw err;
-            } finally {
-                this.isUnlocking = false;
             }
-        })();
-
-        return this.initPromise;
+        } catch (err: any) {
+            this.logger.error(`[LocalDb] [Boot] Fatal Error: ${err.message}`, err);
+            this.lockVault();
+            throw err;
+        } finally {
+            this.isUnlocking = false;
+        }
     }
 
     /**
@@ -258,12 +265,15 @@ export class LocalDbService {
 
     private async verifyBiometrics(): Promise<boolean> {
         try {
-            // Check if vault is already nuked
-            if (localStorage.getItem('vault_nuked') === 'true') {
-                throw new Error('VAULT_LOCKED');
-            }
+            // REMOVED: Proactive VAULT_LOCKED check here prevents recovery.
+            // Move to performInitialization logic to allow boot-to-login.
 
-            const result = await NativeBiometric.isAvailable();
+            const availabilityPromise = NativeBiometric.isAvailable();
+            const availabilityTimeout = new Promise<any>((_, reject) => {
+                setTimeout(() => reject(new Error("BIOMETRIC_AVAILABILITY_TIMEOUT")), 5000);
+            });
+
+            const result = await Promise.race([availabilityPromise, availabilityTimeout]);
             if (!result.isAvailable) {
                 this.logger.log("[LocalDb] Biometrics not available, skipping gate (Fallback to Device Lock).");
                 return true;
@@ -278,16 +288,19 @@ export class LocalDbService {
                 attempts++;
                 this.logger.log(`[LocalDb] Biometric attempt ${attempts}/${maxAttempts}...`);
 
+                // 5. Trigger System Prompt
+                this.logger.log("[LocalDb] [Boot] Launching biometric prompt...");
+                this.appInit.pauseWatchdog();
                 const biometricPromise = NativeBiometric.verifyIdentity({
-                    reason: "Unlock your secure messaging vault",
-                    title: "Vault Access",
-                    subtitle: "ChatFlect Security",
-                    description: "Verify your identity to access encrypted messages.",
-                    useFallback: true
+                    reason: "Unlock Secure Chat Vault",
+                    title: "Authentication Required",
+                    subtitle: "Confirm identity to access encrypted messages",
+                    description: "This app uses end-to-end encryption",
+                    negativeButtonText: "Cancel"
                 });
 
-                const timeoutPromise = new Promise((_, reject) => {
-                    setTimeout(() => reject(new Error("BIOMETRIC_TIMEOUT")), 25000);
+                const timeoutPromise = new Promise<void>((_, reject) => {
+                    setTimeout(() => reject(new Error("BIOMETRIC_VERIFY_TIMEOUT")), 15000); // 15s for user to interact
                 });
 
                 verified = await Promise.race([biometricPromise, timeoutPromise])
@@ -300,6 +313,7 @@ export class LocalDbService {
                         }
                         return false;
                     });
+                this.appInit.resumeWatchdog();
             }
 
             if (verified) {
@@ -327,7 +341,7 @@ export class LocalDbService {
         }
     }
 
-    private async triggerNuke() {
+    public async triggerNuke() {
         this.logger.error("[Critical][Security] NUKE TRIGGERED: Wiping all local data due to multiple failed access attempts.");
 
         // 1. Mark as permanently locked to prevent further attempts until fresh login
@@ -355,8 +369,8 @@ export class LocalDbService {
             this.logger.warn("[LocalDb] Failed to delete database file during nuke", e);
         }
 
-        // 5. Force Reload to Login
-        window.location.href = '/login';
+        // 5. Force Reload to Start Fresh
+        window.location.reload();
     }
 
     private async createTables() {
@@ -538,7 +552,13 @@ export class LocalDbService {
 
     async run(sql: string, params: any[] = []) {
         const db = await this.getReady();
-        return db.run(sql, params);
+        const res = await db.run(sql, params);
+
+        if (sql.includes('local_messages')) {
+            this.notifyTableChange('local_messages');
+        }
+
+        return res;
     }
 
     async query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
@@ -550,6 +570,17 @@ export class LocalDbService {
     async execute(statements: string) {
         const db = await this.getReady();
         return db.execute(statements);
+    }
+
+    public async forceReconnect() {
+        this.logger.warn('[LocalDb] Forcing reconnection and unlocking vault state...');
+        this.vaultState.next(VaultState.LOCKED); // Temporarily lock to block rapid consumers
+        this.isInitialized = false;
+        this.initPromise = null;
+        try {
+            await this.sqlite.closeConnection(this.DB_NAME, false);
+        } catch (e) { } // ignore if already closed
+        return this.initialize();
     }
 
     async runHealthCheck() {

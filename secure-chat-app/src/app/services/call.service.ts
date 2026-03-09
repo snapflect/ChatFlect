@@ -1,12 +1,13 @@
 import { Injectable } from '@angular/core';
 import { ApiService } from './api.service';
 import { BehaviorSubject, from } from 'rxjs';
-import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, where, addDoc, getDocs, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, updateDoc, onSnapshot, query, where, addDoc, getDocs, getDoc, deleteDoc } from 'firebase/firestore';
 import { LoggingService } from './logging.service';
 import { PushService } from './push.service';
 import { SoundService } from './sound.service';
 import { AudioToggle } from 'capacitor-plugin-audio-toggle';
 import { CallKitService } from './callkit.service';
+import { Injector } from '@angular/core';
 
 interface PeerSession {
     connection: RTCPeerConnection;
@@ -49,12 +50,20 @@ export class CallService {
         ]
     };
 
+    private _pushService: PushService | null = null;
+    private get pushService(): PushService {
+        if (!this._pushService) {
+            this._pushService = this.injector.get(PushService);
+        }
+        return this._pushService;
+    }
+
     constructor(
         private api: ApiService,
         private logger: LoggingService,
-        private pushService: PushService,
         private soundService: SoundService,
-        private callKit: CallKitService
+        private callKit: CallKitService,
+        private injector: Injector
     ) {
         try {
             this.db = getFirestore();
@@ -823,7 +832,6 @@ export class CallService {
     async deleteCallLog(callId: string) {
         try {
             const callRef = this.firestoreDoc(this.db, 'calls', callId);
-            const { deleteDoc } = require('firebase/firestore');
             await deleteDoc(callRef);
         } catch (e) {
             this.logger.error("Failed to delete call log", e);

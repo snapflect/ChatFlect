@@ -1,3 +1,30 @@
 <ion-app>
+  <!-- Global Offline Banner -->
+  <div class="offline-banner" *ngIf="isOffline$ | async">
+    <ion-icon name="cloud-offline-outline"></ion-icon>
+    No Internet Connection
+  </div>
+
+  <!-- Boot Fallback UI -->
+  <div class="boot-error-overlay" *ngIf="bootError$ | async as error">
+    <div class="boot-error-content">
+      <ion-icon name="alert-circle-outline" color="danger"></ion-icon>
+      <h2>App failed to start</h2>
+      <p>{{ error.message }}</p>
+
+      <div class="boot-actions">
+        <ion-button expand="block" (click)="retryBoot()">
+          <ion-icon name="refresh-outline" slot="start"></ion-icon>
+          Retry Startup
+        </ion-button>
+
+        <ion-button expand="block" fill="clear" color="medium" (click)="resetAndReload()">
+          <ion-icon name="trash-outline" slot="start"></ion-icon>
+          Reset All Data
+        </ion-button>
+      </div>
+    </div>
+  </div>
+
   <ion-router-outlet></ion-router-outlet>
 </ion-app>

@@ -7,7 +7,7 @@
 
       <!-- Avatar in Header: Use Unified SecureSrc -->
       <ion-avatar class="header-avatar" (click)="openContactInfo()">
-        <img [secureSrc]="chatPic || 'assets/user.png'" onerror="this.src='assets/user.png'">
+        <img [appSecureSrc]="chatPic || 'assets/user.png'" onerror="this.src='assets/user.png'">
       </ion-avatar>
     </ion-buttons>
 
@@ -109,12 +109,12 @@
 
       <div [class.msg-me]="isMyMsg(msg)" [class.msg-them]="!isMyMsg(msg)" class="msg-item">
 
-        <div class="bubble" (click)="isSelectionMode ? toggleSelection(msg) : null" longPress
+        <div class="bubble" (click)="isSelectionMode ? toggleSelection(msg) : null" appLongPress
           (longPress)="onMessageLongPress(msg)" [class.selected]="isSelected(msg.id)" appSwipeToReply
           (reply)="replyingTo = msg">
           <div class="msg-avatar-container" *ngIf="isGroup && !isMyMsg(msg)">
             <ion-avatar class="msg-avatar">
-              <img [secureSrc]="getSenderProfile(msg.senderId).photo" onerror="this.src='assets/user.png'">
+              <img [appSecureSrc]="getSenderProfile(msg.senderId).photo" onerror="this.src='assets/user.png'">
             </ion-avatar>
           </div>
           <div class="bubble-content">
@@ -147,7 +147,7 @@
             <div *ngIf="isMedia(msg.text) && (msg.text.type === 'image' || !msg.text.type)" class="media-content">
               <!-- Normal Image -->
               <ng-container *ngIf="!msg.text.viewOnce">
-                <img [secureSrc]="msg.text.url" [pymKey]="msg.text.k || msg.text.ks" [pymIv]="msg.text.i"
+                <img [appSecureSrc]="msg.text.url" [pymKey]="msg.text.k || msg.text.ks" [pymIv]="msg.text.i"
                   [pymHash]="msg.text.h" [pymSize]="msg.text.size" [pymMime]="msg.text.mime" class="message-image"
                   (click)="openImage(msg.text)" (error)="$any($event).target.src = 'assets/placeholder_broken.png'"
                   role="img" aria-label="Encrypted Image Content" />
@@ -183,7 +183,7 @@
             <div *ngIf="getMsgType(msg.text) === 'video'" class="media-content">
               <!-- Normal Video -->
               <ng-container *ngIf="!msg.text.viewOnce">
-                <video [secureSrc]="msg.text.url" [pymKey]="msg.text.k || msg.text.ks" [pymIv]="msg.text.i"
+                <video [appSecureSrc]="msg.text.url" [pymKey]="msg.text.k || msg.text.ks" [pymIv]="msg.text.i"
                   [pymHash]="msg.text.h" [pymSize]="msg.text.size" [pymMime]="msg.text.mime || 'video/mp4'" controls
                   class="message-video"></video>
 
@@ -226,7 +226,8 @@
             <!-- DOCUMENT -->
             <div *ngIf="getMsgType(msg.text) === 'document'" class="document-content" (click)="openDocument(msg.text)">
               <div class="document-icon">
-                <ion-icon [name]="getDocIcon(msg.text.mime)" *ngIf="!(getMediaProgress(msg) | async)"></ion-icon>
+                <ion-icon [name]="getDocIcon(msg.text.mime)"
+                  *ngIf="(getMediaProgress(msg) | async) === null"></ion-icon>
                 <!-- Progress Spinner for Documents -->
                 <ion-spinner name="circular" *ngIf="getMediaProgress(msg) | async as p"
                   style="color: white;"></ion-spinner>
@@ -239,9 +240,9 @@
                 </div>
               </div>
               <ion-icon name="download-outline" class="download-icon"
-                *ngIf="!isMyMsg(msg) && !(getMediaProgress(msg) | async)"></ion-icon>
+                *ngIf="!isMyMsg(msg) && (getMediaProgress(msg) | async) === null"></ion-icon>
               <ion-icon name="cloud-upload-outline" class="download-icon"
-                *ngIf="isMyMsg(msg) && !(getMediaProgress(msg) | async)"></ion-icon>
+                *ngIf="isMyMsg(msg) && (getMediaProgress(msg) | async) === null"></ion-icon>
             </div>
 
             <!-- REVOKED / DELETED MESSAGE -->
@@ -254,7 +255,7 @@
             <div *ngIf="getMsgType(msg.text) === 'contact'" class="contact-content">
               <div class="contact-card-inner">
                 <ion-avatar class="contact-msg-avatar">
-                  <img [secureSrc]="msg.text.photo" onerror="this.src='assets/user.png'" />
+                  <img [appSecureSrc]="msg.text.photo" onerror="this.src='assets/user.png'" />
                 </ion-avatar>
                 <div class="contact-info">
                   <div class="contact-name">{{ msg.text.name }}</div>
@@ -338,7 +339,7 @@
     <ion-list lines="none">
       <ion-item *ngFor="let user of mentionFilteredParticipants" button (click)="addMention(user)">
         <ion-avatar slot="start">
-          <img [secureSrc]="user.photo" onerror="this.src='assets/user.png'">
+          <img [appSecureSrc]="user.photo" onerror="this.src='assets/user.png'">
         </ion-avatar>
         <ion-label>
           <h2>{{ user.name }}</h2>

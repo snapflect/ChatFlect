@@ -1,4 +1,4 @@
-import { Component, Input, OnInit } from '@angular/core';
+import { Component, Input } from '@angular/core';
 import { ModalController, ToastController } from '@ionic/angular';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { LoggingService } from 'src/app/services/logging.service';
@@ -12,7 +12,7 @@ register();
     styleUrls: ['./image-modal.page.scss'],
     standalone: false
 })
-export class ImageModalPage implements OnInit {
+export class ImageModalPage {
     @Input() imageUrl: string = '';
     @Input() key: string = '';
     @Input() iv: string = '';
@@ -23,9 +23,6 @@ export class ImageModalPage implements OnInit {
         private logger: LoggingService
     ) { }
 
-    ngOnInit() {
-        // Swiper registered globally above, or we can call it here.
-    }
 
     close() {
         this.modalController.dismiss();

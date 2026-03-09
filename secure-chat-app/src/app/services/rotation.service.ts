@@ -58,7 +58,7 @@ export class RotationService {
             // Better: Load all and find max.
 
             // Let's assume we store nextSignedPreKeyId in store.
-            let nextId = await this.store.getNextSignedPreKeyId();
+            const nextId = await this.store.getNextSignedPreKeyId();
             const signedPreKey = await libsignal.KeyHelper.generateSignedPreKey(identityKeyPair, nextId);
 
             // 2. Increment Key Version
@@ -101,7 +101,7 @@ export class RotationService {
 
     async signRequest(privKey: ArrayBuffer, message: string): Promise<string> {
         // Use libsignal Curve (Ed25519) for signing
-        // @ts-ignore
+        // @ts-expect-error libsignal has no types for some Curve methods in some versions
         const signature = await libsignal.Curve.calculateSignature(privKey, new TextEncoder().encode(message));
         return this.arrayBufferToBase64(signature);
     }
