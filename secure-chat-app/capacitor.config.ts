@@ -40,7 +40,7 @@ const config: CapacitorConfig = {
       resizeOnFullScreen: false
     },
     CapacitorHttp: {
-      enabled: true
+      enabled: false
     },
     CapacitorSQLite: {
       androidIsEncryption: true,

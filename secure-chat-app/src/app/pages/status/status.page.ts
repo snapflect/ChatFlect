@@ -3,6 +3,8 @@ import { StatusService } from 'src/app/services/status.service';
 import { ModalController, ToastController, AlertController, ActionSheetController } from '@ionic/angular';
 import { StatusViewerPage } from '../status-viewer/status-viewer.page';
 import { ProfileService } from 'src/app/services/profile.service';
+import { App } from '@capacitor/app';
+import { PluginListenerHandle } from '@capacitor/core';
 
 interface StatusUser {
   user_id: string;
@@ -26,6 +28,7 @@ export class StatusPage implements OnInit {
   mutedUpdates: StatusUser[] = [];
   myProfilePic: string | null = null;
   myUserId: string = '';
+  private resumeSub: PluginListenerHandle | null = null;
 
   constructor(
     private statusService: StatusService,
@@ -36,10 +39,14 @@ export class StatusPage implements OnInit {
     private actionSheetCtrl: ActionSheetController
   ) { }
 
-  ionViewWillEnter() {
+  async ionViewWillEnter() {
     this.myUserId = localStorage.getItem('user_id') || '';
     this.loadProfile();
-    this.statusService.startPolling(15000); // Poll every 15s
+    this.statusService.refreshFeed(); // Load immediately handling TTL
+
+    this.resumeSub = await App.addListener('resume', () => {
+      this.statusService.refreshFeed();
+    });
   }
 
   ngOnInit() {
@@ -49,7 +56,9 @@ export class StatusPage implements OnInit {
   }
 
   ionViewWillLeave() {
-    this.statusService.stopPolling();
+    if (this.resumeSub) {
+      this.resumeSub.remove();
+    }
   }
 
   async loadProfile() {
@@ -121,9 +130,7 @@ export class StatusPage implements OnInit {
           name: item.user_id === this.myUserId ? 'My Status' : `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Unknown',
           avatar: item.user_photo,
           updates: [],
-          // timestamp property added to interface or ignored if not required by interface (TS might complain if interface expects it, but interface definition didn't have it in view 4006. Wait, view 4006 line 7-14 logic. 
-          // If I use it in sort, I need to cast or add to interface.
-          // I'll add 'lastTimestamp' or similar to the object, cast as any if needs be for sort.
+          view_count: 0
         } as any);
       }
 
@@ -140,6 +147,11 @@ export class StatusPage implements OnInit {
         view_count: item.view_count
       });
 
+      // Enterprise: Max view view aggregation instead of sum
+      if (item.view_count > (user.view_count || 0)) {
+        user.view_count = item.view_count;
+      }
+
       // Dynamic property for sorting
       if (item.created_at > (user as any).timestamp) {
         (user as any).timestamp = item.created_at;
@@ -155,8 +167,15 @@ export class StatusPage implements OnInit {
     // Sort others by latest timestamp
     others.sort((a, b) => new Date((b as any).timestamp || 0).getTime() - new Date((a as any).timestamp || 0).getTime());
 
-    this.recentUpdates = others.filter(u => this.hasUnviewedUpdates(u));
-    this.viewedUpdates = others.filter(u => !this.hasUnviewedUpdates(u));
+    // Segregate Muted users
+    this.mutedUpdates = others.filter(u => this.statusService.isUserMuted(u.user_id));
+    const activeOthers = others.filter(u => !this.statusService.isUserMuted(u.user_id));
+
+    this.recentUpdates = activeOthers.filter(u => this.hasUnviewedUpdates(u));
+    this.viewedUpdates = activeOthers.filter(u => !this.hasUnviewedUpdates(u));
+
+    // Trigger silent background prefetching of next few statuses
+    this.statusService.prefetchFeedMedia(this.recentUpdates);
   }
 
   loadStatus() {
@@ -164,15 +183,27 @@ export class StatusPage implements OnInit {
   }
 
   async uploadStatus(event: any) {
-    const file = event.target.files[0];
+    let file = event.target.files[0];
     if (file) {
       const mime = file.type;
       let type: 'image' | 'video' | 'audio' = 'image';
 
-      if (mime.startsWith('video')) {
+      if (mime.startsWith('image')) {
+        file = await this.compressImage(file);
+      } else if (mime.startsWith('video')) {
         type = 'video';
+        const isValid = await this.validateVideo(file);
+        if (!isValid) {
+          event.target.value = '';
+          return;
+        }
       } else if (mime.startsWith('audio')) {
         type = 'audio';
+      } else {
+        const t = await this.toast.create({ message: 'Unsupported file type', duration: 2000 });
+        t.present();
+        event.target.value = '';
+        return;
       }
 
       this.statusService.uploadStatus(file, '', type).subscribe({
@@ -189,6 +220,88 @@ export class StatusPage implements OnInit {
     }
     // Reset input
     event.target.value = '';
+  }
+
+  // HF Phase 3: Client-side Image Compression (1080px, 75% JPEG)
+  private async compressImage(file: File): Promise<File> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const objUrl = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(objUrl);
+        const MAX_WIDTH = 1080;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(file); // Fallback
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const outputMime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const quality = outputMime === 'image/jpeg' ? 0.75 : undefined;
+
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const ext = outputMime === 'image/png' ? '.png' : '.jpg';
+            const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, ext), {
+              type: outputMime,
+              lastModified: Date.now()
+            });
+            resolve(compressedFile);
+          } else {
+            resolve(file);
+          }
+        }, outputMime, quality);
+      };
+      img.onerror = () => resolve(file);
+      img.src = objUrl;
+    });
+  }
+
+  // HF Phase 3: Video Limits (30s, 5MB, 1080p)
+  private async validateVideo(file: File): Promise<boolean> {
+    if (file.size > 5 * 1024 * 1024) {
+      const t = await this.toast.create({ message: 'Video exceeds 5MB limit', duration: 3000 });
+      t.present();
+      return false;
+    }
+
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      const objUrl = URL.createObjectURL(file);
+
+      video.onloadedmetadata = async () => {
+        URL.revokeObjectURL(objUrl);
+
+        if (video.duration > 30.5) {
+          const t = await this.toast.create({ message: 'Video must be 30 seconds or less', duration: 3000 });
+          t.present();
+          return resolve(false);
+        }
+
+        if (video.videoWidth > 1920 || video.videoHeight > 1920) {
+          const t = await this.toast.create({ message: 'Video resolution exceeds 1080p max', duration: 3000 });
+          t.present();
+          return resolve(false);
+        }
+
+        resolve(true);
+      };
+
+      video.onerror = () => resolve(false);
+      video.src = objUrl;
+    });
   }
 
   async viewStatus(userStatus: StatusUser, isOwn: boolean = false) {

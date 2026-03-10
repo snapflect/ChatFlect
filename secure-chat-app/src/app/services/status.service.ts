@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { ApiService } from './api.service';
-import { BehaviorSubject, Observable } from 'rxjs';
-
+import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { debounceTime, throttleTime } from 'rxjs/operators';
+import { LocalDbService } from './local-db.service';
 @Injectable({
     providedIn: 'root'
 })
@@ -14,37 +15,86 @@ export class StatusService {
     private mutedUsersSubject = new BehaviorSubject<string[]>([]);
     public mutedUsers$ = this.mutedUsersSubject.asObservable();
 
-    constructor(private api: ApiService) {
-        this.loadMutedUsers();
-    }
-
     // Reactive Status Feed
     private statusSubject = new BehaviorSubject<any[]>([]);
     public statuses$ = this.statusSubject.asObservable();
-    private pollingInterval: any;
 
-    refreshFeed() {
-        const uid = localStorage.getItem('user_id') || '';
-        this.api.get(`status.php?action=feed&user_id=${uid}`).subscribe((res: any) => {
-            if (Array.isArray(res)) {
-                this.statusSubject.next(res);
-            }
+    // Enterprise Push Trigger Deduplication
+    private refreshTrigger = new Subject<void>();
+    private refreshInProgress: boolean = false;
+
+    constructor(private api: ApiService, private localDb: LocalDbService) {
+        this.loadMutedUsers();
+
+        // HF Phase 2: Debounce and throttle push events
+        this.refreshTrigger.pipe(
+            debounceTime(3000),
+            throttleTime(10000)
+        ).subscribe(() => {
+            this.executeFetch(true);
         });
     }
 
-    startPolling(intervalMs: number = 30000) {
-        this.refreshFeed(); // Immediate
-        this.stopPolling();
-        this.pollingInterval = setInterval(() => {
-            this.refreshFeed();
-        }, intervalMs);
+    async refreshFeed() {
+        // Fast UI render from SQLite
+        await this.loadFromCache();
+
+        // Push actual network fetch through the debounce engine
+        this.refreshTrigger.next();
     }
 
-    stopPolling() {
-        if (this.pollingInterval) {
-            clearInterval(this.pollingInterval);
-            this.pollingInterval = null;
+    private async loadFromCache() {
+        try {
+            const res = await this.localDb.query<{ feed_data: string, cache_time: number }>("SELECT feed_data, cache_time FROM status_cache WHERE id = 1");
+            if (res.length > 0 && res[0].feed_data) {
+                const data = JSON.parse(res[0].feed_data);
+                this.statusSubject.next(data);
+            }
+        } catch (e) {
+            console.error('[StatusService] Cache load fail', e);
         }
+    }
+
+    private async executeFetch(force: boolean = false) {
+        if (this.refreshInProgress) return;
+
+        try {
+            const res = await this.localDb.query<{ feed_data: string, cache_time: number }>("SELECT feed_data, cache_time FROM status_cache WHERE id = 1");
+            if (!force && res.length > 0) {
+                const age = Date.now() - res[0].cache_time;
+                if (age < 5 * 60 * 1000) {
+                    return; // Cache still valid
+                }
+            }
+        } catch (e) { }
+
+        this.refreshInProgress = true;
+        const uid = localStorage.getItem('user_id') || '';
+
+        this.api.get(`status.php?action=feed&user_id=${uid}`).subscribe({
+            next: async (res: any) => {
+                if (Array.isArray(res)) {
+                    this.statusSubject.next(res);
+                    // Update SQLite Cache efficiently without SQL injection risks using parametrized queries
+                    try {
+                        const dataStr = JSON.stringify(res);
+                        await this.localDb.run(`
+                            INSERT INTO status_cache (id, feed_data, cache_time) 
+                            VALUES (1, ?, ?)
+                            ON CONFLICT(id) DO UPDATE SET 
+                                feed_data=excluded.feed_data, 
+                                cache_time=excluded.cache_time;
+                        `, [dataStr, Date.now()]);
+                    } catch (e) {
+                        console.error('[StatusService] Cache write fail', e);
+                    }
+                }
+                this.refreshInProgress = false;
+            },
+            error: () => {
+                this.refreshInProgress = false;
+            }
+        });
     }
 
     // Load muted users from server
@@ -112,6 +162,41 @@ export class StatusService {
         return this.api.post('status.php?action=view', {
             status_id: statusId,
             viewer_id: localStorage.getItem('user_id')
+        });
+    }
+
+    // ==================== PREFETCHING ====================
+    // Silent background prefetcher for zero-latency UX
+    prefetchFeedMedia(users: any[]) {
+        if (!users || users.length === 0) return;
+
+        // HF Phase 9: Network Awareness Bandwidth Guard
+        const connection = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
+        if (connection) {
+            const type = connection.effectiveType;
+            if (type === '2g' || type === 'slow-2g') {
+                console.log('Status: Skipping prefetch to save bandwidth on slow network:', type);
+                return;
+            }
+        }
+
+        // Preload next 2 users' unviewed statuses
+        const toPrefetch = users.slice(0, 2);
+
+        toPrefetch.forEach(user => {
+            if (user.updates && user.updates.length > 0) {
+                const firstUnviewed = user.updates.find((u: any) => !this.isViewed(u.id)) || user.updates[0];
+
+                if (firstUnviewed && firstUnviewed.media_url && firstUnviewed.type === 'image') {
+                    const img = new Image();
+                    img.src = firstUnviewed.media_url;
+                } else if (firstUnviewed && firstUnviewed.media_url && firstUnviewed.type === 'video') {
+                    // Preload video metadata
+                    const vid = document.createElement('video');
+                    vid.preload = 'metadata';
+                    vid.src = firstUnviewed.media_url;
+                }
+            }
         });
     }
 

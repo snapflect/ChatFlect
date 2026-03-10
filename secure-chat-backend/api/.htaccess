@@ -5,9 +5,12 @@
 # ----------------
 # GLOBAL CORS & PREFLIGHT (CRITICAL for Mobile/Capacitor)
 # ----------------
-<IfModule mod_headers.c>
-    # Using 'always' ensures headers remain even on error responses (401, 404, 500)
-    Header always set Access-Control-Allow-Origin "*"
+    # HF FIX: Authenticated requests (withCredentials: true) REQUIRE a specific origin + Credentials header.
+    # Wildcard "*" is strictly forbidden for credentialed requests.
+    SetEnvIf Origin "^(http|https)://(localhost|chat\.snapflect\.com)(:[0-9]+)?$" ALLOWED_ORIGIN=$0
+    Header always set Access-Control-Allow-Origin %{ALLOWED_ORIGIN}e env=ALLOWED_ORIGIN
+    Header always set Access-Control-Allow-Credentials "true"
+
     Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
     Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-User-ID, If-None-Match, Cache-Control, Range"
     Header always set Access-Control-Expose-Headers "Content-Length, Content-Range, ETag"

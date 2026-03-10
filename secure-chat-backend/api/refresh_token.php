@@ -92,7 +92,7 @@ setcookie('auth_token', $newJti, [
     'domain' => '',
     'secure' => true,
     'httponly' => true,
-    'samesite' => 'Strict'
+    'samesite' => 'None'
 ]);
 
 $refreshExpires = time() + (86400 * 30); // 30 Days
@@ -102,7 +102,7 @@ setcookie('refresh_token', $newRefreshToken, [
     'domain' => '',
     'secure' => true,
     'httponly' => true,
-    'samesite' => 'Strict'
+    'samesite' => 'None'
 ]);
 
 echo json_encode([

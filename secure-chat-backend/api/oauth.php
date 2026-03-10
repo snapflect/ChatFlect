@@ -224,7 +224,7 @@ try {
         'domain' => '',
         'secure' => true,
         'httponly' => true,
-        'samesite' => 'Strict'
+        'samesite' => 'None'
     ]);
 
     $refreshExpires = time() + (86400 * 30); // 30 Days
@@ -234,7 +234,7 @@ try {
         'domain' => '',
         'secure' => true,
         'httponly' => true,
-        'samesite' => 'Strict'
+        'samesite' => 'None'
     ]);
 
     // Return success

@@ -247,7 +247,7 @@ export class ContactResolverService {
         if (payload.length === 0) return;
 
         // Batch into chunks to stay within PHP/POST limits
-        const chunkSize = 100;
+        const chunkSize = 50; // Reduced to 50 for smoother backend processing
         for (let i = 0; i < payload.length; i += chunkSize) {
             const chunk = payload.slice(i, i + chunkSize);
             const hashes = chunk.map(c => c.hash);

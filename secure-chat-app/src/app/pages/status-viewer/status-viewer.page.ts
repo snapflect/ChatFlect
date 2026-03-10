@@ -2,7 +2,7 @@ import { Component, Input, OnInit, OnDestroy, ViewChild, ElementRef, ChangeDetec
 import { ModalController, ActionSheetController, ToastController, AlertController } from '@ionic/angular';
 import { StatusService } from 'src/app/services/status.service';
 import { ApiService } from 'src/app/services/api.service';
-import { DomSanitizer } from '@angular/platform-browser';
+import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 
 @Component({
   selector: 'app-status-viewer',
@@ -29,7 +29,7 @@ export class StatusViewerPage implements OnInit, OnDestroy {
   isPaused = false;
   isVideoPlaying = false;
 
-  currentMediaUrl: any = '';
+  currentMediaUrl: SafeUrl | string = '';
   isLoading = false;
   private currentObjectUrl: string | null = null;
 
@@ -47,6 +47,7 @@ export class StatusViewerPage implements OnInit, OnDestroy {
   // Better to import AlertController properly.
 
   ngOnInit() {
+    console.log('[StatusViewer] Init. UserStatuses:', this.userStatuses);
     this.loadMedia(); // Initial load
     this.recordCurrentView();
   }
@@ -58,10 +59,6 @@ export class StatusViewerPage implements OnInit, OnDestroy {
   }
 
   cleanupMedia() {
-    if (this.currentObjectUrl) {
-      URL.revokeObjectURL(this.currentObjectUrl);
-      this.currentObjectUrl = null;
-    }
     this.currentMediaUrl = '';
   }
 
@@ -72,6 +69,7 @@ export class StatusViewerPage implements OnInit, OnDestroy {
     this.isLoading = true;
 
     const status = this.currentStatus;
+    console.log('[StatusViewer] Loading Media for Index:', this.currentIndex, 'Status:', status);
 
     // Text Status: No media to load
     if (this.isTextStatus) {
@@ -81,40 +79,30 @@ export class StatusViewerPage implements OnInit, OnDestroy {
       return;
     }
 
-    // Media Status: Fetch Blob
+    // Media Status: Use direct signed URL
     const url = status.media_url || status.content_url;
     if (!url) {
       this.isLoading = false;
-      return; // Broken status
+      return;
     }
 
-    this.api.getBlob(url).subscribe(blob => {
-      if (blob) {
-        this.currentObjectUrl = URL.createObjectURL(blob as any as Blob);
-        this.currentMediaUrl = this.sanitizer.bypassSecurityTrustUrl(this.currentObjectUrl);
+    console.log('[StatusViewer] Binding Direct URL:', url);
+    // Phase 6 FIX: Using bypassSecurityTrustUrl to prevent Angular from marking absolute signed URLs as 'unsafe'
+    this.currentMediaUrl = this.sanitizer.bypassSecurityTrustUrl(url);
 
-        this.isLoading = false;
-        // Delay slightly to allow DOM to render video/img tag
-        setTimeout(() => {
-          this.isPaused = false;
-          this.adjustDurationForMediaType();
-          this.playMedia();
+    this.isLoading = false;
+    // Delay slightly to allow DOM to render
+    setTimeout(() => {
+      this.isPaused = false;
+      this.adjustDurationForMediaType();
+      this.playMedia();
+      this.prefetchNextTwo();
 
-          // If it's an image, start timer immediately. 
-          // Video/Audio will wait for 'loadedmetadata' or manual play
-          if (this.isImageStatus) {
-            this.startTimer();
-          }
-        }, 100);
-        this.cdr.detectChanges();
-      } else {
-        this.isLoading = false;
-        this.toast.create({ message: 'Failed to load media', duration: 2000 }).then(t => t.present());
+      if (this.isImageStatus) {
+        this.startTimer();
       }
-    }, err => {
-      this.isLoading = false;
-      this.toast.create({ message: 'Error loading media', duration: 2000 }).then(t => t.present());
-    });
+    }, 100);
+    this.cdr.detectChanges();
   }
 
   // Adjusted accessors
@@ -260,6 +248,28 @@ export class StatusViewerPage implements OnInit, OnDestroy {
     this.stopTimer();
     this.stopMedia();
     this.modalCtrl.dismiss();
+  }
+
+  prefetchNextTwo() {
+    const indexes = [this.currentIndex + 1, this.currentIndex + 2];
+
+    indexes.forEach(i => {
+      const s = this.userStatuses[i];
+      if (!s || s.type === 'text') return;
+
+      const url = s.media_url || s.content_url;
+      if (!url) return;
+
+      if (s.type === 'video') {
+        const video = document.createElement('video');
+        video.preload = 'metadata'; // Memory safe preloading
+        video.src = url;
+        video.load();
+      } else {
+        const img = new Image();
+        img.src = url;
+      }
+    });
   }
 
   async showOptions() {

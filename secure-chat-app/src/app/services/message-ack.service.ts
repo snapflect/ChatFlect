@@ -61,7 +61,14 @@ export class MessageAckService {
         this.isPolling = true;
         this.startedAt = Date.now();
         this.resetPollSpeed();
-        this.poll(this.pollGeneration);
+
+        // Gate on Session Readiness (Firebase + Backend Cookie confirmed by ping)
+        this.authService.sessionReady$.pipe(
+            filter(Boolean),
+            take(1)
+        ).subscribe(() => {
+            this.poll(this.pollGeneration);
+        });
     }
 
     private async poll(generation: number) {

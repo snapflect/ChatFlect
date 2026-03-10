@@ -215,14 +215,21 @@ export class LocalDbService {
             let masterSeed = await this.secureGetWithRetry('sqlite_master_seed');
             let deviceSalt = await this.secureGetWithRetry('sqlite_device_salt');
 
-            const secretsShouldExist = localStorage.getItem('vault_secrets_exist') === 'true';
+            const sentinel = localStorage.getItem('vault_secrets_exist');
+
+            if (sentinel === 'true' && (!masterSeed || !deviceSalt)) {
+                this.logger.error("[LocalDb] CRITICAL: SecureStorage read failure. Retrying...");
+                const retryResult = await this.retrySecureStorageRead();
+                masterSeed = retryResult.masterSeed;
+                deviceSalt = retryResult.deviceSalt;
+
+                if (!masterSeed || !deviceSalt) {
+                    this.logger.error("[LocalDb] CRITICAL: Throwing error to prevent vault destruction.");
+                    throw new Error("SECURE_STORAGE_READ_ERROR: Vault secrets exist but could not be read. Aborting to prevent data loss.");
+                }
+            }
 
             if (!masterSeed || !deviceSalt) {
-                if (secretsShouldExist) {
-                    // Secrets SHOULD exist but Keystore returned null — data loss risk
-                    this.logger.error("[LocalDb] CRITICAL: Vault secrets exist (sentinel=true) but SecureStorage returned null. Possible Keystore corruption.");
-                    this.logger.error("[LocalDb] CRITICAL: Regenerating secrets will make the old database unreadable.");
-                }
 
                 this.logger.warn("[LocalDb] Hardware secrets missing. Generating new hardware-bound vault secrets...");
                 masterSeed = btoa(String.fromCharCode(...window.crypto.getRandomValues(new Uint8Array(32))));
@@ -281,6 +288,20 @@ export class LocalDbService {
             }
         }
         return null;
+    }
+
+    private async retrySecureStorageRead(): Promise<{ masterSeed: string | null, deviceSalt: string | null }> {
+        // Deep explicit retry block as requested by Production Fix
+        for (let i = 1; i <= 3; i++) {
+            await new Promise(r => setTimeout(r, 1000)); // 1s delay
+            this.logger.log(`[LocalDb] Explicit SecureStorage retry attempt ${i}/3...`);
+            const m = await SecureStoragePlugin.get({ key: 'sqlite_master_seed' }).catch(() => ({ value: null }));
+            const d = await SecureStoragePlugin.get({ key: 'sqlite_device_salt' }).catch(() => ({ value: null }));
+            if (m?.value && d?.value) {
+                return { masterSeed: m.value, deviceSalt: d.value };
+            }
+        }
+        return { masterSeed: null, deviceSalt: null };
     }
 
     /**
@@ -606,11 +627,20 @@ export class LocalDbService {
                 retry_count INTEGER DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_outbox_chat ON outbox(chat_id);
+
+            -- 15. Status Cache (v2.3)
+            CREATE TABLE IF NOT EXISTS status_cache (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                feed_data TEXT,
+                cache_time INTEGER,
+                schema_version INTEGER DEFAULT 1
+            );
         `;
         await this.db.execute(schema);
     }
 
     async run(sql: string, params: any[] = []) {
+        await this.readyPromise;
         const db = await this.getReady();
         const res = await db.run(sql, params);
 
@@ -622,6 +652,7 @@ export class LocalDbService {
     }
 
     async query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+        await this.readyPromise;
         const db = await this.getReady();
         const res = await db.query(sql, params);
         return (res.values as T[]) || [];

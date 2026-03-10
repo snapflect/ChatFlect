@@ -53,6 +53,7 @@ export class AuthService {
 
     private refreshInProgress: Promise<void> | null = null;
     private refreshTimer: any = null;
+    private isBooting = true;
 
     private resolveAuthPromise() {
         if (!this.authResolved && this.authReadyResolver) {
@@ -139,6 +140,10 @@ export class AuthService {
                 this.logger.log('[Auth] Firebase AUTH READY', { uid: user.uid });
                 this.firebaseReadySubject.next(true);
             } else {
+                if (this.isBooting) {
+                    this.logger.log('[Auth] Firebase null user during boot (WebView rehydration), skipping AUTH LOST flash.');
+                    return;
+                }
                 this.logger.log('[Auth] Firebase AUTH LOST');
                 this.firebaseReadySubject.next(false);
                 this.firebaseSigningIn = false;
@@ -177,6 +182,8 @@ export class AuthService {
                     this.logger.error('[Auth] Initial Push Sync Failed', e)
                 );
             });
+
+        this.isBooting = false;
     }
 
     private initBlockedListener(userId: string) {
@@ -320,6 +327,9 @@ export class AuthService {
     }
 
     public async checkTokenExpiry() {
+        // HF-Boot Fix: Don't run proactive refresh until session is confirmed
+        if (this.isBooting || !this.sessionReadySubject.value) return;
+
         const userId = localStorage.getItem('user_id');
         if (!userId) {
             if (this.refreshTimer) clearInterval(this.refreshTimer);
@@ -428,6 +438,18 @@ export class AuthService {
             this.logger.log('[Auth] Firebase ALREADY authenticated', { uid: authInstance.currentUser.uid });
             this.resolveAuthPromise();
             this.firebaseReadySubject.next(true);
+
+            // Ensure sessionReady also emits if we are already rehydrated
+            if (!this.sessionReadySubject.value) {
+                // Check backend session just in case
+                this.api.get('ping.php').toPromise().then(() => {
+                    this.logger.log("[Auth] Backend session confirmed via ping (Rehydration path).");
+                    this.sessionReadySubject.next(true);
+                }).catch(e => {
+                    this.logger.warn("[Auth] Backend session ping failed during rehydration re-check", e);
+                    this.sessionReadySubject.next(true); // Resolve anyway to avoid blocking
+                });
+            }
             return;
         }
 
@@ -462,8 +484,11 @@ export class AuthService {
                 try {
                     await this.api.get('ping.php').toPromise();
                     this.logger.log("[Auth] Backend session confirmed via ping.");
+
                     // Session fully ready: Firebase signed in + backend cookie confirmed
                     this.sessionReadySubject.next(true);
+                    // Also ensure firebaseReady is set if listener was slow/gated
+                    this.firebaseReadySubject.next(true);
                 } catch (pe) {
                     this.logger.warn("[Auth] Backend session ping failed/slow, resolving anyway to avoid hang", pe);
                     // Still mark session ready — the cookie may be valid even if ping failed

@@ -7,6 +7,7 @@ import { RelaySyncService } from './relay-sync.service';
 import { AuthService } from './auth.service';
 import { ChatService } from './chat.service';
 import { MessageAckService } from './message-ack.service';
+import { StatusService } from './status.service';
 
 @Injectable({
     providedIn: 'root'
@@ -39,6 +40,14 @@ export class PushService {
             this._ack = this.injector.get(MessageAckService);
         }
         return this._ack;
+    }
+
+    private _status: StatusService | null = null;
+    private get status(): StatusService {
+        if (!this._status) {
+            this._status = this.injector.get(StatusService);
+        }
+        return this._status;
     }
 
     constructor(
@@ -87,6 +96,9 @@ export class PushService {
 
                 // Legacy fallback
                 this.relaySync.forceSync();
+            } else if (data.type === 'NEW_STATUS') {
+                console.log('Push: NEW_STATUS SIGNAL RECEIVED -> Refreshing Status Feed');
+                this.status.refreshFeed();
             }
         });
 
@@ -101,9 +113,18 @@ export class PushService {
         });
     }
 
+    private forceRotation = false;
+
     private async registerToken(token: string) {
         const userId = this.auth.getUserId(); // Synchronous check
         if (!userId) return; // Wait for login
+
+        const lastToken = localStorage.getItem('last_push_token_value');
+        if (lastToken === token && !this.forceRotation) {
+            console.log('Push: Token unchanged. Skipping relay API sync.');
+            return;
+        }
+        this.forceRotation = false;
 
         let platformName = 'web';
         if (this.platform.is('android')) platformName = 'android';
@@ -134,6 +155,7 @@ export class PushService {
 
         if (now - parseInt(lastSync, 10) > sevenDaysMs) {
             console.log('Push: Sync threshold (7d) exceeded. Re-registering token...');
+            this.forceRotation = true;
             this.syncToken();
         }
     }
