@@ -131,7 +131,7 @@ export class StatusService {
         return new Observable(observer => {
             this.api.post('status.php', formData).subscribe({
                 next: (res) => {
-                    this.refreshFeed(); // Auto-refresh
+                    this.refreshFeed(true); // Auto-refresh (Immediate)
                     observer.next(res);
                     observer.complete();
                 },
@@ -153,7 +153,7 @@ export class StatusService {
         return new Observable(observer => {
             this.api.post('status.php', formData).subscribe({
                 next: (res) => {
-                    this.refreshFeed(); // Auto-refresh
+                    this.refreshFeed(true); // Auto-refresh (Immediate)
                     observer.next(res);
                     observer.complete();
                 },
