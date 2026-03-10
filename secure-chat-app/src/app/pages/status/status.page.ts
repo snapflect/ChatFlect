@@ -118,6 +118,11 @@ export class StatusPage implements OnInit {
     return gradient;
   }
 
+  hasUnviewed(status: StatusUser | null): boolean {
+    if (!status) return false;
+    return status.updates.some(u => !this.statusService.isViewed(u.id));
+  }
+
   processFeed(res: any[]) {
     if (!res) return;
     // Group by user

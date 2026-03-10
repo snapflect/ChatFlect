@@ -51,23 +51,41 @@
 }
 
 .ring-container {
-    padding: 2px;
-    border: 2px solid transparent;
+    padding: 3px;
     border-radius: 50%;
     margin-right: 10px;
     position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+}
+
+.inner-ring-bg {
+    background: var(--ion-background-color, #000);
+    border-radius: 50%;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.status-ring {
+    margin: 0;
+    width: 44px;
+    height: 44px;
 }
 
 .ring-active {
-    border-color: var(--ion-color-tertiary, #25D366);
+    background: var(--ion-color-tertiary, #25D366) !important;
 }
 
 .ring-viewed {
-    border-color: var(--ion-color-medium, #888);
+    background: var(--ion-color-medium, #888) !important;
 }
 
 .ring-muted {
-    border-color: var(--ion-color-medium-tint, #aaa);
+    background: var(--ion-color-medium-tint, #aaa) !important;
     opacity: 0.6;
 }
 

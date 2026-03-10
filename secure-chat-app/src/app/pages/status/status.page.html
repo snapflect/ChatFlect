@@ -14,10 +14,13 @@
   <!-- My Status -->
   <ion-item lines="none" class="bg-transparent status-item" (click)="myStatus ? viewStatus(myStatus, true) : null">
     <div slot="start" class="avatar-wrapper">
-      <div [class.ring-container]="myStatus" [class.ring-active]="myStatus">
-        <ion-avatar>
-          <img [appSecureSrc]="getFirstMediaUrl(myStatus) || myProfilePic" />
-        </ion-avatar>
+      <div class="ring-container" [style.background]="myStatus ? getRingStyle(myStatus) : 'none'"
+        [class.ring-active]="hasUnviewed(myStatus)" [class.ring-viewed]="myStatus && !hasUnviewed(myStatus)">
+        <div class="inner-ring-bg">
+          <ion-avatar class="status-ring">
+            <img [appSecureSrc]="getFirstMediaUrl(myStatus) || myProfilePic" />
+          </ion-avatar>
+        </div>
       </div>
 
       <!-- Add Icon only if no status -->
