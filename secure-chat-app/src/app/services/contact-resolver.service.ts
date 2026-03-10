@@ -89,6 +89,7 @@ export class ContactResolverService {
             this.logger.log(`[ContactResolver] Found ${result.contacts.length} device contacts.`);
 
             const syncPayload: { hash: string; displayName: string }[] = [];
+            const hashMapping = new Map<string, string>(); // Maps ANY secondary hash to the Primary Hash
 
             // 5. Normalize, Hash, & Store locally
             for (const contact of result.contacts) {
@@ -98,7 +99,8 @@ export class ContactResolverService {
                     const e164 = this.normalizePhoneNumber(phoneItem.number || '');
                     if (!e164) continue;
 
-                    const hash = await this.hashPhone(e164);
+                    const e164Digits = e164.replace(/\D/g, '');
+                    const primaryHash = await this.hashPhone(e164Digits);
                     const phoneLast4 = e164.slice(-4);
                     const displayName = contact.name?.display || 'Unknown';
 
@@ -111,14 +113,27 @@ export class ContactResolverService {
                             phone_last4 = excluded.phone_last4,
                             phone_e164 = excluded.phone_e164,
                             last_synced_at = excluded.last_synced_at
-                    `, [hash, displayName, phoneLast4, e164, Date.now()]);
+                    `, [primaryHash, displayName, phoneLast4, e164, Date.now()]);
 
-                    syncPayload.push({ hash, displayName });
+                    // Add primary format to sync payload
+                    syncPayload.push({ hash: primaryHash, displayName });
+                    hashMapping.set(primaryHash, primaryHash);
+
+                    // Add secondary national format (covers edge cases where users registered locally without country codes)
+                    const parsed = parsePhoneNumberFromString(phoneItem.number || '', this.DEFAULT_REGION as any);
+                    if (parsed && parsed.nationalNumber) {
+                        const nationalDigits = parsed.nationalNumber.replace(/\D/g, '');
+                        if (nationalDigits !== e164Digits) {
+                            const natHash = await this.hashPhone(nationalDigits);
+                            syncPayload.push({ hash: natHash, displayName });
+                            hashMapping.set(natHash, primaryHash); // Link back to local Db row
+                        }
+                    }
                 }
             }
 
             // 6. Batch Sync with Backend (Privacy-First: Only send hashes)
-            await this.performSync(syncPayload);
+            await this.performSync(syncPayload, hashMapping);
 
             localStorage.setItem('last_contact_sync', Date.now().toString());
             this.logger.log('[ContactResolver] Sync completed successfully.');
@@ -209,12 +224,13 @@ export class ContactResolverService {
     }
 
     /**
-     * SHA-256(cleaned_phone + salt). If no salt available, falls back to SHA-256(cleaned_phone).
-     * Must exactly match PHP backend: hash('sha256', preg_replace('/\D/', '', $phone) . $salt)
+     * SHA-256(cleaned_phone). We cannot use a device-specific salt because 
+     * User A's device cannot know User B's salt to look them up.
+     * Must exactly match PHP backend: hash('sha256', preg_replace('/\D/', '', $phone))
      */
     private async hashPhone(e164: string): Promise<string> {
         const cleanPhone = e164.replace(/\D/g, ''); // Strip '+' and any non-digits
-        const input = this.deviceSalt ? (cleanPhone + this.deviceSalt) : cleanPhone;
+        const input = cleanPhone;
         const encoder = new TextEncoder();
         const data = encoder.encode(input);
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -227,7 +243,7 @@ export class ContactResolverService {
        PRIVATE: Backend Sync
     ================================= */
 
-    private async performSync(payload: { hash: string; displayName: string }[]): Promise<void> {
+    private async performSync(payload: { hash: string; displayName: string }[], hashMapping: Map<string, string>): Promise<void> {
         if (payload.length === 0) return;
 
         // Batch into chunks to stay within PHP/POST limits
@@ -250,6 +266,9 @@ export class ContactResolverService {
 
                 if (response && response.success && Array.isArray(response.matches)) {
                     for (const match of response.matches) {
+                        const primaryHash = hashMapping.get(match.hash);
+                        if (!primaryHash) continue; // Should never happen unless DB out of sync
+
                         // Update local contact with server data
                         await this.localDb.run(`
                             UPDATE local_contacts 
@@ -260,7 +279,7 @@ export class ContactResolverService {
                             match.photo_url || null,
                             match.server_name || null,
                             match.short_note || null,
-                            match.hash
+                            primaryHash
                         ]);
                     }
                     this.logger.log(`[ContactResolver] Batch matched ${response.matches.length} users.`);
