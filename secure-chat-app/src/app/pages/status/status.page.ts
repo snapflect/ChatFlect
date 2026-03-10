@@ -130,12 +130,13 @@ export class StatusPage implements OnInit {
           name: item.user_id === this.myUserId ? 'My Status' : `${item.first_name || ''} ${item.last_name || ''}`.trim() || 'Unknown',
           avatar: item.user_photo,
           updates: [],
-          view_count: 0
+          view_count: 0,
+          timestamp: '' // HF Phase 9: Initialize to fix comparison with 'undefined'
         } as any);
       }
 
       const user = usersMap.get(item.user_id)!;
-      user.updates.push({
+      user.updates.unshift({
         id: item.id,
         type: item.type,
         media_url: item.media_url,

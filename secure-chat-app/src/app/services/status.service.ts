@@ -35,12 +35,17 @@ export class StatusService {
         });
     }
 
-    async refreshFeed() {
+    async refreshFeed(force: boolean = false) {
         // Fast UI render from SQLite
         await this.loadFromCache();
 
-        // Push actual network fetch through the debounce engine
-        this.refreshTrigger.next();
+        if (force) {
+            // Bypass the debounced engine for explicit user actions (like posting a story)
+            this.executeFetch(true);
+        } else {
+            // Push background refreshes through the debounce engine
+            this.refreshTrigger.next();
+        }
     }
 
     private async loadFromCache() {
@@ -227,7 +232,7 @@ export class StatusService {
                     // Optimistic update for raw rows:
                     // const filtered = current.filter((s: any) => s.id != statusId);
                     // this.statusSubject.next(filtered);
-                    this.refreshFeed(); // Safe fallback
+                    this.refreshFeed(true); // Safe fallback
                     observer.next(res);
                     observer.complete();
                 },

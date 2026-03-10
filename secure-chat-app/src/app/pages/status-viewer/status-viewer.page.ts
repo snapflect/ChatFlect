@@ -48,6 +48,13 @@ export class StatusViewerPage implements OnInit, OnDestroy {
 
   ngOnInit() {
     console.log('[StatusViewer] Init. UserStatuses:', this.userStatuses);
+
+    // Jump to the first unviewed status
+    const firstUnviewed = this.userStatuses.findIndex(u => !this.statusService.isViewed(u.id));
+    if (firstUnviewed !== -1) {
+      this.currentIndex = firstUnviewed;
+    }
+
     this.loadMedia(); // Initial load
     this.recordCurrentView();
   }
