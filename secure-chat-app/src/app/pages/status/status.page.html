@@ -18,7 +18,7 @@
         [class.ring-active]="hasUnviewed(myStatus)" [class.ring-viewed]="myStatus && !hasUnviewed(myStatus)">
         <div class="inner-ring-bg">
           <ion-avatar class="status-ring">
-            <img [appSecureSrc]="getFirstMediaUrl(myStatus) || myProfilePic" />
+            <img [appSecureSrc]="getFirstMediaUrl(myStatus) || myProfilePic || 'assets/placeholder_user.png'" />
           </ion-avatar>
         </div>
       </div>
