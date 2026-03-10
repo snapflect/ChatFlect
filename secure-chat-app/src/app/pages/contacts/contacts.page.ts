@@ -19,6 +19,7 @@ export class ContactsPage implements OnInit, OnDestroy {
 
   // Display lists (filtered by search)
   groupedRegistered: { letter: string, contacts: ResolvedContact[] }[] = [];
+  displayRegisteredCount: number = 0;
   displayUnregistered: ResolvedContact[] = [];
 
   globalResults: any[] = [];
@@ -123,6 +124,7 @@ export class ContactsPage implements OnInit, OnDestroy {
 
     // Update Registered grouped list
     this.groupRegisteredContacts(filteredReg);
+    this.displayRegisteredCount = filteredReg.length;
   }
 
   private groupRegisteredContacts(filtered: ResolvedContact[]) {

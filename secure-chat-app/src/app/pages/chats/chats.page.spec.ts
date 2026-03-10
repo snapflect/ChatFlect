@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testin
 import { ChatsPage } from './chats.page';
 import { IonicModule, NavController, ToastController, ActionSheetController, AlertController } from '@ionic/angular';
 import { ChatService } from 'src/app/services/chat.service';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { PresenceService } from 'src/app/services/presence.service';
 import { ChatSettingsService } from 'src/app/services/chat-settings.service';
 import { SecureMediaService } from 'src/app/services/secure-media.service'; // Import Service
@@ -21,10 +21,8 @@ describe('ChatsPage', () => {
 
   beforeEach(async () => {
     chatServiceSpy = jasmine.createSpyObj('ChatService', ['getMyChats', 'getUserInfo']);
-    const contactsSpy = jasmine.createSpyObj('ContactsService', ['getContacts'], {
-      localContacts: []
-    });
-    contactsSpy.getContacts.and.returnValue(Promise.resolve([]));
+    const contactsSpy = jasmine.createSpyObj('ContactResolverService', ['getAllResolvedContactsAsArray']);
+    contactsSpy.getAllResolvedContactsAsArray.and.returnValue(Promise.resolve([]));
 
     // Mock getUserInfo for async fallback
     chatServiceSpy.getUserInfo.and.returnValue(Promise.resolve({
@@ -72,7 +70,7 @@ describe('ChatsPage', () => {
       imports: [IonicModule.forRoot(), RouterTestingModule, SharedModule], // Add SharedModule
       providers: [
         { provide: ChatService, useValue: chatServiceSpy },
-        { provide: ContactsService, useValue: contactsSpy },
+        { provide: ContactResolverService, useValue: contactsSpy },
         { provide: PresenceService, useValue: presenceSpy },
         { provide: ChatSettingsService, useValue: chatSettingsSpy },
         { provide: SecureMediaService, useValue: secureMediaSpy }, // Provide Mock

@@ -2,20 +2,20 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { PickContactModalComponent } from './pick-contact-modal.component';
 import { IonicModule, ModalController } from '@ionic/angular';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { of } from 'rxjs';
 
 describe('PickContactModalComponent', () => {
     let component: PickContactModalComponent;
     let fixture: ComponentFixture<PickContactModalComponent>;
-    let contactsServiceSpy: jasmine.SpyObj<ContactsService>;
+    let contactsServiceSpy: jasmine.SpyObj<ContactResolverService>;
     let modalCtrlSpy: jasmine.SpyObj<ModalController>;
 
     beforeEach(async () => {
-        contactsServiceSpy = jasmine.createSpyObj('ContactsService', ['getContacts']);
-        contactsServiceSpy.getContacts.and.returnValue(Promise.resolve([
-            { user_id: '1', first_name: 'Alice', last_name: 'Doe' },
-            { user_id: '2', first_name: 'Bob', last_name: 'Smith' }
+        contactsServiceSpy = jasmine.createSpyObj('ContactResolverService', ['getAllResolvedContactsAsArray']);
+        contactsServiceSpy.getAllResolvedContactsAsArray.and.returnValue(Promise.resolve([
+            { user_id: '1', display_name: 'Alice Doe', hash: 'h1', phone_last4: '1234', phone_e164: null, status: 'on_chatflect', photo_url: null, server_name: null, short_note: null },
+            { user_id: '2', display_name: 'Bob Smith', hash: 'h2', phone_last4: '5678', phone_e164: null, status: 'on_chatflect', photo_url: null, server_name: null, short_note: null }
         ]));
 
         modalCtrlSpy = jasmine.createSpyObj('ModalController', ['dismiss']);
@@ -24,7 +24,7 @@ describe('PickContactModalComponent', () => {
             declarations: [PickContactModalComponent],
             imports: [IonicModule.forRoot()],
             providers: [
-                { provide: ContactsService, useValue: contactsServiceSpy },
+                { provide: ContactResolverService, useValue: contactsServiceSpy },
                 { provide: ModalController, useValue: modalCtrlSpy }
             ]
         }).compileComponents();

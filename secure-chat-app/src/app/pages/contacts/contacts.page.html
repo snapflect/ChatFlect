@@ -34,7 +34,7 @@
     <div *ngIf="groupedRegistered.length > 0">
       <ion-list-header>
         <ion-label color="secondary">Contacts on ChatFlect</ion-label>
-        <ion-badge color="tertiary" slot="end">{{ registeredContacts.length }}</ion-badge>
+        <ion-badge color="tertiary" slot="end">{{ displayRegisteredCount }}</ion-badge>
       </ion-list-header>
 
       <ion-item-group *ngFor="let group of groupedRegistered">

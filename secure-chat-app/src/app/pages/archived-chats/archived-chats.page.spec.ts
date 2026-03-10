@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed, fakeAsync, tick, flush } from '@angular/core
 import { IonicModule, ToastController, NavController } from '@ionic/angular';
 import { ArchivedChatsPage } from './archived-chats.page';
 import { ChatService } from 'src/app/services/chat.service';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { PresenceService } from 'src/app/services/presence.service';
 import { ChatSettingsService } from 'src/app/services/chat-settings.service';
 import { of } from 'rxjs';
@@ -14,7 +14,7 @@ describe('ArchivedChatsPage', () => {
     let fixture: ComponentFixture<ArchivedChatsPage>;
 
     const chatServiceSpy = jasmine.createSpyObj('ChatService', ['getMyChats', 'getUserInfo']);
-    const contactsServiceSpy = jasmine.createSpyObj('ContactsService', ['getContacts']);
+    const contactsServiceSpy = jasmine.createSpyObj('ContactResolverService', ['getAllResolvedContactsAsArray']);
     const presenceServiceSpy = jasmine.createSpyObj('PresenceService', ['getPresence']);
     const chatSettingsSpy = jasmine.createSpyObj('ChatSettingsService', ['loadMultipleSettings', 'isArchived', 'toggleArchive'], {
         settings$: of(new Map())
@@ -28,7 +28,7 @@ describe('ArchivedChatsPage', () => {
             imports: [RouterTestingModule],
             providers: [
                 { provide: ChatService, useValue: chatServiceSpy },
-                { provide: ContactsService, useValue: contactsServiceSpy },
+                { provide: ContactResolverService, useValue: contactsServiceSpy },
                 { provide: PresenceService, useValue: presenceServiceSpy },
                 { provide: ChatSettingsService, useValue: chatSettingsSpy },
                 { provide: ToastController, useValue: toastSpy },
@@ -42,8 +42,7 @@ describe('ArchivedChatsPage', () => {
 
         chatServiceSpy.getMyChats.and.returnValue(of([]));
         chatServiceSpy.getUserInfo.and.returnValue(Promise.resolve({ username: 'testuser', photo: '' }));
-        contactsServiceSpy.getContacts.and.returnValue(Promise.resolve());
-        contactsServiceSpy.localContacts = [];
+        contactsServiceSpy.getAllResolvedContactsAsArray.and.returnValue(Promise.resolve([]));
         chatSettingsSpy.loadMultipleSettings.and.returnValue(Promise.resolve());
         presenceServiceSpy.getPresence.and.returnValue(of({ state: 'online' }));
     }));

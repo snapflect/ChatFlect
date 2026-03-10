@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ContactsPage } from './contacts.page';
 import { IonicModule, ToastController, AlertController, NavController } from '@ionic/angular';
-import { ContactsService } from 'src/app/services/contacts.service';
+import { ContactResolverService } from 'src/app/services/contact-resolver.service';
 import { ChatService } from 'src/app/services/chat.service';
 import { Router } from '@angular/router';
 import { LoggingService } from 'src/app/services/logging.service';
@@ -16,7 +16,7 @@ describe('ContactsPage', () => {
       declarations: [ContactsPage],
       imports: [IonicModule.forRoot()],
       providers: [
-        { provide: ContactsService, useValue: jasmine.createSpyObj('ContactsService', ['getAllContacts', 'syncPhone', 'saveManualContact']) },
+        { provide: ContactResolverService, useValue: jasmine.createSpyObj('ContactResolverService', ['getResolvedContacts', 'syncContacts', 'searchGlobal']) },
         { provide: ChatService, useValue: jasmine.createSpyObj('ChatService', ['getOrCreateChat']) },
         { provide: Router, useValue: jasmine.createSpyObj('Router', ['navigate']) },
         { provide: ToastController, useValue: jasmine.createSpyObj('ToastController', ['create']) },
