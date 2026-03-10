@@ -12,8 +12,8 @@
     </ion-buttons>
   </ion-toolbar>
   <ion-toolbar>
-    <ion-searchbar (ionInput)="onSearchChange($event)" placeholder="Search contacts..." animated="true"
-      showCancelButton="focus"></ion-searchbar>
+    <ion-searchbar [value]="searchQuery" (ionInput)="onSearchChange($event)" placeholder="Search contacts..."
+      animated="true" showCancelButton="focus"></ion-searchbar>
   </ion-toolbar>
 </ion-header>
 
@@ -25,7 +25,7 @@
   <div class="ion-padding-top">
 
     <!-- Empty State -->
-    <div *ngIf="groupedRegistered.length === 0 && unregisteredContacts.length === 0 && globalResults.length === 0"
+    <div *ngIf="groupedRegistered.length === 0 && displayUnregistered.length === 0 && globalResults.length === 0"
       class="empty-state ion-text-center ion-padding">
       <p class="text-muted">No contacts found.</p>
     </div>
@@ -55,13 +55,13 @@
     </div>
 
     <!-- Invite to ChatFlect (Unregistered) -->
-    <div *ngIf="unregisteredContacts.length > 0" class="ion-margin-top anim-fade-in">
+    <div *ngIf="displayUnregistered.length > 0" class="ion-margin-top anim-fade-in">
       <ion-list-header>
         <ion-label color="medium">Invite to ChatFlect</ion-label>
-        <ion-badge color="medium" slot="end">{{ unregisteredContacts.length }}</ion-badge>
+        <ion-badge color="medium" slot="end">{{ displayUnregistered.length }}</ion-badge>
       </ion-list-header>
 
-      <ion-item *ngFor="let c of unregisteredContacts" class="contact-item invite-item">
+      <ion-item *ngFor="let c of displayUnregistered" class="contact-item invite-item">
         <ion-avatar slot="start" class="contact-avatar placeholder-avatar">
           <ion-icon name="person-outline" color="medium"></ion-icon>
         </ion-avatar>

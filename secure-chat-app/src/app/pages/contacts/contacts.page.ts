@@ -5,7 +5,7 @@ import { ContactResolverService, ResolvedContact } from 'src/app/services/contac
 import { ChatService } from 'src/app/services/chat.service';
 import { Share } from '@capacitor/share';
 import { LoggingService } from 'src/app/services/logging.service';
-import { Subject, takeUntil } from 'rxjs';
+import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
 
 @Component({
   selector: 'app-contacts',
@@ -19,11 +19,13 @@ export class ContactsPage implements OnInit, OnDestroy {
 
   // Display lists (filtered by search)
   groupedRegistered: { letter: string, contacts: ResolvedContact[] }[] = [];
+  displayUnregistered: ResolvedContact[] = [];
 
   globalResults: any[] = [];
   searchQuery: string = '';
   isSearchingGlobally = false;
 
+  private searchSubject = new Subject<string>();
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -46,6 +48,22 @@ export class ContactsPage implements OnInit, OnDestroy {
           this.refreshFromLocalDB();
         }
       });
+
+    // Setup Search Debouncer (200ms) to prevent lag during rapid typing
+    this.searchSubject.pipe(
+      debounceTime(200),
+      distinctUntilChanged(),
+      takeUntil(this.destroy$)
+    ).subscribe(query => {
+      this.searchQuery = query;
+      this.applySearchFilter();
+
+      if (this.searchQuery && this.searchQuery.length > 3) {
+        this.globalSearch();
+      } else {
+        this.globalResults = [];
+      }
+    });
   }
 
   ngOnDestroy() {
@@ -79,14 +97,8 @@ export class ContactsPage implements OnInit, OnDestroy {
   }
 
   onSearchChange(event: any) {
-    this.searchQuery = event.detail.value;
-    this.applySearchFilter();
-
-    if (this.searchQuery && this.searchQuery.length > 3) {
-      this.globalSearch();
-    } else {
-      this.globalResults = [];
-    }
+    const query = event.detail.value || '';
+    this.searchSubject.next(query); // Push to subject for debounced execution
   }
 
   private applySearchFilter() {
@@ -106,8 +118,8 @@ export class ContactsPage implements OnInit, OnDestroy {
       filteredUnreg = filteredUnreg.filter(matchFn);
     }
 
-    // Update Unregistered list (simple list, already sorted)
-    this.unregisteredContacts = filteredUnreg;
+    // Update Unregistered list safely (avoid overwriting source array)
+    this.displayUnregistered = filteredUnreg;
 
     // Update Registered grouped list
     this.groupRegisteredContacts(filteredReg);
